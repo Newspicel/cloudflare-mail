@@ -1,4 +1,4 @@
-import { domain, mailbox, mailboxMember } from "@cfmail/db/schema";
+import { domain, mailbox, mailboxMember, user } from "@cfmail/db/schema";
 import { grant, Perm } from "@cfmail/shared/permissions";
 import { createMailbox, grantMember } from "@cfmail/shared/schemas";
 import { zValidator } from "@hono/zod-validator";
@@ -18,7 +18,7 @@ export function mailboxesRoutes() {
 
   r.get("/", async (c) => {
     const db = dbFromCtx(c);
-    const user = c.get("user")!;
+    const u = c.get("user")!;
 
     const ownerRows = await db
       .select({
@@ -32,7 +32,7 @@ export function mailboxesRoutes() {
       })
       .from(mailbox)
       .innerJoin(domain, eq(mailbox.domainId, domain.id))
-      .where(eq(mailbox.ownerUserId, user.id));
+      .where(eq(mailbox.ownerUserId, u.id));
 
     const memberRows = await db
       .select({
@@ -47,7 +47,7 @@ export function mailboxesRoutes() {
       .from(mailboxMember)
       .innerJoin(mailbox, eq(mailboxMember.mailboxId, mailbox.id))
       .innerJoin(domain, eq(mailbox.domainId, domain.id))
-      .where(eq(mailboxMember.userId, user.id));
+      .where(eq(mailboxMember.userId, u.id));
 
     const owned = ownerRows.map((m) => ({
       id: m.id,
@@ -73,7 +73,7 @@ export function mailboxesRoutes() {
 
   r.post("/", zValidator("json", createMailbox), async (c) => {
     const db = dbFromCtx(c);
-    const user = c.get("user")!;
+    const u = c.get("user")!;
     const body = c.req.valid("json");
 
     const dom = await db.query.domain.findFirst({
@@ -91,7 +91,7 @@ export function mailboxesRoutes() {
       localPart: body.localPart.toLowerCase(),
       displayName: body.displayName ?? null,
       type: body.type,
-      ownerUserId: user.id,
+      ownerUserId: u.id,
       signature: body.signature ?? null,
       replyTo: body.replyTo ?? null,
       expiresAt,
@@ -102,14 +102,14 @@ export function mailboxesRoutes() {
 
   r.delete("/:id", async (c) => {
     const db = dbFromCtx(c);
-    const user = c.get("user")!;
+    const u = c.get("user")!;
     const id = c.req.param("id");
     const mb = await db.query.mailbox.findFirst({
       where: eq(mailbox.id, id),
       columns: { ownerUserId: true },
     });
     if (!mb) throw new HTTPException(404, { message: "not found" });
-    if (mb.ownerUserId !== user.id) throw new HTTPException(403, { message: "owner only" });
+    if (mb.ownerUserId !== u.id) throw new HTTPException(403, { message: "owner only" });
     const keys = await collectMailboxBlobKeys(db, id);
     await deleteBlobs(c.env, keys);
     await db.delete(mailbox).where(eq(mailbox.id, id));
@@ -118,22 +118,39 @@ export function mailboxesRoutes() {
 
   r.get("/:id/members", async (c) => {
     const db = dbFromCtx(c);
-    const user = c.get("user")!;
+    const u = c.get("user")!;
     const id = c.req.param("id");
-    await requirePerm(db, user.id, id, Perm.MANAGE);
+    await requirePerm(db, u.id, id, Perm.MANAGE);
     const rows = await db
-      .select({ userId: mailboxMember.userId, perms: mailboxMember.perms })
+      .select({
+        userId: mailboxMember.userId,
+        perms: mailboxMember.perms,
+        email: user.email,
+        name: user.name,
+      })
       .from(mailboxMember)
+      .innerJoin(user, eq(user.id, mailboxMember.userId))
       .where(eq(mailboxMember.mailboxId, id));
     return c.json({ members: rows });
   });
 
   r.post("/:id/members", zValidator("json", grantMember), async (c) => {
     const db = dbFromCtx(c);
-    const user = c.get("user")!;
+    const u = c.get("user")!;
     const id = c.req.param("id");
     const body = c.req.valid("json");
-    await requirePerm(db, user.id, id, Perm.MANAGE);
+    await requirePerm(db, u.id, id, Perm.MANAGE);
+
+    let targetUserId = body.userId;
+    if (!targetUserId && body.email) {
+      const found = await db.query.user.findFirst({
+        where: eq(user.email, body.email.toLowerCase()),
+        columns: { id: true },
+      });
+      if (!found) throw new HTTPException(404, { message: "user not found" });
+      targetUserId = found.id;
+    }
+    if (!targetUserId) throw new HTTPException(400, { message: "userId or email required" });
 
     let perms = 0;
     if (body.read) perms = grant(perms, Perm.READ);
@@ -142,20 +159,20 @@ export function mailboxesRoutes() {
 
     await db
       .insert(mailboxMember)
-      .values({ mailboxId: id, userId: body.userId, perms })
+      .values({ mailboxId: id, userId: targetUserId, perms })
       .onConflictDoUpdate({
         target: [mailboxMember.mailboxId, mailboxMember.userId],
         set: { perms },
       });
-    return c.json({ ok: true });
+    return c.json({ ok: true, userId: targetUserId });
   });
 
   r.delete("/:id/members/:userId", async (c) => {
     const db = dbFromCtx(c);
-    const user = c.get("user")!;
+    const u = c.get("user")!;
     const id = c.req.param("id");
     const uid = c.req.param("userId");
-    await requirePerm(db, user.id, id, Perm.MANAGE);
+    await requirePerm(db, u.id, id, Perm.MANAGE);
     await db
       .delete(mailboxMember)
       .where(and(eq(mailboxMember.mailboxId, id), eq(mailboxMember.userId, uid)));
