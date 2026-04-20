@@ -43,6 +43,10 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
     msg.setReject("Send-only address");
     return;
   }
+  if (msg.from.trim().toLowerCase() === msg.to.trim().toLowerCase()) {
+    msg.setReject("Sender equals recipient");
+    return;
+  }
 
   const raw = await streamToArrayBuffer(msg.raw, MAX_EMAIL_BYTES);
   const size = raw.byteLength;
