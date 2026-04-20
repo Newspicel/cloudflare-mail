@@ -7,6 +7,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
+import { collectMailboxBlobKeys, deleteBlobs } from "../mail/blobs.ts";
 import { requireUser } from "../middleware.ts";
 import { requirePerm } from "../permissions.ts";
 
@@ -109,6 +110,8 @@ export function mailboxesRoutes() {
     });
     if (!mb) throw new HTTPException(404, { message: "not found" });
     if (mb.ownerUserId !== user.id) throw new HTTPException(403, { message: "owner only" });
+    const keys = await collectMailboxBlobKeys(db, id);
+    await deleteBlobs(c.env, keys);
     await db.delete(mailbox).where(eq(mailbox.id, id));
     return c.body(null, 204);
   });
