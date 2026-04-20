@@ -45,3 +45,4 @@ Do not paste stack details into this file or any other doc. If `package.json` sa
 - Follow the global rules (see the main Claude Code system prompt): terse updates, no speculative features, no comments that restate the code, no backwards-compat shims when you can just change the code.
 - When unsure between two approaches that touch the invariants above, ask before coding.
 - If you add a new invariant worth preserving, add it to this file — but only as a rule, never as a snapshot of current state.
+- Push directly to `main`; there is no production deployment yet, so schema changes don't need migrations — edit `packages/db/src/schema.ts` and regenerate.
