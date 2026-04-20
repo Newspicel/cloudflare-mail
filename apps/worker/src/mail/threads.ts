@@ -28,6 +28,27 @@ export async function resolveThreadId(db: DB, input: ResolveThreadInput): Promis
   }
 
   const norm = normalizeSubject(input.subject);
+  // When we have a header chain, derive a deterministic thread id from the
+  // chain root. Two concurrent inbounds with the same parent then collide on
+  // the same id instead of each inserting a fresh random-UUID thread.
+  const rootHeader = input.references?.[0] ?? input.inReplyTo ?? null;
+  if (rootHeader) {
+    const id = await deriveThreadId(input.mailboxId, rootHeader);
+    await db
+      .insert(thread)
+      .values({
+        id,
+        mailboxId: input.mailboxId,
+        subjectNorm: norm,
+        lastMsgAt: new Date(),
+        msgCount: 0,
+        participants: input.participants,
+        unreadCount: 0,
+      })
+      .onConflictDoNothing();
+    return id;
+  }
+
   if (norm) {
     const since = new Date(Date.now() - SUBJECT_WINDOW_SECONDS * 1000);
     const hit = await db.query.thread.findFirst({
@@ -53,6 +74,16 @@ export async function resolveThreadId(db: DB, input: ResolveThreadInput): Promis
     unreadCount: 0,
   });
   return id;
+}
+
+async function deriveThreadId(mailboxId: string, rootHeader: string): Promise<string> {
+  const data = new TextEncoder().encode(`${mailboxId}\u0000${rootHeader}`);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  const bytes = new Uint8Array(digest, 0, 16);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x50;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
 
 export async function bumpThread(
