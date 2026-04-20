@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/cn.ts";
 import { type MailboxSummary, mailboxesQuery } from "@/lib/queries.ts";
 import { openCompose } from "./compose-dock.tsx";
+import { NewTempMailbox } from "./new-temp-mailbox.tsx";
 
 const GROUP_META: Record<
   MailboxSummary["type"],
@@ -36,10 +37,14 @@ export function Sidebar() {
       <button
         type="button"
         onClick={() => openCompose()}
-        className="mb-3 flex items-center gap-2 self-start rounded-2xl bg-primary px-5 py-3 text-sm font-medium text-primary-foreground shadow-sm hover:brightness-105"
+        className="mb-2 flex items-center gap-2 self-start rounded-2xl bg-primary px-5 py-3 text-sm font-medium text-primary-foreground shadow-sm hover:brightness-105"
       >
         <PenSquare className="h-4 w-4" /> Compose
       </button>
+
+      <div className="mb-3">
+        <NewTempMailbox />
+      </div>
 
       <nav className="flex flex-col gap-4 overflow-y-auto pr-1">
         {(Object.keys(grouped) as MailboxSummary["type"][]).map((type) => {
