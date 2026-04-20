@@ -49,13 +49,18 @@ export const createMailbox = z.object({
     .optional(),
 });
 
-export const grantMember = z.object({
-  mailboxId: z.string().min(1),
-  userId: z.string().min(1),
-  read: z.boolean().default(false),
-  write: z.boolean().default(false),
-  manage: z.boolean().default(false),
-});
+export const grantMember = z
+  .object({
+    mailboxId: z.string().min(1),
+    userId: z.string().min(1).optional(),
+    email: emailAddress.optional(),
+    read: z.boolean().default(false),
+    write: z.boolean().default(false),
+    manage: z.boolean().default(false),
+  })
+  .refine((v) => Boolean(v.userId) !== Boolean(v.email), {
+    message: "provide exactly one of userId or email",
+  });
 
 export const sendMessage = z.object({
   mailboxId: z.string().min(1),
