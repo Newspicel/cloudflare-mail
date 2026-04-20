@@ -1,0 +1,25 @@
+{
+  "name": "cloudflare-mail",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "lint": "oxlint && biome check .",
+    "lint:fix": "oxlint --fix && biome check --write .",
+    "format": "biome format --write .",
+    "test": "turbo run test",
+    "db:generate": "pnpm --filter @cfmail/db generate",
+    "db:migrate": "pnpm --filter @cfmail/db migrate"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.12",
+    "@typescript/native-preview": "7.0.0-dev.20260420.1",
+    "oxlint": "1.60.0",
+    "turbo": "2.9.6",
+    "typescript": "5.9.3"
+  }
+}
