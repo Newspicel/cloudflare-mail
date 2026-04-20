@@ -2,7 +2,7 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2023"],
-    "types": ["@cloudflare/workers-types"],
+    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-pool-workers/types"],
     "paths": {
       "@cfmail/shared": ["../../packages/shared/src/index.ts"],
       "@cfmail/shared/*": ["../../packages/shared/src/*"],
@@ -10,5 +10,11 @@
       "@cfmail/db/*": ["../../packages/db/src/*"]
     }
   },
-  "include": ["src/**/*", "../../packages/shared/src/**/*", "../../packages/db/src/**/*"]
+  "include": [
+    "src/**/*",
+    "test/**/*",
+    "vitest.config.ts",
+    "../../packages/shared/src/**/*",
+    "../../packages/db/src/**/*"
+  ]
 }
