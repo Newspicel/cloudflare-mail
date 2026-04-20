@@ -1,0 +1,15 @@
+node_modules
+dist
+.turbo
+.wrangler
+.dev.vars
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+coverage
+.vite
+apps/web/dist
+apps/worker/.wrangler
+apps/worker/dist

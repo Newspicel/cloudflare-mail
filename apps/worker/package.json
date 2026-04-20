@@ -1,0 +1,29 @@
+{
+  "name": "@cfmail/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "build": "wrangler deploy --dry-run --outdir=dist",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsgo --noEmit",
+    "cf-typegen": "wrangler types"
+  },
+  "dependencies": {
+    "@cfmail/db": "workspace:*",
+    "@cfmail/shared": "workspace:*",
+    "@hono/zod-validator": "0.7.6",
+    "better-auth": "1.6.5",
+    "drizzle-orm": "0.45.2",
+    "hono": "4.12.14",
+    "mimetext": "3.0.28",
+    "postal-mime": "2.7.4",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "4.20260420.1",
+    "@typescript/native-preview": "7.0.0-dev.20260420.1",
+    "wrangler": "4.84.0"
+  }
+}
