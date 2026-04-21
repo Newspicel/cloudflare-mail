@@ -100,26 +100,28 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
     sizeBytes: size,
   });
 
-  for (const [idx, att] of (parsed.attachments ?? []).entries()) {
-    const attKey = `att/${messageId}/${idx}-${sanitizeFilename(att.filename ?? `file-${idx}`)}`;
-    const bytes =
-      typeof att.content === "string"
-        ? new TextEncoder().encode(att.content)
-        : new Uint8Array(att.content);
-    await env.BLOBS.put(attKey, bytes, {
-      httpMetadata: { contentType: att.mimeType ?? "application/octet-stream" },
-    });
-    await db.insert(attachment).values({
-      id: crypto.randomUUID(),
-      messageId,
-      filename: att.filename ?? `file-${idx}`,
-      contentType: att.mimeType ?? "application/octet-stream",
-      sizeBytes: bytes.byteLength,
-      r2Key: attKey,
-      inline: att.disposition === "inline",
-      contentId: att.contentId ?? null,
-    });
-  }
+  await Promise.all(
+    (parsed.attachments ?? []).map(async (att, idx) => {
+      const attKey = `att/${messageId}/${idx}-${sanitizeFilename(att.filename ?? `file-${idx}`)}`;
+      const bytes =
+        typeof att.content === "string"
+          ? new TextEncoder().encode(att.content)
+          : new Uint8Array(att.content);
+      await env.BLOBS.put(attKey, bytes, {
+        httpMetadata: { contentType: att.mimeType ?? "application/octet-stream" },
+      });
+      await db.insert(attachment).values({
+        id: crypto.randomUUID(),
+        messageId,
+        filename: att.filename ?? `file-${idx}`,
+        contentType: att.mimeType ?? "application/octet-stream",
+        sizeBytes: bytes.byteLength,
+        r2Key: attKey,
+        inline: att.disposition === "inline",
+        contentId: att.contentId ?? null,
+      });
+    }),
+  );
 
   await bumpThread(db, threadId, receivedAt, participants, +1);
 
