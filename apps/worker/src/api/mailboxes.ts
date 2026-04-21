@@ -1,6 +1,11 @@
 import { domain, mailbox, mailboxMember, shareToken, user } from "@cfmail/db/schema";
 import { grant, Perm } from "@cfmail/shared/permissions";
-import { createMailbox, createShareToken, grantMember } from "@cfmail/shared/schemas";
+import {
+  createMailbox,
+  createShareToken,
+  grantMember,
+  updateMailboxSettings,
+} from "@cfmail/shared/schemas";
 import { zValidator } from "@hono/zod-validator";
 import { and, desc, eq, or } from "drizzle-orm";
 import { Hono } from "hono";
@@ -98,6 +103,61 @@ export function mailboxesRoutes() {
     });
 
     return c.json({ id }, 201);
+  });
+
+  r.get("/:id/settings", async (c) => {
+    const db = dbFromCtx(c);
+    const u = c.get("user")!;
+    const id = c.req.param("id");
+    await requirePerm(db, u.id, id, Perm.READ);
+    const mb = await db.query.mailbox.findFirst({
+      where: eq(mailbox.id, id),
+      columns: { id: true, displayName: true, signature: true, replyTo: true, type: true },
+    });
+    if (!mb) throw new HTTPException(404, { message: "not found" });
+    return c.json({
+      id: mb.id,
+      type: mb.type,
+      displayName: mb.displayName,
+      signature: mb.signature,
+      replyTo: mb.replyTo,
+    });
+  });
+
+  r.patch("/:id/settings", zValidator("json", updateMailboxSettings), async (c) => {
+    const db = dbFromCtx(c);
+    const u = c.get("user")!;
+    const id = c.req.param("id");
+    const body = c.req.valid("json");
+    await requirePerm(db, u.id, id, Perm.MANAGE);
+
+    const mb = await db.query.mailbox.findFirst({
+      where: eq(mailbox.id, id),
+      columns: { type: true },
+    });
+    if (!mb) throw new HTTPException(404, { message: "not found" });
+    if (mb.type === "temp") {
+      throw new HTTPException(400, { message: "temp mailboxes are not editable" });
+    }
+
+    const patch: Partial<{
+      displayName: string | null;
+      signature: string | null;
+      replyTo: string | null;
+    }> = {};
+    if (body.displayName !== undefined) {
+      patch.displayName = body.displayName?.trim() ? body.displayName.trim() : null;
+    }
+    if (body.signature !== undefined) {
+      patch.signature = body.signature?.trim() ? body.signature : null;
+    }
+    if (body.replyTo !== undefined) {
+      patch.replyTo = body.replyTo ? body.replyTo : null;
+    }
+    if (Object.keys(patch).length === 0) return c.json({ ok: true });
+
+    await db.update(mailbox).set(patch).where(eq(mailbox.id, id));
+    return c.json({ ok: true });
   });
 
   r.delete("/:id", async (c) => {

@@ -23,6 +23,7 @@ export async function sendFromMailbox(
       domainId: true,
       displayName: true,
       replyTo: true,
+      signature: true,
     },
   });
   if (!mb) throw new HTTPException(404, { message: "mailbox not found" });
@@ -36,6 +37,10 @@ export async function sendFromMailbox(
   const fromAddr = `${mb.localPart}@${dom.name}`;
   const fromName = mb.displayName ?? undefined;
   const fromFormatted = fromName ? `${escapeName(fromName)} <${fromAddr}>` : fromAddr;
+  const replyToAddr = mb.replyTo ?? undefined;
+  const signature = mb.signature ?? undefined;
+  const text = appendSignatureText(input.text, signature);
+  const html = appendSignatureHtml(input.html, signature);
 
   const attachmentBytes: { filename: string; contentType: string; data: Uint8Array }[] = [];
   for (const att of input.attachments ?? []) {
@@ -56,15 +61,19 @@ export async function sendFromMailbox(
 
   const allRecipients = [...input.to, ...(input.cc ?? []), ...(input.bcc ?? [])];
 
+  const headers = buildThreadingHeaders(threading);
+  if (replyToAddr) headers["Reply-To"] = replyToAddr;
+
   await env.EMAIL.send({
     from: fromFormatted,
     to: input.to.map(formatAddr),
     cc: input.cc?.length ? input.cc.map(formatAddr) : undefined,
     bcc: input.bcc?.length ? input.bcc.map(formatAddr) : undefined,
+    replyTo: replyToAddr,
     subject: input.subject,
-    text: input.text,
-    html: input.html,
-    headers: buildThreadingHeaders(threading),
+    text,
+    html,
+    headers,
     attachments: attachmentBytes.length
       ? attachmentBytes.map((a) => ({
           disposition: "attachment" as const,
@@ -92,9 +101,10 @@ export async function sendFromMailbox(
     to: input.to,
     cc: input.cc,
     bcc: input.bcc,
+    replyTo: replyToAddr,
     subject: input.subject,
-    text: input.text,
-    html: input.html,
+    text,
+    html,
     attachments: attachmentBytes,
   });
 
@@ -115,7 +125,7 @@ export async function sendFromMailbox(
     ccAddrs: input.cc ?? null,
     bccAddrs: input.bcc ?? null,
     subject: input.subject,
-    snippet: snippet(input.text ?? stripHtml(input.html ?? "")),
+    snippet: snippet(text ?? stripHtml(html ?? "")),
     flags: Flag.SENT | Flag.SEEN,
     receivedAt: null,
     sentAt,
@@ -152,4 +162,31 @@ function escapeName(name: string): string {
 
 function stripHtml(html: string): string {
   return html.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ");
+}
+
+function appendSignatureText(
+  body: string | undefined,
+  signature: string | undefined,
+): string | undefined {
+  if (!signature) return body;
+  const sig = `\n\n-- \n${signature}`;
+  return body ? `${body}${sig}` : sig.trimStart();
+}
+
+function appendSignatureHtml(
+  body: string | undefined,
+  signature: string | undefined,
+): string | undefined {
+  if (!signature) return body;
+  if (!body) return undefined;
+  const block = `<div class="signature" style="white-space:pre-wrap;color:#6b7280;margin-top:1em;">-- \n${escapeHtml(signature)}</div>`;
+  return `${body}${block}`;
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
