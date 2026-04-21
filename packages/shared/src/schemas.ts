@@ -95,3 +95,12 @@ export const createTempMailbox = z.object({
     .max(60 * 60 * 24 * 7)
     .default(3600),
 });
+
+export const createShareToken = z.object({
+  ttlSeconds: z
+    .number()
+    .int()
+    .min(60)
+    .max(60 * 60 * 24 * 30)
+    .default(60 * 60 * 24 * 7),
+});

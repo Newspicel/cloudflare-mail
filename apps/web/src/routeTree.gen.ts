@@ -13,6 +13,7 @@ import { Route as LoginRouteImport } from "./routes/login"
 import { Route as AppRouteRouteImport } from "./routes/app/route"
 import { Route as IndexRouteImport } from "./routes/index"
 import { Route as AppIndexRouteImport } from "./routes/app/index"
+import { Route as TTokenRouteImport } from "./routes/t.$token"
 import { Route as AppSettingsRouteImport } from "./routes/app/settings"
 import { Route as AppAdminRouteImport } from "./routes/app/admin"
 import { Route as AppMMailboxIdRouteImport } from "./routes/app/m/$mailboxId"
@@ -38,6 +39,11 @@ const AppIndexRoute = AppIndexRouteImport.update({
   id: "/",
   path: "/",
   getParentRoute: () => AppRouteRoute,
+} as any)
+const TTokenRoute = TTokenRouteImport.update({
+  id: "/t/$token",
+  path: "/t/$token",
+  getParentRoute: () => rootRouteImport,
 } as any)
 const AppSettingsRoute = AppSettingsRouteImport.update({
   id: "/settings",
@@ -71,6 +77,7 @@ export interface FileRoutesByFullPath {
   "/login": typeof LoginRoute
   "/app/admin": typeof AppAdminRoute
   "/app/settings": typeof AppSettingsRoute
+  "/t/$token": typeof TTokenRoute
   "/app/": typeof AppIndexRoute
   "/app/m/$mailboxId": typeof AppMMailboxIdRouteWithChildren
   "/app/m/$mailboxId/": typeof AppMMailboxIdIndexRoute
@@ -81,6 +88,7 @@ export interface FileRoutesByTo {
   "/login": typeof LoginRoute
   "/app/admin": typeof AppAdminRoute
   "/app/settings": typeof AppSettingsRoute
+  "/t/$token": typeof TTokenRoute
   "/app": typeof AppIndexRoute
   "/app/m/$mailboxId": typeof AppMMailboxIdIndexRoute
   "/app/m/$mailboxId/t/$threadId": typeof AppMMailboxIdTThreadIdRoute
@@ -92,6 +100,7 @@ export interface FileRoutesById {
   "/login": typeof LoginRoute
   "/app/admin": typeof AppAdminRoute
   "/app/settings": typeof AppSettingsRoute
+  "/t/$token": typeof TTokenRoute
   "/app/": typeof AppIndexRoute
   "/app/m/$mailboxId": typeof AppMMailboxIdRouteWithChildren
   "/app/m/$mailboxId/": typeof AppMMailboxIdIndexRoute
@@ -105,6 +114,7 @@ export interface FileRouteTypes {
     | "/login"
     | "/app/admin"
     | "/app/settings"
+    | "/t/$token"
     | "/app/"
     | "/app/m/$mailboxId"
     | "/app/m/$mailboxId/"
@@ -115,6 +125,7 @@ export interface FileRouteTypes {
     | "/login"
     | "/app/admin"
     | "/app/settings"
+    | "/t/$token"
     | "/app"
     | "/app/m/$mailboxId"
     | "/app/m/$mailboxId/t/$threadId"
@@ -125,6 +136,7 @@ export interface FileRouteTypes {
     | "/login"
     | "/app/admin"
     | "/app/settings"
+    | "/t/$token"
     | "/app/"
     | "/app/m/$mailboxId"
     | "/app/m/$mailboxId/"
@@ -135,6 +147,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AppRouteRoute: typeof AppRouteRouteWithChildren
   LoginRoute: typeof LoginRoute
+  TTokenRoute: typeof TTokenRoute
 }
 
 declare module "@tanstack/react-router" {
@@ -166,6 +179,13 @@ declare module "@tanstack/react-router" {
       fullPath: "/app/"
       preLoaderRoute: typeof AppIndexRouteImport
       parentRoute: typeof AppRouteRoute
+    }
+    "/t/$token": {
+      id: "/t/$token"
+      path: "/t/$token"
+      fullPath: "/t/$token"
+      preLoaderRoute: typeof TTokenRouteImport
+      parentRoute: typeof rootRouteImport
     }
     "/app/settings": {
       id: "/app/settings"
@@ -241,6 +261,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AppRouteRoute: AppRouteRouteWithChildren,
   LoginRoute: LoginRoute,
+  TTokenRoute: TTokenRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

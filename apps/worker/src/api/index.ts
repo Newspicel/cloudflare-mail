@@ -9,6 +9,7 @@ import { attachmentsRoutes } from "./attachments.ts";
 import { domainsRoutes } from "./domains.ts";
 import { mailboxesRoutes } from "./mailboxes.ts";
 import { messagesRoutes } from "./messages.ts";
+import { publicShareRoutes } from "./publicShare.ts";
 import { streamRoute } from "./stream.ts";
 import { tempRoutes } from "./temp.ts";
 import { threadsRoutes } from "./threads.ts";
@@ -47,6 +48,7 @@ export function buildApi() {
   app.route("/api/messages", messagesRoutes());
   app.route("/api/attachments", attachmentsRoutes());
   app.route("/api/temp", tempRoutes());
+  app.route("/api/t", publicShareRoutes());
   app.get("/api/stream", streamRoute);
 
   app.onError((err, c) => {

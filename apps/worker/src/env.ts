@@ -16,6 +16,7 @@ export interface HonoVars {
   db: DB;
   user: User | null;
   sessionId: string | null;
+  shareMailboxId: string | null;
 }
 
 export type AppBindings = { Bindings: Env; Variables: HonoVars };
