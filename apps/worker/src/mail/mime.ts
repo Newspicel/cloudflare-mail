@@ -50,6 +50,7 @@ export interface BuildMimeInput extends ThreadingHeaders {
   to: { name?: string; address: string }[];
   cc?: { name?: string; address: string }[];
   bcc?: { name?: string; address: string }[];
+  replyTo?: string;
   subject: string;
   text?: string;
   html?: string;
@@ -74,6 +75,7 @@ export function buildMime(input: BuildMimeInput): string {
   for (const [name, value] of Object.entries(buildThreadingHeaders(input))) {
     msg.setHeader(name, value);
   }
+  if (input.replyTo) msg.setHeader("Reply-To", input.replyTo);
 
   if (input.text) msg.addMessage({ contentType: "text/plain", data: input.text });
   if (input.html) msg.addMessage({ contentType: "text/html", data: input.html });

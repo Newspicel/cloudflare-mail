@@ -49,6 +49,16 @@ export const createMailbox = z.object({
     .optional(),
 });
 
+export const updateMailboxSettings = z.object({
+  displayName: z.string().max(200).nullable().optional(),
+  signature: z.string().max(5000).nullable().optional(),
+  replyTo: z
+    .union([emailAddress, z.literal("")])
+    .nullable()
+    .optional(),
+});
+export type UpdateMailboxSettingsInput = z.infer<typeof updateMailboxSettings>;
+
 export const grantMember = z
   .object({
     mailboxId: z.string().min(1),
