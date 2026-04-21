@@ -32,7 +32,20 @@ export async function streamToArrayBuffer(
   return out.buffer;
 }
 
-export interface BuildMimeInput {
+export interface ThreadingHeaders {
+  messageId: string;
+  inReplyTo?: string;
+  references?: string[];
+}
+
+export function buildThreadingHeaders(input: ThreadingHeaders): Record<string, string> {
+  const headers: Record<string, string> = { "Message-ID": input.messageId };
+  if (input.inReplyTo) headers["In-Reply-To"] = input.inReplyTo;
+  if (input.references?.length) headers.References = input.references.join(" ");
+  return headers;
+}
+
+export interface BuildMimeInput extends ThreadingHeaders {
   from: { name?: string; address: string };
   to: { name?: string; address: string }[];
   cc?: { name?: string; address: string }[];
@@ -40,9 +53,6 @@ export interface BuildMimeInput {
   subject: string;
   text?: string;
   html?: string;
-  inReplyTo?: string;
-  references?: string[];
-  messageId: string;
   attachments?: {
     filename: string;
     contentType: string;
@@ -61,9 +71,9 @@ export function buildMime(input: BuildMimeInput): string {
     msg.setBcc(input.bcc.map((r) => ({ name: r.name ?? "", addr: r.address })));
   }
   msg.setSubject(input.subject);
-  msg.setHeader("Message-ID", input.messageId);
-  if (input.inReplyTo) msg.setHeader("In-Reply-To", input.inReplyTo);
-  if (input.references?.length) msg.setHeader("References", input.references.join(" "));
+  for (const [name, value] of Object.entries(buildThreadingHeaders(input))) {
+    msg.setHeader(name, value);
+  }
 
   if (input.text) msg.addMessage({ contentType: "text/plain", data: input.text });
   if (input.html) msg.addMessage({ contentType: "text/html", data: input.html });

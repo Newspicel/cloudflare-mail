@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import type { Env } from "../env.ts";
 import { broadcastToUsers } from "../hub.ts";
-import { buildMime, snippet } from "./mime.ts";
+import { buildMime, buildThreadingHeaders, snippet, type ThreadingHeaders } from "./mime.ts";
 import { bumpThread, resolveThreadId } from "./threads.ts";
 
 export async function sendFromMailbox(
@@ -50,9 +50,9 @@ export async function sendFromMailbox(
   }
 
   const messageIdHdr = `<${crypto.randomUUID()}@${dom.name}>`;
-  const headers: Record<string, string> = { "Message-ID": messageIdHdr };
-  if (input.inReplyTo) headers["In-Reply-To"] = input.inReplyTo;
-  if (input.references?.length) headers["References"] = input.references.join(" ");
+  const threading: ThreadingHeaders = { messageId: messageIdHdr };
+  if (input.inReplyTo) threading.inReplyTo = input.inReplyTo;
+  if (input.references?.length) threading.references = input.references;
 
   const allRecipients = [...input.to, ...(input.cc ?? []), ...(input.bcc ?? [])];
 
@@ -64,7 +64,7 @@ export async function sendFromMailbox(
     subject: input.subject,
     text: input.text,
     html: input.html,
-    headers,
+    headers: buildThreadingHeaders(threading),
     attachments: attachmentBytes.length
       ? attachmentBytes.map((a) => ({
           disposition: "attachment" as const,
@@ -87,6 +87,7 @@ export async function sendFromMailbox(
   });
 
   const raw = buildMime({
+    ...threading,
     from: { name: fromName, address: fromAddr },
     to: input.to,
     cc: input.cc,
@@ -94,9 +95,6 @@ export async function sendFromMailbox(
     subject: input.subject,
     text: input.text,
     html: input.html,
-    inReplyTo: input.inReplyTo,
-    references: input.references,
-    messageId: messageIdHdr,
     attachments: attachmentBytes,
   });
 
