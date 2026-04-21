@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
+import { checkDomainHealth } from "../mail/dns.ts";
 import { requireUser } from "../middleware.ts";
 
 export function domainsRoutes() {
@@ -37,6 +38,23 @@ export function domainsRoutes() {
     const res = await db.delete(domain).where(eq(domain.id, id));
     if (!res.success) throw new HTTPException(404, { message: "not found" });
     return c.body(null, 204);
+  });
+
+  r.post("/:id/check", async (c) => {
+    const db = dbFromCtx(c);
+    const id = c.req.param("id");
+    const row = await db.query.domain.findFirst({
+      where: eq(domain.id, id),
+      columns: { id: true, name: true },
+    });
+    if (!row) throw new HTTPException(404, { message: "not found" });
+    const health = await checkDomainHealth(row.name);
+    const now = new Date();
+    await db
+      .update(domain)
+      .set({ ...health, lastCheckedAt: now })
+      .where(eq(domain.id, id));
+    return c.json({ ...health, lastCheckedAt: now.toISOString() });
   });
 
   return r;

@@ -15,6 +15,10 @@ interface Domain {
   name: string;
   kind: "primary" | "sub";
   isTempDomain: boolean;
+  spfOk: boolean;
+  dkimOk: boolean;
+  dmarcOk: boolean;
+  lastCheckedAt: string | null;
 }
 
 interface Member {
@@ -82,15 +86,7 @@ function AdminPage() {
         <h2 className="mb-3 text-lg font-medium">Domains</h2>
         <ul className="mb-4 divide-y rounded-lg border">
           {(domainsQ.data?.domains ?? []).map((d) => (
-            <li key={d.id} className="flex items-center justify-between px-4 py-3 text-sm">
-              <div>
-                <div className="font-medium">{d.name}</div>
-                <div className="text-xs text-muted-foreground">
-                  {d.kind}
-                  {d.isTempDomain && " · temp"}
-                </div>
-              </div>
-            </li>
+            <DomainRow key={d.id} domain={d} />
           ))}
           {domainsQ.data?.domains.length === 0 && (
             <li className="px-4 py-8 text-center text-sm text-muted-foreground">No domains yet.</li>
@@ -175,6 +171,69 @@ function AdminPage() {
         </div>
       </section>
     </div>
+  );
+}
+
+function DomainRow({ domain: d }: { domain: Domain }) {
+  const qc = useQueryClient();
+  const recheck = useMutation({
+    mutationFn: () => api(`/api/domains/${d.id}/check`, { method: "POST" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["domains"] });
+      toast.success("DNS rechecked");
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+  const checkedLabel = d.lastCheckedAt
+    ? `checked ${new Date(d.lastCheckedAt).toLocaleString()}`
+    : "not yet checked";
+  return (
+    <li className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
+      <div className="min-w-0">
+        <div className="truncate font-medium">{d.name}</div>
+        <div className="text-xs text-muted-foreground">
+          {d.kind}
+          {d.isTempDomain && " · temp"} · {checkedLabel}
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <DnsBadge label="SPF" ok={d.spfOk} checked={d.lastCheckedAt !== null} />
+        <DnsBadge label="DKIM" ok={d.dkimOk} checked={d.lastCheckedAt !== null} />
+        <DnsBadge label="DMARC" ok={d.dmarcOk} checked={d.lastCheckedAt !== null} />
+        <button
+          type="button"
+          onClick={() => recheck.mutate()}
+          disabled={recheck.isPending}
+          className="rounded-md border px-2 py-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+        >
+          {recheck.isPending ? "Checking…" : "Recheck"}
+        </button>
+      </div>
+    </li>
+  );
+}
+
+function DnsBadge({ label, ok, checked }: { label: string; ok: boolean; checked: boolean }) {
+  const cls = !checked
+    ? "border-border bg-muted text-muted-foreground"
+    : ok
+      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+      : "border-destructive/30 bg-destructive/10 text-destructive";
+  const icon = !checked ? "·" : ok ? "✓" : "✗";
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${cls}`}
+      title={
+        !checked
+          ? "Not yet checked"
+          : ok
+            ? `${label} record found`
+            : `${label} record missing or invalid`
+      }
+    >
+      <span>{icon}</span>
+      {label}
+    </span>
   );
 }
 
