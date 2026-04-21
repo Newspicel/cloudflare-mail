@@ -1,6 +1,7 @@
+import { has, Perm } from "@cfmail/shared/permissions";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
-import { Archive, Inbox, Mailbox, PenSquare, ShieldCheck, Timer, Users } from "lucide-react";
+import { Archive, Inbox, Lock, Mailbox, PenSquare, ShieldCheck, Timer, Users } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/cn.ts";
 import { type MailboxSummary, mailboxesQuery } from "@/lib/queries.ts";
@@ -57,27 +58,37 @@ export function Sidebar() {
                 <meta.icon className="h-3.5 w-3.5" /> {meta.label}
               </h3>
               <ul className="flex flex-col gap-0.5">
-                {items.map((m) => (
-                  <li key={m.id}>
-                    <Link
-                      to="/app/m/$mailboxId"
-                      params={{ mailboxId: m.id }}
-                      className={cn(
-                        "flex items-center justify-between rounded-full px-3 py-2 text-sm transition",
-                        activeId === m.id
-                          ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
-                          : "hover:bg-sidebar-accent/60",
-                      )}
-                    >
-                      <span className="truncate">{m.displayName ?? m.address}</span>
-                      {m.expiresAt && (
-                        <span className="ml-2 shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                          TTL
+                {items.map((m) => {
+                  const readOnly = m.role === "member" && !has(m.perms, Perm.WRITE);
+                  return (
+                    <li key={m.id}>
+                      <Link
+                        to="/app/m/$mailboxId"
+                        params={{ mailboxId: m.id }}
+                        className={cn(
+                          "flex items-center justify-between rounded-full px-3 py-2 text-sm transition",
+                          activeId === m.id
+                            ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                            : "hover:bg-sidebar-accent/60",
+                        )}
+                      >
+                        <span className="truncate">{m.displayName ?? m.address}</span>
+                        <span className="ml-2 flex shrink-0 items-center gap-1">
+                          {readOnly && (
+                            <span role="img" aria-label="Read-only" title="Read-only">
+                              <Lock className="h-3.5 w-3.5 text-muted-foreground" />
+                            </span>
+                          )}
+                          {m.expiresAt && (
+                            <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                              TTL
+                            </span>
+                          )}
                         </span>
-                      )}
-                    </Link>
-                  </li>
-                ))}
+                      </Link>
+                    </li>
+                  );
+                })}
               </ul>
             </section>
           );
