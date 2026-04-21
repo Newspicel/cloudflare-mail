@@ -61,3 +61,26 @@ export const threadQuery = (threadId: string) =>
     queryFn: () => api<{ thread: ThreadRow; messages: MessageRow[] }>(`/api/threads/${threadId}`),
     enabled: Boolean(threadId),
   });
+
+export interface SearchResult {
+  messageId: string;
+  threadId: string;
+  mailboxId: string;
+  mailboxAddress: string;
+  subject: string;
+  snippet: string;
+  fromName: string | null;
+  fromAddr: string;
+  direction: "in" | "out";
+  flags: number;
+  receivedAt: string | null;
+  sentAt: string | null;
+}
+
+export const searchQuery = (q: string) =>
+  queryOptions({
+    queryKey: ["search", q],
+    queryFn: () => api<{ results: SearchResult[] }>(`/api/search?q=${encodeURIComponent(q)}`),
+    enabled: q.trim().length > 0,
+    staleTime: 15_000,
+  });
