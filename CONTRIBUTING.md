@@ -47,13 +47,14 @@ Squash-merge is fine; the PR title becomes the commit on `main`.
 
 ### One-time setup
 
-Follow [`docs/DEPLOY.md`](./docs/DEPLOY.md) sections 1–7 against a **personal / staging zone** you control. You'll end up with:
+Follow [`docs/DEPLOY.md`](./docs/DEPLOY.md) against a **personal / staging zone** you control. You'll end up with:
 
 - Wrangler logged in (`wrangler login`)
 - A real D1 database and R2 bucket
 - The zone's MX records pointed at Cloudflare Email Routing
 - A verified Email Sending domain
-- `BETTER_AUTH_SECRET` set both as a real Worker secret and in `apps/worker/.dev.vars`
+
+No `BETTER_AUTH_SECRET` setup is required — the Worker lazy-generates one on first request and stores it in D1 (`system_config`). Per-domain config (which mailbox kinds a domain accepts, who can create what) lives in D1 too.
 
 ### Local dev loop
 

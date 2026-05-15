@@ -1,24 +1,71 @@
-import { makeDB, schema } from "@cfmail/db";
+import { type DB, makeDB, schema } from "@cfmail/db";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { admin } from "better-auth/plugins/admin";
+import { twoFactor } from "better-auth/plugins/two-factor";
+import { getConfig, getOrCreateAuthSecret } from "./config.ts";
 import type { Env } from "./env.ts";
+import { sendMail } from "./mail/notify.ts";
 
-export function createAuth(env: Env) {
-  const db = makeDB(env.DB);
+export type Auth = Awaited<ReturnType<typeof createAuth>>;
+export type User =
+  Awaited<ReturnType<Auth["api"]["getSession"]>> extends infer S | null | undefined
+    ? S extends { user: infer U }
+      ? U
+      : never
+    : never;
+
+interface CreateAuthOpts {
+  env: Env;
+  db?: DB;
+  baseURL: string;
+}
+
+export async function createAuth({ env, db, baseURL }: CreateAuthOpts) {
+  const database = db ?? makeDB(env.DB);
+  const secret = await getOrCreateAuthSecret(database);
+
   return betterAuth({
-    baseURL: env.APP_URL,
-    secret: env.BETTER_AUTH_SECRET ?? "dev-secret-change-me",
-    database: drizzleAdapter(db, {
+    baseURL,
+    secret,
+    trustedOrigins: [baseURL],
+    database: drizzleAdapter(database, {
       provider: "sqlite",
       schema: {
         user: schema.user,
         session: schema.session,
         account: schema.account,
         verification: schema.verification,
+        twoFactor: schema.twoFactor,
       },
       usePlural: false,
     }),
-    emailAndPassword: { enabled: true, autoSignIn: true },
+    emailAndPassword: {
+      enabled: true,
+      autoSignIn: true,
+      // Public HTTP sign-up is blocked at the Hono layer (api/index.ts).
+      // Bootstrap + admin-created users + invite acceptance call
+      // auth.api.signUpEmail internally, which is unaffected by this flag.
+      disableSignUp: true,
+      sendResetPassword: async ({ user, url }) => {
+        // Admins cannot use the self-service reset flow — they must recover
+        // via 2FA backup codes or a CLI `wrangler d1 execute` reset.
+        const u = user as { email: string; role?: string };
+        if (u.role === "admin") return;
+        const from = await getConfig(database, "auth_from_address");
+        if (!from) return;
+        await sendMail(env, {
+          from,
+          to: u.email,
+          subject: "Reset your password",
+          text:
+            `A password reset was requested for your account.\n\n` +
+            `Reset link (valid 1 hour):\n${url}\n\n` +
+            `If you didn't request this, ignore this email.`,
+        });
+      },
+      resetPasswordTokenExpiresIn: 3600,
+    },
     advanced: {
       crossSubDomainCookies: { enabled: false },
       defaultCookieAttributes: { sameSite: "lax" },
@@ -27,13 +74,17 @@ export function createAuth(env: Env) {
       expiresIn: 60 * 60 * 24 * 30,
       updateAge: 60 * 60 * 24,
     },
+    plugins: [
+      admin({
+        defaultRole: "user",
+        adminRoles: ["admin"],
+      }),
+      twoFactor(),
+    ],
   });
 }
 
-export type Auth = ReturnType<typeof createAuth>;
-export type User =
-  Awaited<ReturnType<Auth["api"]["getSession"]>> extends infer S | null | undefined
-    ? S extends { user: infer U }
-      ? U
-      : never
-    : never;
+export function baseUrlFromRequest(req: Request): string {
+  const url = new URL(req.url);
+  return `${url.protocol}//${url.host}`;
+}

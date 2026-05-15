@@ -10,7 +10,15 @@ import {
 
 const now = sql`(unixepoch())`;
 
-// ─── Better Auth ────────────────────────────────────────────────────────────
+// ─── System config (lazy-init: auth secret, from-address, etc.) ─────────────
+
+export const systemConfig = sqliteTable("system_config", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().default(now),
+});
+
+// ─── Better Auth (with admin + twoFactor plugin fields) ─────────────────────
 
 export const user = sqliteTable("user", {
   id: text("id").primaryKey(),
@@ -18,6 +26,13 @@ export const user = sqliteTable("user", {
   email: text("email").notNull().unique(),
   emailVerified: integer("email_verified", { mode: "boolean" }).notNull().default(false),
   image: text("image"),
+  // admin plugin
+  role: text("role").notNull().default("user"),
+  banned: integer("banned", { mode: "boolean" }).notNull().default(false),
+  banReason: text("ban_reason"),
+  banExpires: integer("ban_expires", { mode: "timestamp" }),
+  // twoFactor plugin
+  twoFactorEnabled: integer("two_factor_enabled", { mode: "boolean" }).notNull().default(false),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(now),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().default(now),
 });
@@ -33,6 +48,8 @@ export const session = sqliteTable(
     expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
     ipAddress: text("ip_address"),
     userAgent: text("user_agent"),
+    // admin plugin (impersonation)
+    impersonatedBy: text("impersonated_by"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(now),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().default(now),
   },
@@ -70,6 +87,43 @@ export const verification = sqliteTable("verification", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().default(now),
 });
 
+export const twoFactor = sqliteTable(
+  "two_factor",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    secret: text("secret").notNull(),
+    backupCodes: text("backup_codes").notNull(),
+  },
+  (t) => [index("two_factor_user_idx").on(t.userId)],
+);
+
+// ─── App-level user invites (admin-controlled signup) ───────────────────────
+
+export const userInvite = sqliteTable(
+  "user_invite",
+  {
+    id: text("id").primaryKey(),
+    email: text("email").notNull(),
+    role: text("role", { enum: ["admin", "user"] })
+      .notNull()
+      .default("user"),
+    token: text("token").notNull().unique(),
+    invitedByUserId: text("invited_by_user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+    usedAt: integer("used_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(now),
+  },
+  (t) => [
+    uniqueIndex("user_invite_email_uq").on(t.email),
+    index("user_invite_expires_idx").on(t.expiresAt),
+  ],
+);
+
 // ─── Domains & mailboxes ────────────────────────────────────────────────────
 
 export const domain = sqliteTable(
@@ -78,7 +132,9 @@ export const domain = sqliteTable(
     id: text("id").primaryKey(),
     name: text("name").notNull().unique(),
     kind: text("kind", { enum: ["primary", "sub"] }).notNull(),
-    isTempDomain: integer("is_temp_domain", { mode: "boolean" }).notNull().default(false),
+    // Bitfield of MailboxKind (PERSONAL|GROUP|SERVICE|TEMP) — which mailbox
+    // types may be hosted on this domain. 0 means none allowed.
+    allowedKinds: integer("allowed_kinds").notNull().default(0),
     spfOk: integer("spf_ok", { mode: "boolean" }).notNull().default(false),
     dkimOk: integer("dkim_ok", { mode: "boolean" }).notNull().default(false),
     dmarcOk: integer("dmarc_ok", { mode: "boolean" }).notNull().default(false),
@@ -86,6 +142,26 @@ export const domain = sqliteTable(
     createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(now),
   },
   (t) => [index("domain_kind_idx").on(t.kind)],
+);
+
+// Per-user permission to create mailboxes of given kinds on a given domain.
+// Admins bypass this check entirely.
+export const domainGrant = sqliteTable(
+  "domain_grant",
+  {
+    domainId: text("domain_id")
+      .notNull()
+      .references(() => domain.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    allowedKinds: integer("allowed_kinds").notNull().default(0),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(now),
+  },
+  (t) => [
+    primaryKey({ columns: [t.domainId, t.userId] }),
+    index("domain_grant_user_idx").on(t.userId),
+  ],
 );
 
 export const mailbox = sqliteTable(

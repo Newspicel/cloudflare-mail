@@ -9,7 +9,6 @@ describe("workers-pool smoke", () => {
     expect(e.DB).toBeDefined();
     expect(e.BLOBS).toBeDefined();
     expect(e.USER_HUB).toBeDefined();
-    expect(typeof e.APP_URL).toBe("string");
   });
 
   it("runs inside the Workers runtime", async () => {

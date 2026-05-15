@@ -2,10 +2,11 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 import { logger } from "hono/logger";
-import { createAuth } from "../auth.ts";
+import { authFromCtx } from "../auth-ctx.ts";
 import type { AppBindings } from "../env.ts";
 import { sessionMiddleware } from "../middleware.ts";
 import { attachmentsRoutes } from "./attachments.ts";
+import { bootstrapRoutes } from "./bootstrap.ts";
 import { domainsRoutes } from "./domains.ts";
 import { labelsRoutes } from "./labels.ts";
 import { mailboxesRoutes } from "./mailboxes.ts";
@@ -15,6 +16,7 @@ import { searchRoutes } from "./search.ts";
 import { streamRoute } from "./stream.ts";
 import { tempRoutes } from "./temp.ts";
 import { threadsRoutes } from "./threads.ts";
+import { usersRoutes } from "./users.ts";
 
 export function buildApi() {
   const app = new Hono<AppBindings>();
@@ -30,8 +32,15 @@ export function buildApi() {
     }),
   );
 
+  // Bootstrap endpoints sit outside session middleware — they're how the
+  // first admin is created when the DB has zero users.
+  app.route("/api/bootstrap", bootstrapRoutes());
+
+  // Public HTTP sign-up is closed via `disableSignUp: true` in auth.ts.
+  // All account creation flows through /api/bootstrap (first admin) or
+  // /api/users (admin-created) or /api/invites/accept (invited user).
   app.all("/api/auth/*", async (c) => {
-    const auth = createAuth(c.env);
+    const auth = await authFromCtx(c);
     return auth.handler(c.req.raw);
   });
 
@@ -45,6 +54,7 @@ export function buildApi() {
   });
 
   app.route("/api/domains", domainsRoutes());
+  app.route("/api/users", usersRoutes());
   app.route("/api/mailboxes", mailboxesRoutes());
   app.route("/api/threads", threadsRoutes());
   app.route("/api/messages", messagesRoutes());

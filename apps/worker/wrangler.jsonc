@@ -18,7 +18,7 @@
     {
       "binding": "DB",
       "database_name": "cfmail",
-      "database_id": "REPLACE_WITH_D1_ID",
+      "database_id": "2d535672-f246-47d8-ba54-ad19d272eb29",
       "migrations_dir": "../../packages/db/drizzle"
     }
   ],
@@ -50,9 +50,5 @@
   ],
   "triggers": {
     "crons": ["*/1 * * * *"]
-  },
-  "vars": {
-    "APP_URL": "http://localhost:8787",
-    "TEMP_DOMAIN": "tmp.example.com"
   }
 }

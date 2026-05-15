@@ -39,10 +39,24 @@ export interface MessageRow {
   createdAt: string;
 }
 
+export interface MeUser {
+  id: string;
+  name: string;
+  email: string;
+  role: "admin" | "user";
+  twoFactorEnabled?: boolean;
+}
+
 export const meQuery = queryOptions({
   queryKey: ["me"],
-  queryFn: () => api<{ user: { id: string; name: string; email: string } | null }>("/api/me"),
+  queryFn: () => api<{ user: MeUser | null }>("/api/me"),
   staleTime: 60_000,
+});
+
+export const bootstrapQuery = queryOptions({
+  queryKey: ["bootstrap"],
+  queryFn: () => api<{ needsBootstrap: boolean }>("/api/bootstrap"),
+  staleTime: 0,
 });
 
 export const mailboxesQuery = queryOptions({
