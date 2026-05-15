@@ -19,7 +19,7 @@ function ThreadPage() {
 
   return (
     <div className="flex h-full">
-      <aside className="w-[380px] shrink-0 border-r bg-card">
+      <aside className="w-[360px] shrink-0 border-r">
         <ThreadList
           mailboxId={mailboxId}
           threads={threads.data?.threads ?? []}

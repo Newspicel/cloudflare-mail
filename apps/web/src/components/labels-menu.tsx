@@ -50,7 +50,7 @@ export function LabelsMenu({ mailboxId, messageId }: Props) {
         type="button"
         onClick={() => setOpen((v) => !v)}
         className={cn(
-          "rounded-full p-2 text-muted-foreground hover:bg-muted",
+          "grid h-8 w-8 place-items-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground",
           open && "bg-muted text-foreground",
         )}
         aria-label="Labels"
@@ -108,7 +108,6 @@ function LabelsPopover({
       setName("");
       setColor(DEFAULT_COLOR);
       invalidate();
-      // Auto-apply the freshly created label to the current message.
       toggle.mutate({ labelId: res.id, on: true });
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
@@ -121,19 +120,19 @@ function LabelsPopover({
   });
 
   return (
-    <div className="absolute right-0 top-full z-30 mt-1 w-72 rounded-xl border bg-popover p-3 text-popover-foreground shadow-lg">
-      <div className="mb-2 flex items-center justify-between">
-        <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+    <div className="absolute right-0 top-full z-30 mt-1 w-72 rounded-md border bg-popover p-2 text-popover-foreground shadow-md">
+      <div className="mb-1.5 flex items-center justify-between px-1">
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
           Labels
         </div>
         <button
           type="button"
           onClick={() => setCreating((v) => !v)}
-          className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
           aria-label="New label"
           title="New label"
         >
-          <Plus className="h-3.5 w-3.5" />
+          <Plus className="h-3 w-3" />
         </button>
       </div>
 
@@ -144,7 +143,7 @@ function LabelsPopover({
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Label name"
-            className="w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus:border-ring"
+            className="w-full rounded-md border bg-background px-2 py-1 text-[12px] outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
             maxLength={64}
           />
           <div className="flex flex-wrap gap-1">
@@ -153,7 +152,10 @@ function LabelsPopover({
                 key={c}
                 type="button"
                 onClick={() => setColor(c)}
-                className={cn("h-5 w-5 rounded-full border", color === c ? "ring-2 ring-ring" : "")}
+                className={cn(
+                  "h-5 w-5 rounded-full border",
+                  color === c ? "ring-2 ring-ring ring-offset-1 ring-offset-background" : "",
+                )}
                 style={{ backgroundColor: c }}
                 aria-label={c}
               />
@@ -164,14 +166,14 @@ function LabelsPopover({
               type="button"
               onClick={() => create.mutate()}
               disabled={!name.trim() || create.isPending}
-              className="flex-1 rounded-md bg-primary px-2 py-1 text-xs font-medium text-primary-foreground disabled:opacity-50"
+              className="flex-1 rounded-md bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground transition hover:brightness-105 disabled:opacity-50"
             >
               {create.isPending ? "Creating…" : "Create"}
             </button>
             <button
               type="button"
               onClick={() => setCreating(false)}
-              className="rounded-md border px-2 py-1 text-xs"
+              className="rounded-md border px-2 py-1 text-[11px] font-medium hover:bg-muted"
             >
               Cancel
             </button>
@@ -183,14 +185,14 @@ function LabelsPopover({
         {(labelsQ.data?.labels ?? []).map((l) => {
           const on = applied.has(l.id);
           return (
-            <li key={l.id} className="flex items-center justify-between gap-2">
+            <li key={l.id} className="flex items-center justify-between gap-1">
               <button
                 type="button"
                 onClick={() => toggle.mutate({ labelId: l.id, on: !on })}
-                className="flex flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent"
+                className="flex flex-1 items-center gap-2 rounded px-2 py-1 text-[13px] hover:bg-muted"
               >
                 <span
-                  className="h-3 w-3 shrink-0 rounded-full"
+                  className="h-2.5 w-2.5 shrink-0 rounded-sm"
                   style={{ backgroundColor: l.color }}
                 />
                 <span className="flex-1 truncate text-left">{l.name}</span>
@@ -210,15 +212,17 @@ function LabelsPopover({
           );
         })}
         {labelsQ.data && labelsQ.data.labels.length === 0 && !creating && (
-          <li className="px-2 py-3 text-center text-xs text-muted-foreground">No labels yet.</li>
+          <li className="px-2 py-3 text-center text-[11px] text-muted-foreground">
+            No labels yet.
+          </li>
         )}
       </ul>
 
-      <div className="mt-2 flex justify-end">
+      <div className="mt-1 flex justify-end border-t pt-1.5">
         <button
           type="button"
           onClick={onClose}
-          className="text-xs text-muted-foreground hover:text-foreground"
+          className="text-[11px] text-muted-foreground hover:text-foreground"
         >
           Close
         </button>
@@ -236,10 +240,10 @@ export function LabelChips({ messageId, className }: { messageId: string; classN
       {labels.map((l) => (
         <span
           key={l.id}
-          className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]"
+          className="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium"
           style={{ borderColor: l.color, color: l.color }}
         >
-          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: l.color }} />
+          <span className="h-1.5 w-1.5 rounded-sm" style={{ backgroundColor: l.color }} />
           {l.name}
         </span>
       ))}

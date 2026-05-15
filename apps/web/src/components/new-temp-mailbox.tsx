@@ -51,11 +51,11 @@ export function NewTempMailbox() {
         type="button"
         onClick={() => setOpen((v) => !v)}
         className={cn(
-          "flex w-full items-center gap-2 rounded-full px-3 py-2 text-sm transition",
-          open ? "bg-sidebar-accent text-sidebar-accent-foreground" : "hover:bg-sidebar-accent/60",
+          "flex w-full items-center gap-2 rounded-md border border-sidebar-border bg-card px-2.5 py-1.5 text-[13px] text-sidebar-foreground transition hover:bg-sidebar-accent",
+          open && "bg-sidebar-accent",
         )}
       >
-        <Timer className="h-4 w-4" />
+        <Timer className="h-3.5 w-3.5" />
         New temp mailbox
       </button>
       {open && <TempPopover onClose={() => setOpen(false)} />}
@@ -93,36 +93,37 @@ function TempPopover({ onClose }: { onClose: () => void }) {
   });
 
   return (
-    <div className="absolute left-0 right-0 top-full z-30 mt-1 rounded-xl border bg-popover p-3 text-popover-foreground shadow-lg">
+    <div className="absolute left-0 right-0 top-full z-30 mt-1 rounded-md border bg-popover p-3 text-popover-foreground shadow-md">
       <div className="mb-2 flex items-center justify-between">
-        <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
           Temporary mailbox
         </div>
         <button
           type="button"
           onClick={onClose}
-          className="rounded p-1 text-muted-foreground hover:text-foreground"
+          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
           aria-label="Close"
         >
-          <X className="h-3.5 w-3.5" />
+          <X className="h-3 w-3" />
         </button>
       </div>
 
       {created ? (
         <CreatedPanel created={created} onDone={onClose} />
       ) : tempDomains.length === 0 ? (
-        <p className="text-xs text-muted-foreground">
-          No domain is marked as temp. Set <code>is_temp_domain</code> on a domain in Admin first.
+        <p className="text-[11px] text-muted-foreground">
+          No domain is marked as temp. Set{" "}
+          <code className="rounded bg-muted px-1">is_temp_domain</code> on a domain in Admin first.
         </p>
       ) : (
         <div className="flex flex-col gap-3">
           {tempDomains.length > 1 && (
-            <label className="flex flex-col gap-1 text-xs">
+            <label className="flex flex-col gap-1 text-[11px]">
               <span className="text-muted-foreground">Domain</span>
               <select
                 value={domainId}
                 onChange={(e) => setDomainId(e.target.value)}
-                className="rounded-md border bg-background px-2 py-1.5 text-sm"
+                className="rounded-md border bg-background px-2 py-1.5 text-[13px]"
               >
                 {tempDomains.map((d) => (
                   <option key={d.id} value={d.id}>
@@ -133,12 +134,12 @@ function TempPopover({ onClose }: { onClose: () => void }) {
             </label>
           )}
           {tempDomains.length === 1 && (
-            <div className="text-xs text-muted-foreground">
+            <div className="text-[11px] text-muted-foreground">
               Domain: <span className="font-medium text-foreground">@{tempDomains[0]!.name}</span>
             </div>
           )}
 
-          <div className="flex flex-col gap-1 text-xs">
+          <div className="flex flex-col gap-1 text-[11px]">
             <span className="text-muted-foreground">Expires after</span>
             <div className="flex gap-1">
               {TTL_PRESETS.map((p) => (
@@ -147,10 +148,10 @@ function TempPopover({ onClose }: { onClose: () => void }) {
                   type="button"
                   onClick={() => setTtlSeconds(p.seconds)}
                   className={cn(
-                    "flex-1 rounded-md border px-2 py-1.5 text-xs transition",
+                    "flex-1 rounded-md border px-2 py-1.5 text-[11px] font-medium transition",
                     ttlSeconds === p.seconds
                       ? "border-primary bg-primary text-primary-foreground"
-                      : "hover:bg-accent",
+                      : "hover:bg-muted",
                   )}
                 >
                   {p.label}
@@ -163,7 +164,7 @@ function TempPopover({ onClose }: { onClose: () => void }) {
             type="button"
             onClick={() => create.mutate()}
             disabled={!domainId || create.isPending}
-            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:brightness-105 disabled:opacity-50"
+            className="rounded-md bg-primary px-3 py-1.5 text-[13px] font-medium text-primary-foreground transition hover:brightness-105 disabled:opacity-50"
           >
             {create.isPending ? "Creating…" : "Create"}
           </button>
@@ -191,14 +192,14 @@ function CreatedPanel({ created, onDone }: { created: CreatedTemp; onDone: () =>
     <div className="flex flex-col gap-3">
       <div className="rounded-md border bg-muted/40 p-2">
         <div className="flex items-center gap-1">
-          <code className="flex-1 truncate text-xs">{created.address}</code>
+          <code className="flex-1 truncate text-[11px]">{created.address}</code>
           <button
             type="button"
             onClick={copy}
-            className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
             aria-label="Copy address"
           >
-            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
           </button>
         </div>
         <div className="mt-1 text-[10px] text-muted-foreground">
@@ -208,7 +209,7 @@ function CreatedPanel({ created, onDone }: { created: CreatedTemp; onDone: () =>
       <button
         type="button"
         onClick={onDone}
-        className="rounded-md border px-3 py-1.5 text-xs hover:bg-accent"
+        className="rounded-md border px-3 py-1.5 text-[11px] font-medium hover:bg-muted"
       >
         Done
       </button>

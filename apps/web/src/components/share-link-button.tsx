@@ -59,16 +59,18 @@ export function ShareLinkButton({ mailboxId }: { mailboxId: string }) {
         type="button"
         onClick={() => setOpen((v) => !v)}
         className={cn(
-          "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition",
-          open ? "bg-accent text-accent-foreground" : "hover:bg-muted",
+          "flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[12px] font-medium transition",
+          open
+            ? "bg-muted text-foreground"
+            : "text-muted-foreground hover:bg-muted hover:text-foreground",
         )}
       >
-        <Share2 className="h-3.5 w-3.5" /> Share
+        <Share2 className="h-3 w-3" /> Share
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-30 mt-1 w-80 rounded-xl border bg-popover p-3 text-popover-foreground shadow-lg">
+        <div className="absolute right-0 top-full z-30 mt-1 w-80 rounded-md border bg-popover p-3 text-popover-foreground shadow-md">
           <div className="mb-2 flex items-center justify-between">
-            <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               Read-only share link
             </div>
             <button
@@ -77,10 +79,10 @@ export function ShareLinkButton({ mailboxId }: { mailboxId: string }) {
                 setOpen(false);
                 setCreated(null);
               }}
-              className="rounded p-1 text-muted-foreground hover:text-foreground"
+              className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
               aria-label="Close"
             >
-              <X className="h-3.5 w-3.5" />
+              <X className="h-3 w-3" />
             </button>
           </div>
 
@@ -88,7 +90,7 @@ export function ShareLinkButton({ mailboxId }: { mailboxId: string }) {
             <CreatedPanel created={created} />
           ) : (
             <div className="flex flex-col gap-3">
-              <div className="flex flex-col gap-1 text-xs">
+              <div className="flex flex-col gap-1 text-[11px]">
                 <span className="text-muted-foreground">Expires after</span>
                 <div className="flex gap-1">
                   {TTL_PRESETS.map((p) => (
@@ -97,10 +99,10 @@ export function ShareLinkButton({ mailboxId }: { mailboxId: string }) {
                       type="button"
                       onClick={() => setTtlSeconds(p.seconds)}
                       className={cn(
-                        "flex-1 rounded-md border px-2 py-1.5 text-xs transition",
+                        "flex-1 rounded-md border px-2 py-1.5 text-[11px] font-medium transition",
                         ttlSeconds === p.seconds
                           ? "border-primary bg-primary text-primary-foreground"
-                          : "hover:bg-accent",
+                          : "hover:bg-muted",
                       )}
                     >
                       {p.label}
@@ -112,12 +114,12 @@ export function ShareLinkButton({ mailboxId }: { mailboxId: string }) {
                 type="button"
                 onClick={() => create.mutate()}
                 disabled={create.isPending}
-                className="flex items-center justify-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:brightness-105 disabled:opacity-50"
+                className="flex items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[13px] font-medium text-primary-foreground transition hover:brightness-105 disabled:opacity-50"
               >
-                <LinkIcon className="h-3.5 w-3.5" />
+                <LinkIcon className="h-3 w-3" />
                 {create.isPending ? "Creating…" : "Create link"}
               </button>
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-[11px] leading-relaxed text-muted-foreground">
                 Anyone with the link can read this mailbox's messages until the link expires.
               </p>
             </div>
@@ -146,14 +148,14 @@ function CreatedPanel({ created }: { created: CreatedToken }) {
     <div className="flex flex-col gap-2">
       <div className="rounded-md border bg-muted/40 p-2">
         <div className="flex items-center gap-1">
-          <code className="flex-1 truncate text-xs">{created.url}</code>
+          <code className="flex-1 truncate text-[11px]">{created.url}</code>
           <button
             type="button"
             onClick={copy}
-            className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
             aria-label="Copy link"
           >
-            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
           </button>
         </div>
         <div className="mt-1 text-[10px] text-muted-foreground">

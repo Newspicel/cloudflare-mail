@@ -1,7 +1,16 @@
 import { has, Perm } from "@cfmail/shared/permissions";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
-import { Archive, Inbox, Lock, Mailbox, PenSquare, ShieldCheck, Timer, Users } from "lucide-react";
+import {
+  Inbox,
+  Lock,
+  Mailbox,
+  PenSquare,
+  ShieldCheck,
+  SlidersHorizontal,
+  Timer,
+  Users,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/cn.ts";
 import { type MailboxSummary, mailboxesQuery } from "@/lib/queries.ts";
@@ -22,7 +31,6 @@ const GROUP_META: Record<
 export function Sidebar() {
   const { data } = useQuery(mailboxesQuery);
   const mailboxes = data?.mailboxes ?? [];
-  // Tick once a minute so TTL labels refresh.
   useNow(60_000);
 
   const grouped: Record<MailboxSummary["type"], MailboxSummary[]> = {
@@ -37,30 +45,29 @@ export function Sidebar() {
   const activeId = (params as { mailboxId?: string }).mailboxId;
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col gap-1 border-r bg-sidebar px-3 py-4 text-sidebar-foreground">
-      <button
-        type="button"
-        onClick={() => openCompose()}
-        className="mb-2 flex items-center gap-2 self-start rounded-2xl bg-primary px-5 py-3 text-sm font-medium text-primary-foreground shadow-sm hover:brightness-105"
-      >
-        <PenSquare className="h-4 w-4" /> Compose
-      </button>
-
-      <div className="mb-3">
+    <aside className="flex w-60 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground">
+      <div className="flex flex-col gap-2 border-b border-sidebar-border px-3 py-3">
+        <button
+          type="button"
+          onClick={() => openCompose()}
+          className="flex w-full items-center justify-center gap-2 rounded-md bg-primary px-3 py-2 text-[13px] font-medium text-primary-foreground transition hover:brightness-105"
+        >
+          <PenSquare className="h-3.5 w-3.5" /> Compose
+        </button>
         <NewTempMailbox />
       </div>
 
-      <nav className="flex flex-col gap-4 overflow-y-auto pr-1">
+      <nav className="flex flex-1 flex-col gap-4 overflow-y-auto px-2 py-3">
         {(Object.keys(grouped) as MailboxSummary["type"][]).map((type) => {
           const items = grouped[type];
           if (!items.length) return null;
           const meta = GROUP_META[type];
           return (
             <section key={type}>
-              <h3 className="mb-1 flex items-center gap-2 px-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                <meta.icon className="h-3.5 w-3.5" /> {meta.label}
+              <h3 className="mb-1 flex items-center gap-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <meta.icon className="h-3 w-3" /> {meta.label}
               </h3>
-              <ul className="flex flex-col gap-0.5">
+              <ul className="flex flex-col">
                 {items.map((m) => {
                   const readOnly = m.role === "member" && !has(m.perms, Perm.WRITE);
                   return (
@@ -69,17 +76,17 @@ export function Sidebar() {
                         to="/app/m/$mailboxId"
                         params={{ mailboxId: m.id }}
                         className={cn(
-                          "flex items-center justify-between rounded-full px-3 py-2 text-sm transition",
+                          "group flex items-center justify-between rounded-md px-2 py-1.5 text-[13px] transition",
                           activeId === m.id
                             ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
-                            : "hover:bg-sidebar-accent/60",
+                            : "text-sidebar-foreground hover:bg-sidebar-accent/60",
                         )}
                       >
                         <span className="truncate">{m.displayName ?? m.address}</span>
                         <span className="ml-2 flex shrink-0 items-center gap-1">
                           {readOnly && (
                             <span role="img" aria-label="Read-only" title="Read-only">
-                              <Lock className="h-3.5 w-3.5 text-muted-foreground" />
+                              <Lock className="h-3 w-3 text-muted-foreground" />
                             </span>
                           )}
                           {m.expiresAt && <TtlBadge expiresAt={m.expiresAt} />}
@@ -94,19 +101,19 @@ export function Sidebar() {
         })}
 
         {mailboxes.length === 0 && (
-          <div className="rounded-lg border border-dashed p-4 text-xs text-muted-foreground">
-            <Mailbox className="mb-2 h-4 w-4" />
+          <div className="mx-2 rounded-md border border-dashed p-3 text-[11px] text-muted-foreground">
+            <Mailbox className="mb-1.5 h-3.5 w-3.5" />
             No mailboxes — create one from Admin.
           </div>
         )}
       </nav>
 
-      <div className="mt-auto pt-3">
+      <div className="border-t border-sidebar-border px-2 py-2">
         <Link
           to="/app/admin"
-          className="flex items-center gap-2 rounded-full px-3 py-2 text-sm text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
+          className="flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-muted-foreground transition hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
         >
-          <Archive className="h-4 w-4" /> Admin & mailboxes
+          <SlidersHorizontal className="h-3.5 w-3.5" /> Admin
         </Link>
       </div>
     </aside>
@@ -121,8 +128,8 @@ function TtlBadge({ expiresAt }: { expiresAt: string }) {
     <span
       title={`Expires ${new Date(expiresAt).toLocaleString()}`}
       className={cn(
-        "rounded-full px-1.5 py-0.5 text-[10px]",
-        expired ? "bg-destructive/15 text-destructive" : "bg-muted text-muted-foreground",
+        "rounded px-1 py-0.5 text-[10px] font-medium",
+        expired ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground",
       )}
     >
       {remaining}

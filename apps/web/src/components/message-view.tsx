@@ -33,17 +33,12 @@ export function MessageView({ thread, messages, readOnly = false }: Props) {
   });
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 border-b px-6 py-4">
-        <button
-          type="button"
-          className="rounded-full p-2 text-muted-foreground hover:bg-muted"
-          onClick={() => history.back()}
-          aria-label="Back"
-        >
+    <div className="flex h-full flex-col bg-background">
+      <div className="flex items-center gap-2 border-b bg-card px-4 py-2.5">
+        <ToolbarButton onClick={() => history.back()} ariaLabel="Back">
           <ArrowLeft className="h-4 w-4" />
-        </button>
-        <h2 className="flex-1 truncate text-lg font-semibold tracking-tight">
+        </ToolbarButton>
+        <h2 className="flex-1 truncate text-[14px] font-semibold tracking-tight">
           {messages[0]?.subject || thread.subjectNorm || "(no subject)"}
         </h2>
         {!readOnly && messages.at(-1) && (
@@ -51,48 +46,67 @@ export function MessageView({ thread, messages, readOnly = false }: Props) {
         )}
         {!readOnly && (
           <>
-            <button
-              type="button"
-              className="rounded-full p-2 text-muted-foreground hover:bg-muted"
+            <ToolbarButton
               onClick={() => setState.mutate({ archived: true })}
               disabled={setState.isPending}
-              aria-label="Archive (e)"
-              title="Archive (e)"
+              ariaLabel="Archive (e)"
             >
               <Archive className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              className="rounded-full p-2 text-muted-foreground hover:bg-muted"
+            </ToolbarButton>
+            <ToolbarButton
               onClick={() => setState.mutate({ trashed: true })}
               disabled={setState.isPending}
-              aria-label="Trash (#)"
-              title="Trash (#)"
+              ariaLabel="Trash (#)"
             >
               <Trash2 className="h-4 w-4" />
-            </button>
+            </ToolbarButton>
           </>
         )}
       </div>
 
-      <div className="flex-1 space-y-4 overflow-y-auto bg-muted/10 p-6">
+      <div className="flex-1 space-y-3 overflow-y-auto p-4">
         {messages.map((m) => (
           <MessageCard key={m.id} msg={m} />
         ))}
       </div>
 
       {!readOnly && (
-        <div className="border-t bg-card p-4">
+        <div className="border-t bg-card p-3">
           <button
             type="button"
             onClick={() => openCompose({ replyToMessage: messages.at(-1) ?? null })}
-            className="flex items-center gap-2 rounded-full border px-4 py-2 text-sm text-muted-foreground hover:bg-muted"
+            className="flex items-center gap-2 rounded-md border px-3 py-1.5 text-[13px] font-medium text-foreground transition hover:bg-muted"
           >
-            <Reply className="h-4 w-4" /> Reply
+            <Reply className="h-3.5 w-3.5" /> Reply
           </button>
         </div>
       )}
     </div>
+  );
+}
+
+function ToolbarButton({
+  onClick,
+  disabled,
+  ariaLabel,
+  children,
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+  ariaLabel: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:opacity-50"
+      aria-label={ariaLabel}
+      title={ariaLabel}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -104,23 +118,23 @@ function MessageCard({ msg }: { msg: MessageRow }) {
   }, [msg]);
 
   return (
-    <article className="rounded-xl border bg-card shadow-sm">
-      <header className="flex items-start justify-between gap-4 border-b px-5 py-3">
+    <article className="rounded-md border bg-card">
+      <header className="flex items-start justify-between gap-4 border-b px-4 py-2.5">
         <div className="min-w-0">
-          <div className="text-sm font-semibold">
+          <div className="text-[13px] font-semibold">
             {msg.fromName ?? msg.fromAddr}{" "}
             <span className="font-normal text-muted-foreground">&lt;{msg.fromAddr}&gt;</span>
           </div>
-          <div className="text-xs text-muted-foreground">
+          <div className="text-[11px] text-muted-foreground">
             to {msg.toAddrs.map((a) => a.address).join(", ")}
           </div>
-          <LabelChips messageId={msg.id} className="mt-1" />
+          <LabelChips messageId={msg.id} className="mt-1.5" />
         </div>
-        <time className="shrink-0 text-xs text-muted-foreground">
+        <time className="shrink-0 text-[11px] text-muted-foreground">
           {new Date(msg.sentAt ?? msg.receivedAt ?? msg.createdAt).toLocaleString()}
         </time>
       </header>
-      <div className="prose prose-sm max-w-none px-5 py-4 dark:prose-invert">
+      <div className="prose prose-sm max-w-none px-4 py-3 dark:prose-invert">
         {bodyHtml ? (
           <div
             className="[&_*]:max-w-full"
@@ -128,7 +142,7 @@ function MessageCard({ msg }: { msg: MessageRow }) {
             dangerouslySetInnerHTML={{ __html: bodyHtml }}
           />
         ) : (
-          <pre className="whitespace-pre-wrap font-sans text-sm">{msg.snippet}</pre>
+          <pre className="whitespace-pre-wrap font-sans text-[13px]">{msg.snippet}</pre>
         )}
       </div>
     </article>

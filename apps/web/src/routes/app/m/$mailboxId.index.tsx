@@ -19,20 +19,24 @@ function MailboxIndex() {
   return (
     <div className="flex h-full flex-col">
       {canShare && (
-        <div className="flex shrink-0 items-center justify-end gap-2 border-b bg-card px-4 py-2">
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b bg-card px-4 py-1.5">
+          <div className="text-[12px] font-medium text-muted-foreground">{mailbox?.address}</div>
           <ShareLinkButton mailboxId={mailboxId} />
         </div>
       )}
       <div className="flex min-h-0 flex-1">
-        <aside className="w-[380px] shrink-0 border-r bg-card">
+        <aside className="w-[360px] shrink-0 border-r">
           <ThreadList
             mailboxId={mailboxId}
             threads={data?.threads ?? []}
             expiresAt={mailbox?.expiresAt ?? null}
           />
         </aside>
-        <section className="flex flex-1 items-center justify-center bg-muted/30 text-center text-sm text-muted-foreground">
-          Select a conversation
+        <section className="flex flex-1 items-center justify-center bg-background text-center text-[13px] text-muted-foreground">
+          <div className="max-w-sm">
+            <div className="mb-1 text-foreground font-medium">No conversation selected</div>
+            <div>Pick a thread from the list to read or reply.</div>
+          </div>
         </section>
       </div>
     </div>
