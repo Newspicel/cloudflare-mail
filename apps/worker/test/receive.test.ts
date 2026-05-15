@@ -84,6 +84,7 @@ async function readUntil(
     const remaining = deadline - Date.now();
     if (remaining <= 0) throw new Error(`timed out waiting for ${needle}; got: ${acc}`);
     const timed = new Promise<null>((resolve) => setTimeout(() => resolve(null), remaining));
+    // eslint-disable-next-line no-await-in-loop -- stream reads are inherently sequential
     const result = await Promise.race([reader.read(), timed]);
     if (result === null) throw new Error(`timed out waiting for ${needle}; got: ${acc}`);
     if (result.done) throw new Error(`stream ended before ${needle}; got: ${acc}`);

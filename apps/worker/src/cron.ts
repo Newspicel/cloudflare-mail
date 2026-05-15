@@ -18,17 +18,17 @@ export async function runCron(env: Env, now: Date): Promise<void> {
     .where(and(eq(mailbox.type, "temp"), isNotNull(mailbox.expiresAt), lte(mailbox.expiresAt, now)))
     .limit(100);
 
-  for (const mb of expired) {
-    const keys = await collectMailboxBlobKeys(db, mb.id);
-    await deleteBlobs(env, keys);
-
-    await db.delete(mailbox).where(eq(mailbox.id, mb.id));
-
-    await broadcastToUsers(env, [mb.ownerUserId], {
-      type: "mailbox_expired",
-      mailboxId: mb.id,
-    });
-  }
+  await Promise.all(
+    expired.map(async (mb) => {
+      const keys = await collectMailboxBlobKeys(db, mb.id);
+      await deleteBlobs(env, keys);
+      await db.delete(mailbox).where(eq(mailbox.id, mb.id));
+      await broadcastToUsers(env, [mb.ownerUserId], {
+        type: "mailbox_expired",
+        mailboxId: mb.id,
+      });
+    }),
+  );
 
   const stale = new Date(now.getTime() - DNS_RECHECK_INTERVAL_MS);
   const dueDomains = await db

@@ -25,7 +25,9 @@ export async function collectMailboxBlobKeys(db: DB, mailboxId: string): Promise
 
 export async function deleteBlobs(env: Env, keys: string[]): Promise<void> {
   if (!keys.length) return;
+  const batches: string[][] = [];
   for (let i = 0; i < keys.length; i += R2_DELETE_BATCH) {
-    await env.BLOBS.delete(keys.slice(i, i + R2_DELETE_BATCH));
+    batches.push(keys.slice(i, i + R2_DELETE_BATCH));
   }
+  await Promise.all(batches.map((batch) => env.BLOBS.delete(batch)));
 }

@@ -15,6 +15,7 @@ export async function streamToArrayBuffer(
   const chunks: Uint8Array[] = [];
   let total = 0;
   for (;;) {
+    // eslint-disable-next-line no-await-in-loop -- stream reads are inherently sequential
     const { value, done } = await reader.read();
     if (done) break;
     if (value) {

@@ -19,13 +19,16 @@ export async function resolveThreadId(db: DB, input: ResolveThreadInput): Promis
     ...(input.inReplyTo ? [input.inReplyTo] : []),
   ].filter(Boolean);
 
-  for (const mid of headerIds) {
-    const hit = await db.query.message.findFirst({
-      where: and(eq(message.mailboxId, input.mailboxId), eq(message.messageIdHdr, mid)),
-      columns: { threadId: true },
-    });
-    if (hit) return hit.threadId;
-  }
+  const headerHits = await Promise.all(
+    headerIds.map((mid) =>
+      db.query.message.findFirst({
+        where: and(eq(message.mailboxId, input.mailboxId), eq(message.messageIdHdr, mid)),
+        columns: { threadId: true },
+      }),
+    ),
+  );
+  const firstHit = headerHits.find((h) => h);
+  if (firstHit) return firstHit.threadId;
 
   const norm = normalizeSubject(input.subject);
   // When we have a header chain, derive a deterministic thread id from the

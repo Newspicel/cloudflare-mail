@@ -24,16 +24,18 @@ export const sessionMiddleware: MiddlewareHandler<AppBindings> = async (c, next)
       })
       .from(mailboxInvite)
       .where(eq(mailboxInvite.email, u.email.toLowerCase()));
-    for (const inv of pending) {
-      await db
-        .insert(mailboxMember)
-        .values({ mailboxId: inv.mailboxId, userId: u.id, perms: inv.perms })
-        .onConflictDoUpdate({
-          target: [mailboxMember.mailboxId, mailboxMember.userId],
-          set: { perms: inv.perms },
-        });
-      await db.delete(mailboxInvite).where(eq(mailboxInvite.id, inv.id));
-    }
+    await Promise.all(
+      pending.map(async (inv) => {
+        await db
+          .insert(mailboxMember)
+          .values({ mailboxId: inv.mailboxId, userId: u.id, perms: inv.perms })
+          .onConflictDoUpdate({
+            target: [mailboxMember.mailboxId, mailboxMember.userId],
+            set: { perms: inv.perms },
+          });
+        await db.delete(mailboxInvite).where(eq(mailboxInvite.id, inv.id));
+      }),
+    );
   }
 
   return next();
