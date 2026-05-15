@@ -1,6 +1,9 @@
+import { mailboxInvite, mailboxMember } from "@cfmail/db/schema";
+import { eq } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { createAuth } from "./auth.ts";
+import { dbFromCtx } from "./db.ts";
 import type { AppBindings } from "./env.ts";
 
 export const sessionMiddleware: MiddlewareHandler<AppBindings> = async (c, next) => {
@@ -8,6 +11,31 @@ export const sessionMiddleware: MiddlewareHandler<AppBindings> = async (c, next)
   const sess = await auth.api.getSession({ headers: c.req.raw.headers });
   c.set("user", sess?.user ?? null);
   c.set("sessionId", sess?.session?.id ?? null);
+
+  // Materialize pending mailbox invites for this user's email.
+  const u = sess?.user;
+  if (u?.email) {
+    const db = dbFromCtx(c);
+    const pending = await db
+      .select({
+        id: mailboxInvite.id,
+        mailboxId: mailboxInvite.mailboxId,
+        perms: mailboxInvite.perms,
+      })
+      .from(mailboxInvite)
+      .where(eq(mailboxInvite.email, u.email.toLowerCase()));
+    for (const inv of pending) {
+      await db
+        .insert(mailboxMember)
+        .values({ mailboxId: inv.mailboxId, userId: u.id, perms: inv.perms })
+        .onConflictDoUpdate({
+          target: [mailboxMember.mailboxId, mailboxMember.userId],
+          set: { perms: inv.perms },
+        });
+      await db.delete(mailboxInvite).where(eq(mailboxInvite.id, inv.id));
+    }
+  }
+
   return next();
 };
 

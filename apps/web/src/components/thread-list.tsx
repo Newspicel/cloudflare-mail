@@ -1,20 +1,24 @@
 import { Link } from "@tanstack/react-router";
+import { Timer } from "lucide-react";
 import { cn } from "@/lib/cn.ts";
 import type { ThreadRow } from "@/lib/queries.ts";
+import { formatRemaining, useNow } from "@/lib/time.ts";
 
 interface Props {
   mailboxId: string;
   threads: ThreadRow[];
   selectedThreadId?: string;
+  expiresAt?: string | null;
 }
 
-export function ThreadList({ mailboxId, threads, selectedThreadId }: Props) {
+export function ThreadList({ mailboxId, threads, selectedThreadId, expiresAt }: Props) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b px-4 py-3">
         <h2 className="text-sm font-semibold tracking-tight">Inbox</h2>
         <span className="text-xs text-muted-foreground">{threads.length}</span>
       </div>
+      {expiresAt && <ExpiryBanner expiresAt={expiresAt} />}
       <ul className="flex-1 overflow-y-auto">
         {threads.map((t) => (
           <ThreadRowItem
@@ -72,6 +76,27 @@ function ThreadRowItem({
         </div>
       </Link>
     </li>
+  );
+}
+
+function ExpiryBanner({ expiresAt }: { expiresAt: string }) {
+  useNow(60_000);
+  const remaining = formatRemaining(expiresAt);
+  if (!remaining) return null;
+  const expired = remaining === "expired";
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-2 border-b px-4 py-2 text-xs",
+        expired
+          ? "bg-destructive/10 text-destructive"
+          : "bg-amber-500/10 text-amber-700 dark:text-amber-300",
+      )}
+      title={`Expires ${new Date(expiresAt).toLocaleString()}`}
+    >
+      <Timer className="h-3.5 w-3.5" />
+      <span>{expired ? "Mailbox expired" : `Temp mailbox · expires in ${remaining}`}</span>
+    </div>
   );
 }
 

@@ -19,6 +19,8 @@ export interface ThreadRow {
   msgCount: number;
   unreadCount: number;
   participants: { name?: string; address: string }[];
+  archived: boolean;
+  trashed: boolean;
 }
 
 export interface MessageRow {
@@ -83,4 +85,35 @@ export const searchQuery = (q: string) =>
     queryFn: () => api<{ results: SearchResult[] }>(`/api/search?q=${encodeURIComponent(q)}`),
     enabled: q.trim().length > 0,
     staleTime: 15_000,
+  });
+
+export interface LabelRow {
+  id: string;
+  mailboxId: string;
+  name: string;
+  color: string;
+}
+
+export const labelsQuery = (mailboxId: string) =>
+  queryOptions({
+    queryKey: ["labels", mailboxId],
+    queryFn: () =>
+      api<{ labels: LabelRow[] }>(`/api/labels?mailboxId=${encodeURIComponent(mailboxId)}`),
+    enabled: Boolean(mailboxId),
+  });
+
+export interface MessageLabel {
+  id: string;
+  name: string;
+  color: string;
+}
+
+export const messageLabelsQuery = (messageIds: string[]) =>
+  queryOptions({
+    queryKey: ["message-labels", messageIds.toSorted().join(",")],
+    queryFn: () => {
+      const qs = messageIds.map((id) => `id=${encodeURIComponent(id)}`).join("&");
+      return api<{ labels: Record<string, MessageLabel[]> }>(`/api/labels/by-messages?${qs}`);
+    },
+    enabled: messageIds.length > 0,
   });

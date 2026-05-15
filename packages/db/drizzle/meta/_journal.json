@@ -15,6 +15,13 @@
       "when": 1776700535598,
       "tag": "0001_message_fts",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1778874791407,
+      "tag": "0002_blushing_abomination",
+      "breakpoints": true
     }
   ]
 }

@@ -184,6 +184,17 @@ function DomainRow({ domain: d }: { domain: Domain }) {
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
+  const toggleTemp = useMutation({
+    mutationFn: (isTempDomain: boolean) =>
+      api(`/api/domains/${d.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ isTempDomain }),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["domains"] });
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
   const checkedLabel = d.lastCheckedAt
     ? `checked ${new Date(d.lastCheckedAt).toLocaleString()}`
     : "not yet checked";
@@ -200,6 +211,19 @@ function DomainRow({ domain: d }: { domain: Domain }) {
         <DnsBadge label="SPF" ok={d.spfOk} checked={d.lastCheckedAt !== null} />
         <DnsBadge label="DKIM" ok={d.dkimOk} checked={d.lastCheckedAt !== null} />
         <DnsBadge label="DMARC" ok={d.dmarcOk} checked={d.lastCheckedAt !== null} />
+        <label
+          className="flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+          title="Allow this domain to host temporary mailboxes"
+        >
+          <input
+            type="checkbox"
+            checked={d.isTempDomain}
+            disabled={toggleTemp.isPending}
+            onChange={(e) => toggleTemp.mutate(e.target.checked)}
+            className="h-3.5 w-3.5"
+          />
+          temp
+        </label>
         <button
           type="button"
           onClick={() => recheck.mutate()}
@@ -265,11 +289,22 @@ function MailboxRow({ mailbox: m }: { mailbox: MailboxSummary }) {
   );
 }
 
+interface Invite {
+  id: string;
+  email: string;
+  perms: number;
+  createdAt: string;
+}
+
 function MembersPanel({ mailboxId }: { mailboxId: string }) {
   const qc = useQueryClient();
   const membersQ = useQuery({
     queryKey: ["mailbox-members", mailboxId],
     queryFn: () => api<{ members: Member[] }>(`/api/mailboxes/${mailboxId}/members`),
+  });
+  const invitesQ = useQuery({
+    queryKey: ["mailbox-invites", mailboxId],
+    queryFn: () => api<{ invites: Invite[] }>(`/api/mailboxes/${mailboxId}/invites`),
   });
 
   const [email, setEmail] = useState("");
@@ -277,22 +312,32 @@ function MembersPanel({ mailboxId }: { mailboxId: string }) {
   const [write, setWrite] = useState(false);
   const [manage, setManage] = useState(false);
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: ["mailbox-members", mailboxId] });
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ["mailbox-members", mailboxId] });
+    qc.invalidateQueries({ queryKey: ["mailbox-invites", mailboxId] });
+  };
 
   const addMember = useMutation({
     mutationFn: () =>
-      api(`/api/mailboxes/${mailboxId}/members`, {
+      api<{ ok: boolean; invited?: boolean }>(`/api/mailboxes/${mailboxId}/members`, {
         method: "POST",
         body: JSON.stringify({ mailboxId, email, read, write, manage }),
       }),
-    onSuccess: () => {
+    onSuccess: (res) => {
       setEmail("");
       setRead(true);
       setWrite(false);
       setManage(false);
       invalidate();
-      toast.success("Member added");
+      toast.success(res.invited ? "Invite sent" : "Member added");
     },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
+  const removeInvite = useMutation({
+    mutationFn: (inviteId: string) =>
+      api(`/api/mailboxes/${mailboxId}/invites/${inviteId}`, { method: "DELETE" }),
+    onSuccess: invalidate,
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
@@ -365,9 +410,29 @@ function MembersPanel({ mailboxId }: { mailboxId: string }) {
             </div>
           </li>
         ))}
-        {membersQ.data?.members.length === 0 && (
-          <li className="px-3 py-4 text-center text-xs text-muted-foreground">No members yet.</li>
-        )}
+        {membersQ.data?.members.length === 0 &&
+          (!invitesQ.data || invitesQ.data.invites.length === 0) && (
+            <li className="px-3 py-4 text-center text-xs text-muted-foreground">No members yet.</li>
+          )}
+        {(invitesQ.data?.invites ?? []).map((inv) => (
+          <li key={inv.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+            <div className="min-w-0 flex-1 truncate">
+              <div className="truncate font-medium text-muted-foreground">
+                {inv.email} <span className="text-xs">(pending)</span>
+              </div>
+              <div className="truncate text-xs text-muted-foreground">
+                Invite sent {new Date(inv.createdAt).toLocaleString()} · {permLabel(inv.perms)}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => removeInvite.mutate(inv.id)}
+              className="text-destructive hover:underline"
+            >
+              Revoke
+            </button>
+          </li>
+        ))}
       </ul>
 
       <div className="grid grid-cols-[1fr_auto_auto] items-center gap-3">
@@ -394,6 +459,14 @@ function MembersPanel({ mailboxId }: { mailboxId: string }) {
       </div>
     </div>
   );
+}
+
+function permLabel(perms: number): string {
+  const out: string[] = [];
+  if (has(perms, Perm.READ)) out.push("read");
+  if (has(perms, Perm.WRITE)) out.push("write");
+  if (has(perms, Perm.MANAGE)) out.push("manage");
+  return out.length ? out.join(", ") : "no permissions";
 }
 
 function PermToggle({

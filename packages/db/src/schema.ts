@@ -149,10 +149,13 @@ export const thread = sqliteTable(
       .notNull()
       .default(sql`'[]'`),
     unreadCount: integer("unread_count").notNull().default(0),
+    archived: integer("archived", { mode: "boolean" }).notNull().default(false),
+    trashed: integer("trashed", { mode: "boolean" }).notNull().default(false),
   },
   (t) => [
     index("thread_mailbox_last_idx").on(t.mailboxId, t.lastMsgAt),
     index("thread_mailbox_subject_idx").on(t.mailboxId, t.subjectNorm),
+    index("thread_mailbox_state_idx").on(t.mailboxId, t.archived, t.trashed),
   ],
 );
 
@@ -235,6 +238,26 @@ export const messageLabel = sqliteTable(
       .references(() => label.id, { onDelete: "cascade" }),
   },
   (t) => [primaryKey({ columns: [t.messageId, t.labelId] })],
+);
+
+export const mailboxInvite = sqliteTable(
+  "mailbox_invite",
+  {
+    id: text("id").primaryKey(),
+    mailboxId: text("mailbox_id")
+      .notNull()
+      .references(() => mailbox.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    perms: integer("perms").notNull().default(0),
+    invitedByUserId: text("invited_by_user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(now),
+  },
+  (t) => [
+    uniqueIndex("mailbox_invite_mailbox_email_uq").on(t.mailboxId, t.email),
+    index("mailbox_invite_email_idx").on(t.email),
+  ],
 );
 
 export const shareToken = sqliteTable(

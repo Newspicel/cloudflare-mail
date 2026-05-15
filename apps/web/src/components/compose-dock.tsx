@@ -1,9 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import DOMPurify from "dompurify";
 import { Paperclip, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { marked } from "marked";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ApiError, api } from "@/lib/api.ts";
 import { type MessageRow, mailboxesQuery } from "@/lib/queries.ts";
+
+marked.setOptions({ breaks: true, gfm: true });
 
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const MAX_ATTACHMENTS = 20;
@@ -56,12 +60,21 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
     s.replyToMessage ? prefixSubject(s.replyToMessage.subject) : "",
   );
   const [text, setText] = useState("");
+  const [markdown, setMarkdown] = useState(false);
+  const [preview, setPreview] = useState(false);
   const [attachments, setAttachments] = useState<UploadedAttachment[]>([]);
   const [uploading, setUploading] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const previewHtml = useMemo(() => {
+    if (!markdown || !text.trim()) return "";
+    const rendered = marked.parse(text, { async: false }) as string;
+    return DOMPurify.sanitize(rendered, { USE_PROFILES: { html: true } });
+  }, [markdown, text]);
+
   const send = useMutation({
     mutationFn: async () => {
+      const html = markdown && text.trim() ? previewHtml : undefined;
       return api<{ messageId: string; threadId: string }>("/api/messages/send", {
         method: "POST",
         body: JSON.stringify({
@@ -72,6 +85,7 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
             .map((address) => ({ address })),
           subject,
           text,
+          html,
           attachments: attachments.length
             ? attachments.map((a) => ({
                 r2Key: a.r2Key,
@@ -183,12 +197,20 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
             className="flex-1 bg-transparent outline-none"
           />
         </label>
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          className="flex-1 resize-none bg-transparent py-2 outline-none"
-          placeholder="Write your message…"
-        />
+        {markdown && preview ? (
+          <div
+            // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized via DOMPurify
+            dangerouslySetInnerHTML={{ __html: previewHtml }}
+            className="prose prose-sm flex-1 max-w-none overflow-y-auto py-2 dark:prose-invert"
+          />
+        ) : (
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            className="flex-1 resize-none bg-transparent py-2 outline-none font-mono text-[13px]"
+            placeholder={markdown ? "Write your message in markdown…" : "Write your message…"}
+          />
+        )}
         {attachments.length > 0 && (
           <ul className="flex flex-wrap gap-1.5 border-t pt-2">
             {attachments.map((a) => (
@@ -244,6 +266,29 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
               e.target.value = "";
             }}
           />
+          <button
+            type="button"
+            onClick={() => {
+              setMarkdown((v) => {
+                if (v) setPreview(false);
+                return !v;
+              });
+            }}
+            className={`rounded-md border px-2 py-1 text-xs ${markdown ? "border-primary text-primary" : "text-muted-foreground hover:text-foreground"}`}
+            aria-pressed={markdown}
+            title="Toggle markdown"
+          >
+            MD
+          </button>
+          {markdown && (
+            <button
+              type="button"
+              onClick={() => setPreview((v) => !v)}
+              className="rounded-md border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+            >
+              {preview ? "Edit" : "Preview"}
+            </button>
+          )}
         </div>
         <span className="text-xs text-muted-foreground">
           {uploading > 0

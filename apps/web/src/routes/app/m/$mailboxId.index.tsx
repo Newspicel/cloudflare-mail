@@ -25,7 +25,11 @@ function MailboxIndex() {
       )}
       <div className="flex min-h-0 flex-1">
         <aside className="w-[380px] shrink-0 border-r bg-card">
-          <ThreadList mailboxId={mailboxId} threads={data?.threads ?? []} />
+          <ThreadList
+            mailboxId={mailboxId}
+            threads={data?.threads ?? []}
+            expiresAt={mailbox?.expiresAt ?? null}
+          />
         </aside>
         <section className="flex flex-1 items-center justify-center bg-muted/30 text-center text-sm text-muted-foreground">
           Select a conversation

@@ -34,6 +34,36 @@ export const createDomain = z.object({
   kind: DomainKind,
 });
 
+export const updateDomain = z.object({
+  isTempDomain: z.boolean().optional(),
+});
+
+export const updateThread = z.object({
+  archived: z.boolean().optional(),
+  trashed: z.boolean().optional(),
+});
+
+const labelColor = z.string().regex(/^#[0-9a-f]{6}$/i, "expected hex color (#rrggbb)");
+
+export const createLabel = z.object({
+  mailboxId: z.string().min(1),
+  name: z.string().min(1).max(64),
+  color: labelColor.optional(),
+});
+
+export const updateLabel = z.object({
+  name: z.string().min(1).max(64).optional(),
+  color: labelColor.optional(),
+});
+
+export const inviteMember = z.object({
+  mailboxId: z.string().min(1),
+  email: emailAddress,
+  read: z.boolean().default(true),
+  write: z.boolean().default(false),
+  manage: z.boolean().default(false),
+});
+
 export const createMailbox = z.object({
   domainId: z.string().min(1),
   localPart,

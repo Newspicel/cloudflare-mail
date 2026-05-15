@@ -1,5 +1,5 @@
 import { domain } from "@cfmail/db/schema";
-import { createDomain } from "@cfmail/shared/schemas";
+import { createDomain, updateDomain } from "@cfmail/shared/schemas";
 import { zValidator } from "@hono/zod-validator";
 import { asc, eq } from "drizzle-orm";
 import { Hono } from "hono";
@@ -30,6 +30,18 @@ export function domainsRoutes() {
       kind: body.kind,
     });
     return c.json({ id }, 201);
+  });
+
+  r.patch("/:id", zValidator("json", updateDomain), async (c) => {
+    const db = dbFromCtx(c);
+    const id = c.req.param("id");
+    const body = c.req.valid("json");
+    const patch: Partial<{ isTempDomain: boolean }> = {};
+    if (body.isTempDomain !== undefined) patch.isTempDomain = body.isTempDomain;
+    if (Object.keys(patch).length === 0) return c.json({ ok: true });
+    const res = await db.update(domain).set(patch).where(eq(domain.id, id));
+    if (!res.success) throw new HTTPException(404, { message: "not found" });
+    return c.json({ ok: true });
   });
 
   r.delete("/:id", async (c) => {

@@ -1,4 +1,4 @@
-import { domain, mailbox, mailboxMember, shareToken, user } from "@cfmail/db/schema";
+import { domain, mailbox, mailboxInvite, mailboxMember, shareToken, user } from "@cfmail/db/schema";
 import { grant, Perm } from "@cfmail/shared/permissions";
 import {
   createMailbox,
@@ -201,21 +201,37 @@ export function mailboxesRoutes() {
     const body = c.req.valid("json");
     await requirePerm(db, u.id, id, Perm.MANAGE);
 
+    let perms = 0;
+    if (body.read) perms = grant(perms, Perm.READ);
+    if (body.write) perms = grant(perms, Perm.WRITE);
+    if (body.manage) perms = grant(perms, Perm.MANAGE);
+
     let targetUserId = body.userId;
     if (!targetUserId && body.email) {
       const found = await db.query.user.findFirst({
         where: eq(user.email, body.email.toLowerCase()),
         columns: { id: true },
       });
-      if (!found) throw new HTTPException(404, { message: "user not found" });
+      if (!found) {
+        const inviteId = crypto.randomUUID();
+        await db
+          .insert(mailboxInvite)
+          .values({
+            id: inviteId,
+            mailboxId: id,
+            email: body.email.toLowerCase(),
+            perms,
+            invitedByUserId: u.id,
+          })
+          .onConflictDoUpdate({
+            target: [mailboxInvite.mailboxId, mailboxInvite.email],
+            set: { perms, invitedByUserId: u.id },
+          });
+        return c.json({ ok: true, invited: true, email: body.email.toLowerCase() }, 202);
+      }
       targetUserId = found.id;
     }
     if (!targetUserId) throw new HTTPException(400, { message: "userId or email required" });
-
-    let perms = 0;
-    if (body.read) perms = grant(perms, Perm.READ);
-    if (body.write) perms = grant(perms, Perm.WRITE);
-    if (body.manage) perms = grant(perms, Perm.MANAGE);
 
     await db
       .insert(mailboxMember)
@@ -225,6 +241,35 @@ export function mailboxesRoutes() {
         set: { perms },
       });
     return c.json({ ok: true, userId: targetUserId });
+  });
+
+  r.get("/:id/invites", async (c) => {
+    const db = dbFromCtx(c);
+    const u = c.get("user")!;
+    const id = c.req.param("id");
+    await requirePerm(db, u.id, id, Perm.MANAGE);
+    const rows = await db
+      .select({
+        id: mailboxInvite.id,
+        email: mailboxInvite.email,
+        perms: mailboxInvite.perms,
+        createdAt: mailboxInvite.createdAt,
+      })
+      .from(mailboxInvite)
+      .where(eq(mailboxInvite.mailboxId, id));
+    return c.json({ invites: rows });
+  });
+
+  r.delete("/:id/invites/:inviteId", async (c) => {
+    const db = dbFromCtx(c);
+    const u = c.get("user")!;
+    const id = c.req.param("id");
+    const inviteId = c.req.param("inviteId");
+    await requirePerm(db, u.id, id, Perm.MANAGE);
+    await db
+      .delete(mailboxInvite)
+      .where(and(eq(mailboxInvite.id, inviteId), eq(mailboxInvite.mailboxId, id)));
+    return c.body(null, 204);
   });
 
   r.delete("/:id/members/:userId", async (c) => {
