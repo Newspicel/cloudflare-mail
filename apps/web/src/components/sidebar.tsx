@@ -106,7 +106,7 @@ export function Sidebar() {
           to="/app/admin"
           className="flex items-center gap-2 rounded-full px-3 py-2 text-sm text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
         >
-          <Archive className="h-4 w-4" /> Admin
+          <Archive className="h-4 w-4" /> Admin & mailboxes
         </Link>
       </div>
     </aside>

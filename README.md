@@ -100,10 +100,12 @@ Key files to orient from:
 
 ## Quick start
 
+The goal: clone, deploy, open the URL, create the admin account in the browser. No `wrangler secret put`, no editing env vars in `wrangler.jsonc`. Per-domain config (which mailbox kinds, who can create what) is configured in the in-app admin panel.
+
 ### 1. Prerequisites
 
-- A Cloudflare account on the **Workers Paid** plan (Email Service requires it)
-- A domain on Cloudflare with **Email Routing** enabled
+- A Cloudflare account on the **Workers Paid** plan (Email Sending requires it)
+- A domain on Cloudflare with **Email Routing** enabled (per email-domain DNS still needs the standard MX + SPF/DKIM/DMARC records — the admin UI shows you what to paste)
 - Node 22+, pnpm 10+
 
 ### 2. Install
@@ -114,40 +116,41 @@ cd cloudflare-mail
 pnpm install
 ```
 
-### 3. Provision Cloudflare resources
+### 3. Provision and deploy
 
 ```bash
-# D1 database — copy the returned database_id into apps/worker/wrangler.jsonc
+# D1 database — copy the printed database_id into apps/worker/wrangler.jsonc
 pnpm --filter @cfmail/worker exec wrangler d1 create cfmail
 
-# R2 bucket
+# R2 bucket (name is referenced from wrangler.jsonc)
 pnpm --filter @cfmail/worker exec wrangler r2 bucket create cfmail-blobs
 
-# Apply schema (local dev)
-pnpm --filter @cfmail/db generate
-pnpm --filter @cfmail/db migrate:local
-```
-
-Then in the Cloudflare dashboard:
-
-- Enable **Email Routing** for your domain and point a catch-all (or specific address) to the deployed Worker.
-- Enable **Email Sending** and verify your from-domain.
-- Generate a Better Auth secret: `openssl rand -base64 32` and store it as a Worker secret (`wrangler secret put BETTER_AUTH_SECRET`).
-
-### 4. Run locally
-
-```bash
-pnpm dev          # starts Vite (:5173) and Wrangler (:8787), Vite proxies /api
-```
-
-### 5. Deploy
-
-```bash
-pnpm --filter @cfmail/db migrate         # production migration
+# Apply schema and ship
+pnpm --filter @cfmail/db migrate           # production D1
+pnpm --filter @cfmail/web build
 pnpm --filter @cfmail/worker deploy
 ```
 
-For the full deployment walk-through (DNS, Email Routing, Email Sending verification, secrets, smoke test) see [`docs/DEPLOY.md`](./docs/DEPLOY.md).
+That's the whole deploy. No secrets to set: the auth secret is lazy-generated on first request and stored in D1 (`system_config`). The app URL is derived from the request `Host` header, so whatever custom domain you bind to the Worker in the Cloudflare dashboard becomes your app URL automatically.
+
+### 4. First-run setup (in the browser)
+
+1. Bind a custom domain to the deployed Worker (Cloudflare dashboard → Workers → your worker → Custom Domains).
+2. Open that URL. The first visit shows a **Create administrator** form — this becomes the system admin.
+3. Sign in. From the admin panel:
+   - **Domains** tab → add the email domains you'll use, and tick which mailbox kinds each allows (`personal`, `group`, `service`, `temp`). The DNS-health badges and DNS records you need are shown inline.
+   - **Users** tab → invite teammates (email link) or create accounts directly. Per-user, per-domain mailbox-kind grants live here.
+   - Set the **Transactional email** from-address (must be on a verified Email Sending domain) so password reset and invite emails can go out.
+4. In Cloudflare: enable **Email Routing** per zone, route catch-all → this Worker, and verify the zone under **Email Sending**.
+
+### 5. Local dev
+
+```bash
+pnpm --filter @cfmail/db migrate:local
+pnpm dev          # Vite (:5173) + Wrangler (:8787), Vite proxies /api
+```
+
+For the long-form walk-through (DNS records, troubleshooting, recovery options) see [`docs/DEPLOY.md`](./docs/DEPLOY.md).
 
 ## Verification commands
 

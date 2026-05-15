@@ -31,7 +31,11 @@ Do not paste stack details into this file or any other doc. If `package.json` sa
    - `att/<messageId>/<idx>-<sanitized-filename>` — extracted attachments
    - `draft/<userId>/<uuid>-<sanitized-filename>` — user uploads pending send
 6. **Realtime uses SSE.** Per-user `UserHub` Durable Object fans out. Don't add WebSockets or polling alongside it.
-7. **Secrets stay out of the repo.** No `.env`, no real tokens in `wrangler.jsonc`, no `BETTER_AUTH_SECRET` in code. Development secrets go in `.dev.vars`, production via `wrangler secret put`.
+7. **Zero-config init.** `wrangler.jsonc` must not contain env-specific values (no `APP_URL`, no `TEMP_DOMAIN`, no secrets). The base URL is derived from the incoming request, the auth secret is lazy-generated and stored in `system_config` (see `apps/worker/src/config.ts`), and per-domain config lives in the `domain` table. A fresh deploy should require no manual secret setup.
+8. **Admin-controlled signup.** Public sign-up is disabled (`disableSignUp: true` in Better Auth). First-run goes through `/api/bootstrap`; subsequent accounts are created via admin endpoints in `apps/worker/src/api/users.ts` or invite-token redemption. Don't reintroduce an open `/api/auth/sign-up/email` path.
+9. **Admin password reset is intentionally not self-service.** `sendResetPassword` in `auth.ts` no-ops for users with `role === "admin"`. Recovery is via 2FA backup codes or a CLI `wrangler d1 execute` reset. Don't add a UI flow that bypasses this.
+10. **Mailbox creation goes through `mailbox-access.ts#authorizeMailboxCreate`.** That helper checks both `domain.allowedKinds` (does the domain permit this kind?) and `domain_grant` (is this user permitted?). Admins bypass the grant check. Don't duplicate this logic in route handlers.
+11. **Secrets stay out of the repo.** No `.env`, no real tokens in `wrangler.jsonc`. Development is `.dev.vars` (gitignored, but no longer required for `BETTER_AUTH_SECRET` since it's DB-stored).
 
 ## Tooling rules
 

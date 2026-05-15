@@ -13,6 +13,7 @@ import { HTTPException } from "hono/http-exception";
 import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
 import { collectMailboxBlobKeys, deleteBlobs } from "../mail/blobs.ts";
+import { authorizeMailboxCreate } from "../mailbox-access.ts";
 import { requireUser } from "../middleware.ts";
 import { requirePerm } from "../permissions.ts";
 
@@ -81,11 +82,7 @@ export function mailboxesRoutes() {
     const u = c.get("user")!;
     const body = c.req.valid("json");
 
-    const dom = await db.query.domain.findFirst({
-      where: eq(domain.id, body.domainId),
-      columns: { id: true },
-    });
-    if (!dom) throw new HTTPException(400, { message: "domain not found" });
+    await authorizeMailboxCreate(db, u, body.domainId, body.type);
 
     const id = crypto.randomUUID();
     const expiresAt = body.ttlSeconds ? new Date(Date.now() + body.ttlSeconds * 1000) : null;
@@ -300,9 +297,8 @@ export function mailboxesRoutes() {
       perms: Perm.READ,
       expiresAt,
     });
-    const url = c.env.APP_URL
-      ? `${c.env.APP_URL.replace(/\/$/, "")}/t/${tokenId}`
-      : `/t/${tokenId}`;
+    const baseUrl = c.get("baseUrl");
+    const url = baseUrl ? `${baseUrl.replace(/\/$/, "")}/t/${tokenId}` : `/t/${tokenId}`;
     return c.json({ id: tokenId, url, expiresAt: expiresAt.toISOString() }, 201);
   });
 

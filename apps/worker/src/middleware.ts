@@ -2,12 +2,12 @@ import { mailboxInvite, mailboxMember } from "@cfmail/db/schema";
 import { eq } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { createAuth } from "./auth.ts";
+import { authFromCtx } from "./auth-ctx.ts";
 import { dbFromCtx } from "./db.ts";
 import type { AppBindings } from "./env.ts";
 
 export const sessionMiddleware: MiddlewareHandler<AppBindings> = async (c, next) => {
-  const auth = createAuth(c.env);
+  const auth = await authFromCtx(c);
   const sess = await auth.api.getSession({ headers: c.req.raw.headers });
   c.set("user", sess?.user ?? null);
   c.set("sessionId", sess?.session?.id ?? null);
@@ -43,5 +43,14 @@ export const sessionMiddleware: MiddlewareHandler<AppBindings> = async (c, next)
 
 export const requireUser: MiddlewareHandler<AppBindings> = async (c, next) => {
   if (!c.get("user")) throw new HTTPException(401, { message: "unauthenticated" });
+  return next();
+};
+
+export const requireAdmin: MiddlewareHandler<AppBindings> = async (c, next) => {
+  const u = c.get("user");
+  if (!u) throw new HTTPException(401, { message: "unauthenticated" });
+  if ((u as { role?: string }).role !== "admin") {
+    throw new HTTPException(403, { message: "admin only" });
+  }
   return next();
 };

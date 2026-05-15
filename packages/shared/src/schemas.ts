@@ -29,13 +29,54 @@ export const addressObject = z.object({
 });
 export type AddressObject = z.infer<typeof addressObject>;
 
+const allowedKinds = z.number().int().min(0).max(15); // 4 bits
+
 export const createDomain = z.object({
   name: domainName,
   kind: DomainKind,
+  allowedKinds: allowedKinds.default(0),
 });
 
 export const updateDomain = z.object({
-  isTempDomain: z.boolean().optional(),
+  allowedKinds: allowedKinds.optional(),
+});
+
+export const upsertDomainGrant = z.object({
+  userId: z.string().min(1),
+  allowedKinds,
+});
+
+export const createUserInvite = z.object({
+  email: emailAddress,
+  role: z.enum(["admin", "user"]).default("user"),
+});
+
+export const adminCreateUser = z.object({
+  email: emailAddress,
+  name: z.string().min(1).max(200),
+  password: z.string().min(8).max(200),
+  role: z.enum(["admin", "user"]).default("user"),
+});
+
+export const adminUpdateUser = z.object({
+  role: z.enum(["admin", "user"]).optional(),
+  banned: z.boolean().optional(),
+});
+
+export const acceptInvite = z.object({
+  token: z.string().min(8),
+  name: z.string().min(1).max(200),
+  password: z.string().min(8).max(200),
+});
+
+export const bootstrapAdmin = z.object({
+  email: emailAddress,
+  name: z.string().min(1).max(200),
+  password: z.string().min(8).max(200),
+});
+
+export const setAuthFromAddress = z.object({
+  address: emailAddress,
 });
 
 export const updateThread = z.object({

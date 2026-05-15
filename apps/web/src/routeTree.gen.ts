@@ -9,7 +9,11 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from "./routes/__root"
+import { Route as TwoFactorRouteImport } from "./routes/two-factor"
+import { Route as ResetPasswordRouteImport } from "./routes/reset-password"
 import { Route as LoginRouteImport } from "./routes/login"
+import { Route as ForgotPasswordRouteImport } from "./routes/forgot-password"
+import { Route as AcceptInviteRouteImport } from "./routes/accept-invite"
 import { Route as AppRouteRouteImport } from "./routes/app/route"
 import { Route as IndexRouteImport } from "./routes/index"
 import { Route as AppIndexRouteImport } from "./routes/app/index"
@@ -20,9 +24,29 @@ import { Route as AppMMailboxIdRouteImport } from "./routes/app/m/$mailboxId"
 import { Route as AppMMailboxIdIndexRouteImport } from "./routes/app/m/$mailboxId.index"
 import { Route as AppMMailboxIdTThreadIdRouteImport } from "./routes/app/m/$mailboxId.t.$threadId"
 
+const TwoFactorRoute = TwoFactorRouteImport.update({
+  id: "/two-factor",
+  path: "/two-factor",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: "/reset-password",
+  path: "/reset-password",
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LoginRoute = LoginRouteImport.update({
   id: "/login",
   path: "/login",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
+  id: "/forgot-password",
+  path: "/forgot-password",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AcceptInviteRoute = AcceptInviteRouteImport.update({
+  id: "/accept-invite",
+  path: "/accept-invite",
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppRouteRoute = AppRouteRouteImport.update({
@@ -74,7 +98,11 @@ const AppMMailboxIdTThreadIdRoute = AppMMailboxIdTThreadIdRouteImport.update({
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
   "/app": typeof AppRouteRouteWithChildren
+  "/accept-invite": typeof AcceptInviteRoute
+  "/forgot-password": typeof ForgotPasswordRoute
   "/login": typeof LoginRoute
+  "/reset-password": typeof ResetPasswordRoute
+  "/two-factor": typeof TwoFactorRoute
   "/app/admin": typeof AppAdminRoute
   "/app/settings": typeof AppSettingsRoute
   "/t/$token": typeof TTokenRoute
@@ -85,7 +113,11 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute
+  "/accept-invite": typeof AcceptInviteRoute
+  "/forgot-password": typeof ForgotPasswordRoute
   "/login": typeof LoginRoute
+  "/reset-password": typeof ResetPasswordRoute
+  "/two-factor": typeof TwoFactorRoute
   "/app/admin": typeof AppAdminRoute
   "/app/settings": typeof AppSettingsRoute
   "/t/$token": typeof TTokenRoute
@@ -97,7 +129,11 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   "/": typeof IndexRoute
   "/app": typeof AppRouteRouteWithChildren
+  "/accept-invite": typeof AcceptInviteRoute
+  "/forgot-password": typeof ForgotPasswordRoute
   "/login": typeof LoginRoute
+  "/reset-password": typeof ResetPasswordRoute
+  "/two-factor": typeof TwoFactorRoute
   "/app/admin": typeof AppAdminRoute
   "/app/settings": typeof AppSettingsRoute
   "/t/$token": typeof TTokenRoute
@@ -111,7 +147,11 @@ export interface FileRouteTypes {
   fullPaths:
     | "/"
     | "/app"
+    | "/accept-invite"
+    | "/forgot-password"
     | "/login"
+    | "/reset-password"
+    | "/two-factor"
     | "/app/admin"
     | "/app/settings"
     | "/t/$token"
@@ -122,7 +162,11 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | "/"
+    | "/accept-invite"
+    | "/forgot-password"
     | "/login"
+    | "/reset-password"
+    | "/two-factor"
     | "/app/admin"
     | "/app/settings"
     | "/t/$token"
@@ -133,7 +177,11 @@ export interface FileRouteTypes {
     | "__root__"
     | "/"
     | "/app"
+    | "/accept-invite"
+    | "/forgot-password"
     | "/login"
+    | "/reset-password"
+    | "/two-factor"
     | "/app/admin"
     | "/app/settings"
     | "/t/$token"
@@ -146,17 +194,49 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AppRouteRoute: typeof AppRouteRouteWithChildren
+  AcceptInviteRoute: typeof AcceptInviteRoute
+  ForgotPasswordRoute: typeof ForgotPasswordRoute
   LoginRoute: typeof LoginRoute
+  ResetPasswordRoute: typeof ResetPasswordRoute
+  TwoFactorRoute: typeof TwoFactorRoute
   TTokenRoute: typeof TTokenRoute
 }
 
 declare module "@tanstack/react-router" {
   interface FileRoutesByPath {
+    "/two-factor": {
+      id: "/two-factor"
+      path: "/two-factor"
+      fullPath: "/two-factor"
+      preLoaderRoute: typeof TwoFactorRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/reset-password": {
+      id: "/reset-password"
+      path: "/reset-password"
+      fullPath: "/reset-password"
+      preLoaderRoute: typeof ResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     "/login": {
       id: "/login"
       path: "/login"
       fullPath: "/login"
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/forgot-password": {
+      id: "/forgot-password"
+      path: "/forgot-password"
+      fullPath: "/forgot-password"
+      preLoaderRoute: typeof ForgotPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/accept-invite": {
+      id: "/accept-invite"
+      path: "/accept-invite"
+      fullPath: "/accept-invite"
+      preLoaderRoute: typeof AcceptInviteRouteImport
       parentRoute: typeof rootRouteImport
     }
     "/app": {
@@ -260,7 +340,11 @@ const AppRouteRouteWithChildren = AppRouteRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AppRouteRoute: AppRouteRouteWithChildren,
+  AcceptInviteRoute: AcceptInviteRoute,
+  ForgotPasswordRoute: ForgotPasswordRoute,
   LoginRoute: LoginRoute,
+  ResetPasswordRoute: ResetPasswordRoute,
+  TwoFactorRoute: TwoFactorRoute,
   TTokenRoute: TTokenRoute,
 }
 export const routeTree = rootRouteImport

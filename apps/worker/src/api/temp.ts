@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
+import { authorizeMailboxCreate } from "../mailbox-access.ts";
 import { requireUser } from "../middleware.ts";
 
 export function tempRoutes() {
@@ -14,15 +15,16 @@ export function tempRoutes() {
 
   r.post("/", zValidator("json", createTempMailbox), async (c) => {
     const db = dbFromCtx(c);
-    const user = c.get("user")!;
+    const u = c.get("user")!;
     const body = c.req.valid("json");
+
+    await authorizeMailboxCreate(db, u, body.domainId, "temp");
 
     const dom = await db.query.domain.findFirst({
       where: eq(domain.id, body.domainId),
-      columns: { id: true, name: true, isTempDomain: true },
+      columns: { id: true, name: true },
     });
     if (!dom) throw new HTTPException(400, { message: "domain not found" });
-    if (!dom.isTempDomain) throw new HTTPException(400, { message: "domain not marked for temp" });
 
     const localPart = crypto.randomUUID().replace(/-/g, "").slice(0, 10);
     const id = crypto.randomUUID();
@@ -34,7 +36,7 @@ export function tempRoutes() {
       localPart,
       displayName: body.displayName ?? null,
       type: "temp",
-      ownerUserId: user.id,
+      ownerUserId: u.id,
       expiresAt,
     });
 
