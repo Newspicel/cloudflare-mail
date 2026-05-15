@@ -27,6 +27,58 @@ A self-hostable, Gmail-style mail client that runs entirely on Cloudflare — on
 | Frontend      | React 19, Vite, Tailwind v4, shadcn/ui, TanStack Router + Query    |
 | Tooling       | pnpm · Turborepo · Biome v2 · oxlint · tsgo (TypeScript 7)         |
 
+## Architecture
+
+One Worker owns every code path. There is no separate API service, no message queue worker, no static-asset host — just `apps/worker` with the bindings declared in `apps/worker/wrangler.jsonc`.
+
+```mermaid
+flowchart LR
+  Browser["Browser SPA<br/>(apps/web)"]
+  Inbound["Cloudflare<br/>Email Routing"]
+  Cron["Cloudflare<br/>Cron Trigger"]
+  Sender["Outbound recipient<br/>(env.EMAIL.send)"]
+
+  subgraph Worker["apps/worker (single Worker)"]
+    direction TB
+    Fetch["fetch()<br/>Hono API + SPA assets"]
+    Email["email()<br/>inbound handler"]
+    Scheduled["scheduled()<br/>temp-mailbox GC"]
+    Hub["UserHub<br/>(Durable Object, SSE fan-out)"]
+  end
+
+  D1[("D1<br/>metadata")]
+  R2[("R2<br/>raw MIME + attachments")]
+  Assets[("ASSETS<br/>Vite build")]
+
+  Browser -- "/api/* (fetch + SSE)" --> Fetch
+  Browser -- "/ (static)" --> Assets
+  Assets --> Fetch
+  Inbound --> Email
+  Cron --> Scheduled
+  Fetch --> D1
+  Fetch --> R2
+  Fetch --> Hub
+  Email --> D1
+  Email --> R2
+  Email --> Hub
+  Scheduled --> D1
+  Scheduled --> R2
+  Fetch -- "compose / reply" --> Sender
+  Hub -- "SSE events" --> Browser
+```
+
+Bindings the Worker depends on (see `wrangler.jsonc`):
+
+| Binding     | Type            | Purpose                                                          |
+| ----------- | --------------- | ---------------------------------------------------------------- |
+| `DB`        | D1              | Mailboxes, threads, messages, RBAC, FTS5 search                  |
+| `BLOBS`     | R2              | Raw inbound `.eml`, archived sent copies, attachments, drafts    |
+| `EMAIL`     | Send Email      | Outbound `env.EMAIL.send()` via Cloudflare Email Sending         |
+| `USER_HUB`  | Durable Object  | Per-user SSE fan-out (`message_*`, `mailbox_*` events)           |
+| `ASSETS`    | Static Assets   | Vite-built SPA, SPA fallback, `/api/*` routed to Worker first    |
+| Cron        | `*/1 * * * *`   | `scheduled()` deletes expired temp mailboxes + their R2 keys     |
+| Email route | Email Routing   | `email()` parses inbound, stores in R2/D1, broadcasts via DO     |
+
 ## Structure
 
 ```
@@ -95,6 +147,8 @@ pnpm --filter @cfmail/db migrate         # production migration
 pnpm --filter @cfmail/worker deploy
 ```
 
+For the full deployment walk-through (DNS, Email Routing, Email Sending verification, secrets, smoke test) see [`docs/DEPLOY.md`](./docs/DEPLOY.md).
+
 ## Verification commands
 
 ```bash
@@ -105,10 +159,10 @@ pnpm build        # Vite + Wrangler dry-run
 
 ## Contributing
 
-Issues and PRs welcome. Please:
+Issues and PRs welcome — see [`CONTRIBUTING.md`](./CONTRIBUTING.md) for branching, required checks, and how to run locally against a real Cloudflare account. TL;DR:
 
 - Keep the toolchain (tsgo / Biome / oxlint / pnpm / Turborepo) — don't swap pieces without discussion.
-- Run `pnpm typecheck && pnpm lint && pnpm build` before opening a PR.
+- Run `pnpm typecheck && pnpm lint && pnpm build && pnpm test` before opening a PR.
 - If you use Claude Code or similar AI tooling, read `CLAUDE.md` first — it captures the invariants that make the project safe to change.
 
 ## License

@@ -42,17 +42,18 @@ export async function sendFromMailbox(
   const text = appendSignatureText(input.text, signature);
   const html = appendSignatureHtml(input.html, signature);
 
-  const attachmentBytes: { filename: string; contentType: string; data: Uint8Array }[] = [];
-  for (const att of input.attachments ?? []) {
-    const obj = await env.BLOBS.get(att.r2Key);
-    if (!obj) throw new HTTPException(400, { message: `attachment missing: ${att.r2Key}` });
-    const buf = await obj.arrayBuffer();
-    attachmentBytes.push({
-      filename: att.filename,
-      contentType: att.contentType,
-      data: new Uint8Array(buf),
-    });
-  }
+  const attachmentBytes = await Promise.all(
+    (input.attachments ?? []).map(async (att) => {
+      const obj = await env.BLOBS.get(att.r2Key);
+      if (!obj) throw new HTTPException(400, { message: `attachment missing: ${att.r2Key}` });
+      const buf = await obj.arrayBuffer();
+      return {
+        filename: att.filename,
+        contentType: att.contentType,
+        data: new Uint8Array(buf),
+      };
+    }),
+  );
 
   const messageIdHdr = `<${crypto.randomUUID()}@${dom.name}>`;
   const threading: ThreadingHeaders = { messageId: messageIdHdr };
@@ -109,44 +110,41 @@ export async function sendFromMailbox(
   });
 
   const rawKey = `raw/${mb.id}/sent/${messageId}.eml`;
-  await env.BLOBS.put(rawKey, raw, { httpMetadata: { contentType: "message/rfc822" } });
 
-  await db.insert(message).values({
-    id: messageId,
-    mailboxId: mb.id,
-    threadId,
-    direction: "out",
-    messageIdHdr,
-    inReplyTo: input.inReplyTo ?? null,
-    references: input.references ?? null,
-    fromName: fromName ?? null,
-    fromAddr,
-    toAddrs: input.to,
-    ccAddrs: input.cc ?? null,
-    bccAddrs: input.bcc ?? null,
-    subject: input.subject,
-    snippet: snippet(text ?? stripHtml(html ?? "")),
-    flags: Flag.SENT | Flag.SEEN,
-    receivedAt: null,
-    sentAt,
-    rawR2Key: rawKey,
-    sizeBytes: new TextEncoder().encode(raw).byteLength,
-  });
+  await Promise.all([
+    env.BLOBS.put(rawKey, raw, { httpMetadata: { contentType: "message/rfc822" } }),
+    db.insert(message).values({
+      id: messageId,
+      mailboxId: mb.id,
+      threadId,
+      direction: "out",
+      messageIdHdr,
+      inReplyTo: input.inReplyTo ?? null,
+      references: input.references ?? null,
+      fromName: fromName ?? null,
+      fromAddr,
+      toAddrs: input.to,
+      ccAddrs: input.cc ?? null,
+      bccAddrs: input.bcc ?? null,
+      subject: input.subject,
+      snippet: snippet(text ?? stripHtml(html ?? "")),
+      flags: Flag.SENT | Flag.SEEN,
+      receivedAt: null,
+      sentAt,
+      rawR2Key: rawKey,
+      sizeBytes: new TextEncoder().encode(raw).byteLength,
+    }),
+  ]);
 
-  await bumpThread(
-    db,
-    threadId,
-    sentAt,
-    [{ name: fromName, address: fromAddr }, ...allRecipients],
-    0,
-  );
-
-  await broadcastToUsers(env, [userId], {
-    type: "message_sent",
-    mailboxId: mb.id,
-    messageId,
-    threadId,
-  });
+  await Promise.all([
+    bumpThread(db, threadId, sentAt, [{ name: fromName, address: fromAddr }, ...allRecipients], 0),
+    broadcastToUsers(env, [userId], {
+      type: "message_sent",
+      mailboxId: mb.id,
+      messageId,
+      threadId,
+    }),
+  ]);
 
   return { messageId, threadId };
 }
