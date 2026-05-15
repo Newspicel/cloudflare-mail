@@ -4,7 +4,10 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { Toaster } from "sonner";
 import "./styles/globals.css";
+import { initTheme } from "./lib/theme.ts";
 import { routeTree } from "./routeTree.gen.ts";
+
+initTheme();
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, refetchOnWindowFocus: false } },

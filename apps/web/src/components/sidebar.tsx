@@ -5,6 +5,7 @@ import { Archive, Inbox, Lock, Mailbox, PenSquare, ShieldCheck, Timer, Users } f
 import type { ReactNode } from "react";
 import { cn } from "@/lib/cn.ts";
 import { type MailboxSummary, mailboxesQuery } from "@/lib/queries.ts";
+import { formatRemaining, useNow } from "@/lib/time.ts";
 import { openCompose } from "./compose-dock.tsx";
 import { NewTempMailbox } from "./new-temp-mailbox.tsx";
 
@@ -21,6 +22,8 @@ const GROUP_META: Record<
 export function Sidebar() {
   const { data } = useQuery(mailboxesQuery);
   const mailboxes = data?.mailboxes ?? [];
+  // Tick once a minute so TTL labels refresh.
+  useNow(60_000);
 
   const grouped: Record<MailboxSummary["type"], MailboxSummary[]> = {
     personal: [],
@@ -79,11 +82,7 @@ export function Sidebar() {
                               <Lock className="h-3.5 w-3.5 text-muted-foreground" />
                             </span>
                           )}
-                          {m.expiresAt && (
-                            <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                              TTL
-                            </span>
-                          )}
+                          {m.expiresAt && <TtlBadge expiresAt={m.expiresAt} />}
                         </span>
                       </Link>
                     </li>
@@ -111,5 +110,22 @@ export function Sidebar() {
         </Link>
       </div>
     </aside>
+  );
+}
+
+function TtlBadge({ expiresAt }: { expiresAt: string }) {
+  const remaining = formatRemaining(expiresAt);
+  if (!remaining) return null;
+  const expired = remaining === "expired";
+  return (
+    <span
+      title={`Expires ${new Date(expiresAt).toLocaleString()}`}
+      className={cn(
+        "rounded-full px-1.5 py-0.5 text-[10px]",
+        expired ? "bg-destructive/15 text-destructive" : "bg-muted text-muted-foreground",
+      )}
+    >
+      {remaining}
+    </span>
   );
 }

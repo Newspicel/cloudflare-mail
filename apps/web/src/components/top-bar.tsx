@@ -1,10 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { LogOut, Search, Settings } from "lucide-react";
+import { LogOut, Monitor, Moon, Search, Settings, Sun } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { authClient } from "@/lib/auth-client.ts";
 import { cn } from "@/lib/cn.ts";
 import { meQuery, type SearchResult, searchQuery } from "@/lib/queries.ts";
+import { type Theme, useTheme } from "@/lib/theme.ts";
 
 const SEARCH_DEBOUNCE_MS = 200;
 const MIN_SEARCH_CHARS = 2;
@@ -31,6 +32,8 @@ export function TopBar() {
 
       <SearchBox />
 
+      <ThemeToggle />
+
       <button
         type="button"
         className="rounded-full p-2 text-muted-foreground hover:bg-muted"
@@ -54,6 +57,26 @@ export function TopBar() {
         {initial}
       </div>
     </header>
+  );
+}
+
+function ThemeToggle() {
+  const { theme, setTheme } = useTheme();
+  const order: Theme[] = ["system", "light", "dark"];
+  const next = order[(order.indexOf(theme) + 1) % order.length] ?? "system";
+  const label =
+    theme === "system" ? "System theme" : theme === "dark" ? "Dark theme" : "Light theme";
+  const Icon = theme === "dark" ? Moon : theme === "light" ? Sun : Monitor;
+  return (
+    <button
+      type="button"
+      className="rounded-full p-2 text-muted-foreground hover:bg-muted"
+      onClick={() => setTheme(next)}
+      aria-label={label}
+      title={label}
+    >
+      <Icon className="h-4 w-4" />
+    </button>
   );
 }
 

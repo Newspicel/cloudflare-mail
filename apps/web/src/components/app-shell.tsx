@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { AppShortcuts } from "./app-shortcuts.tsx";
 import { ComposeDock } from "./compose-dock.tsx";
 import { Sidebar } from "./sidebar.tsx";
 import { TopBar } from "./top-bar.tsx";
@@ -12,6 +13,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <main className="min-w-0 flex-1 overflow-hidden bg-muted/20">{children}</main>
       </div>
       <ComposeDock />
+      <AppShortcuts />
     </div>
   );
 }
