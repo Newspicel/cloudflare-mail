@@ -7,64 +7,84 @@
     "Inter var", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
     Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, "Cascadia Mono", monospace;
-  --radius: 0.625rem;
+  --radius: 0.375rem;
 
-  --color-background: oklch(0.99 0 0);
-  --color-foreground: oklch(0.18 0.02 260);
-  --color-muted: oklch(0.96 0.008 260);
-  --color-muted-foreground: oklch(0.48 0.01 260);
-  --color-border: oklch(0.92 0.01 260);
-  --color-input: oklch(0.93 0.01 260);
-  --color-ring: oklch(0.7 0.15 35);
+  /* Cloudflare dashboard light palette: near-zero-chroma cool grays + signature orange. */
+  --color-background: oklch(0.985 0 0);
+  --color-foreground: oklch(0.18 0 0);
+  --color-muted: oklch(0.965 0 0);
+  --color-muted-foreground: oklch(0.45 0 0);
+  --color-border: oklch(0.905 0 0);
+  --color-input: oklch(0.92 0 0);
+  --color-ring: oklch(0.72 0.16 50);
   --color-card: oklch(1 0 0);
-  --color-card-foreground: oklch(0.18 0.02 260);
+  --color-card-foreground: oklch(0.18 0 0);
   --color-popover: oklch(1 0 0);
-  --color-popover-foreground: oklch(0.18 0.02 260);
-  --color-primary: oklch(0.68 0.18 35);
-  --color-primary-foreground: oklch(0.99 0 0);
-  --color-secondary: oklch(0.96 0.008 260);
-  --color-secondary-foreground: oklch(0.22 0.02 260);
-  --color-accent: oklch(0.95 0.03 35);
-  --color-accent-foreground: oklch(0.22 0.02 260);
-  --color-destructive: oklch(0.6 0.22 27);
-  --color-destructive-foreground: oklch(0.99 0 0);
-  --color-sidebar: oklch(0.985 0.004 260);
-  --color-sidebar-foreground: oklch(0.22 0.02 260);
-  --color-sidebar-accent: oklch(0.94 0.02 35);
-  --color-sidebar-accent-foreground: oklch(0.22 0.02 260);
+  --color-popover-foreground: oklch(0.18 0 0);
+  --color-primary: oklch(0.7 0.18 50);
+  --color-primary-foreground: oklch(1 0 0);
+  --color-secondary: oklch(0.965 0 0);
+  --color-secondary-foreground: oklch(0.22 0 0);
+  --color-accent: oklch(0.95 0 0);
+  --color-accent-foreground: oklch(0.18 0 0);
+  --color-destructive: oklch(0.58 0.22 27);
+  --color-destructive-foreground: oklch(1 0 0);
+  --color-success: oklch(0.62 0.16 150);
+  --color-success-foreground: oklch(1 0 0);
+  --color-warning: oklch(0.78 0.15 80);
+  --color-sidebar: oklch(0.975 0 0);
+  --color-sidebar-foreground: oklch(0.22 0 0);
+  --color-sidebar-border: oklch(0.9 0 0);
+  --color-sidebar-accent: oklch(0.93 0 0);
+  --color-sidebar-accent-foreground: oklch(0.18 0 0);
 }
 
 .dark {
-  --color-background: oklch(0.14 0.02 260);
-  --color-foreground: oklch(0.97 0 0);
-  --color-muted: oklch(0.2 0.02 260);
-  --color-muted-foreground: oklch(0.68 0.02 260);
-  --color-border: oklch(0.26 0.02 260);
-  --color-input: oklch(0.24 0.02 260);
-  --color-ring: oklch(0.75 0.15 35);
-  --color-card: oklch(0.17 0.02 260);
-  --color-card-foreground: oklch(0.97 0 0);
-  --color-popover: oklch(0.17 0.02 260);
-  --color-popover-foreground: oklch(0.97 0 0);
-  --color-primary: oklch(0.74 0.18 35);
-  --color-primary-foreground: oklch(0.14 0.02 260);
-  --color-secondary: oklch(0.22 0.02 260);
-  --color-secondary-foreground: oklch(0.97 0 0);
-  --color-accent: oklch(0.28 0.05 35);
-  --color-accent-foreground: oklch(0.97 0 0);
-  --color-destructive: oklch(0.68 0.21 27);
-  --color-destructive-foreground: oklch(0.14 0.02 260);
-  --color-sidebar: oklch(0.16 0.02 260);
-  --color-sidebar-foreground: oklch(0.95 0 0);
-  --color-sidebar-accent: oklch(0.26 0.04 35);
-  --color-sidebar-accent-foreground: oklch(0.97 0 0);
+  --color-background: oklch(0.16 0 0);
+  --color-foreground: oklch(0.96 0 0);
+  --color-muted: oklch(0.22 0 0);
+  --color-muted-foreground: oklch(0.66 0 0);
+  --color-border: oklch(0.28 0 0);
+  --color-input: oklch(0.26 0 0);
+  --color-ring: oklch(0.74 0.16 50);
+  --color-card: oklch(0.2 0 0);
+  --color-card-foreground: oklch(0.96 0 0);
+  --color-popover: oklch(0.2 0 0);
+  --color-popover-foreground: oklch(0.96 0 0);
+  --color-primary: oklch(0.74 0.18 50);
+  --color-primary-foreground: oklch(0.16 0 0);
+  --color-secondary: oklch(0.24 0 0);
+  --color-secondary-foreground: oklch(0.96 0 0);
+  --color-accent: oklch(0.26 0 0);
+  --color-accent-foreground: oklch(0.96 0 0);
+  --color-destructive: oklch(0.66 0.22 27);
+  --color-destructive-foreground: oklch(0.96 0 0);
+  --color-success: oklch(0.7 0.16 150);
+  --color-success-foreground: oklch(0.16 0 0);
+  --color-warning: oklch(0.78 0.15 80);
+  --color-sidebar: oklch(0.18 0 0);
+  --color-sidebar-foreground: oklch(0.94 0 0);
+  --color-sidebar-border: oklch(0.26 0 0);
+  --color-sidebar-accent: oklch(0.27 0 0);
+  --color-sidebar-accent-foreground: oklch(0.96 0 0);
 }
 
 @layer base {
   * {
     border-color: var(--color-border);
   }
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
   body {
     font-feature-settings: "cv11", "ss01", "ss03";
+    letter-spacing: -0.005em;
+  }
+  /* Inputs adopt a consistent muted background so forms read like Cloudflare's dashboard. */
+  input,
+  textarea,
+  select {
+    font-feature-settings: normal;
   }
 }

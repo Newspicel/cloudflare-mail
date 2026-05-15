@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api.ts";
 import { authClient } from "@/lib/auth-client.ts";
+import { cn } from "@/lib/cn.ts";
 import { type MailboxSummary, mailboxesQuery, meQuery } from "@/lib/queries.ts";
 
 export const Route = createFileRoute("/app/settings")({
@@ -19,34 +20,46 @@ function SettingsPage() {
   );
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6 p-10">
-      <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
-
-      <section className="rounded-xl border bg-card p-6">
-        <h2 className="mb-2 text-lg font-medium">Profile</h2>
-        <dl className="grid grid-cols-[120px_1fr] gap-y-2 text-sm">
-          <dt className="text-muted-foreground">Name</dt>
-          <dd>{me.data?.user?.name}</dd>
-          <dt className="text-muted-foreground">Email</dt>
-          <dd>{me.data?.user?.email}</dd>
-          <dt className="text-muted-foreground">Role</dt>
-          <dd>{me.data?.user?.role ?? "—"}</dd>
-        </dl>
-      </section>
-
-      <TwoFactorSection enabled={!!me.data?.user?.twoFactorEnabled} />
-
-      <section className="space-y-4">
-        <h2 className="text-lg font-medium">Mailboxes</h2>
-        {editable.length === 0 && (
-          <p className="rounded-xl border bg-card p-6 text-sm text-muted-foreground">
-            No editable mailboxes yet.
+    <div className="h-full overflow-y-auto">
+      <div className="mx-auto max-w-3xl space-y-6 px-8 py-8">
+        <header>
+          <h1 className="text-[22px] font-semibold tracking-tight">Settings</h1>
+          <p className="mt-1 text-[13px] text-muted-foreground">
+            Profile, security, and per-mailbox preferences.
           </p>
-        )}
-        {editable.map((m) => (
-          <MailboxSettingsForm key={m.id} mailbox={m} />
-        ))}
-      </section>
+        </header>
+
+        <Section title="Profile">
+          <dl className="grid grid-cols-[120px_1fr] gap-y-2 text-[13px]">
+            <dt className="text-muted-foreground">Name</dt>
+            <dd className="font-medium">{me.data?.user?.name}</dd>
+            <dt className="text-muted-foreground">Email</dt>
+            <dd>{me.data?.user?.email}</dd>
+            <dt className="text-muted-foreground">Role</dt>
+            <dd>
+              <span className="inline-flex items-center rounded border bg-muted px-1.5 py-0 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                {me.data?.user?.role ?? "—"}
+              </span>
+            </dd>
+          </dl>
+        </Section>
+
+        <TwoFactorSection enabled={!!me.data?.user?.twoFactorEnabled} />
+
+        <div>
+          <h2 className="mb-3 text-[14px] font-semibold tracking-tight">Mailboxes</h2>
+          {editable.length === 0 && (
+            <div className="rounded-md border bg-card px-5 py-4 text-[13px] text-muted-foreground">
+              No editable mailboxes yet.
+            </div>
+          )}
+          <div className="space-y-4">
+            {editable.map((m) => (
+              <MailboxSettingsForm key={m.id} mailbox={m} />
+            ))}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -57,6 +70,50 @@ interface MailboxSettings {
   displayName: string | null;
   signature: string | null;
   replyTo: string | null;
+}
+
+function Section({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-md border bg-card">
+      <header className="border-b px-5 py-3">
+        <h2 className="text-[14px] font-semibold tracking-tight">{title}</h2>
+        {description && <p className="mt-0.5 text-[12px] text-muted-foreground">{description}</p>}
+      </header>
+      <div className="px-5 py-4">{children}</div>
+    </section>
+  );
+}
+
+function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <input
+      {...props}
+      className={cn(
+        "rounded-md border bg-background px-2.5 py-1.5 text-[13px] outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/20",
+        props.className,
+      )}
+    />
+  );
+}
+
+function PrimaryBtn(props: React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  return (
+    <button
+      {...props}
+      className={cn(
+        "rounded-md bg-primary px-3 py-1.5 text-[13px] font-medium text-primary-foreground transition hover:brightness-105 disabled:opacity-50",
+        props.className,
+      )}
+    />
+  );
 }
 
 function TwoFactorSection({ enabled }: { enabled: boolean }) {
@@ -110,46 +167,45 @@ function TwoFactorSection({ enabled }: { enabled: boolean }) {
   });
 
   return (
-    <section className="rounded-xl border bg-card p-6">
-      <h2 className="mb-2 text-lg font-medium">Two-factor authentication</h2>
-      <p className="mb-3 text-xs text-muted-foreground">
-        {enabled
+    <Section
+      title="Two-factor authentication"
+      description={
+        enabled
           ? "TOTP is currently enabled on your account."
-          : "Protect your sign-in with a TOTP authenticator app. Backup codes will be shown once."}
-      </p>
-
+          : "Protect your sign-in with a TOTP authenticator app. Backup codes will be shown once."
+      }
+    >
       {!enabled && !totpUri && (
         <div className="flex gap-2">
-          <input
+          <Input
             type="password"
             placeholder="Current password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="flex-1 rounded-md border bg-background px-3 py-2 text-sm outline-none focus:border-ring"
+            className="flex-1"
           />
-          <button
-            type="button"
-            onClick={() => enable.mutate()}
-            disabled={!password || enable.isPending}
-            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-          >
+          <PrimaryBtn onClick={() => enable.mutate()} disabled={!password || enable.isPending}>
             Enable 2FA
-          </button>
+          </PrimaryBtn>
         </div>
       )}
 
       {totpUri && (
         <div className="space-y-3">
-          <div className="rounded-md border bg-muted/30 p-3 text-xs">
-            <div className="mb-1 font-medium">Authenticator setup URI</div>
+          <div className="rounded-md border bg-muted/40 p-3 text-[12px]">
+            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Authenticator setup URI
+            </div>
             <div className="font-mono break-all">{totpUri}</div>
-            <div className="mt-2 text-muted-foreground">
+            <div className="mt-2 text-[11px] text-muted-foreground">
               Paste this into your authenticator app or render it as a QR code.
             </div>
           </div>
           {backupCodes && backupCodes.length > 0 && (
-            <div className="rounded-md border bg-muted/30 p-3 text-xs">
-              <div className="mb-1 font-medium">Backup codes (save these now)</div>
+            <div className="rounded-md border bg-muted/40 p-3 text-[12px]">
+              <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Backup codes (save these now)
+              </div>
               <ul className="grid grid-cols-2 gap-1 font-mono">
                 {backupCodes.map((c) => (
                   <li key={c}>{c}</li>
@@ -158,44 +214,39 @@ function TwoFactorSection({ enabled }: { enabled: boolean }) {
             </div>
           )}
           <div className="flex gap-2">
-            <input
+            <Input
               placeholder="Code from authenticator"
               value={verifyCode}
               onChange={(e) => setVerifyCode(e.target.value)}
-              className="flex-1 rounded-md border bg-background px-3 py-2 text-sm outline-none focus:border-ring"
+              className="flex-1"
             />
-            <button
-              type="button"
-              onClick={() => verify.mutate()}
-              disabled={!verifyCode || verify.isPending}
-              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-            >
+            <PrimaryBtn onClick={() => verify.mutate()} disabled={!verifyCode || verify.isPending}>
               Verify
-            </button>
+            </PrimaryBtn>
           </div>
         </div>
       )}
 
       {enabled && (
         <div className="flex gap-2">
-          <input
+          <Input
             type="password"
             placeholder="Current password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="flex-1 rounded-md border bg-background px-3 py-2 text-sm outline-none focus:border-ring"
+            className="flex-1"
           />
           <button
             type="button"
             onClick={() => disable.mutate()}
             disabled={!password || disable.isPending}
-            className="rounded-md border px-4 py-2 text-sm text-destructive hover:bg-destructive/10 disabled:opacity-50"
+            className="rounded-md border px-3 py-1.5 text-[13px] font-medium text-destructive transition hover:bg-destructive/10 disabled:opacity-50"
           >
             Disable 2FA
           </button>
         </div>
       )}
-    </section>
+    </Section>
   );
 }
 
@@ -242,54 +293,52 @@ function MailboxSettingsForm({ mailbox }: { mailbox: MailboxSummary }) {
         e.preventDefault();
         save.mutate();
       }}
-      className="rounded-xl border bg-card p-6"
+      className="rounded-md border bg-card"
     >
-      <div className="mb-4">
-        <div className="font-medium">{mailbox.address}</div>
-        <div className="text-xs text-muted-foreground">{mailbox.type}</div>
-      </div>
-      <div className="grid gap-4 text-sm">
+      <header className="flex items-center justify-between border-b px-5 py-3">
+        <div className="min-w-0">
+          <div className="truncate font-medium">{mailbox.address}</div>
+          <div className="text-[11px] text-muted-foreground">{mailbox.type}</div>
+        </div>
+      </header>
+      <div className="grid gap-4 px-5 py-4 text-[13px]">
         <label className="grid gap-1.5">
-          <span className="text-xs text-muted-foreground">Display name</span>
+          <span className="text-[11px] font-medium text-foreground">Display name</span>
           <input
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
             placeholder="e.g. Support"
-            className="rounded-md border bg-background px-3 py-2 outline-none focus:border-ring"
             maxLength={200}
+            className="rounded-md border bg-background px-2.5 py-1.5 text-[13px] outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/20"
           />
         </label>
         <label className="grid gap-1.5">
-          <span className="text-xs text-muted-foreground">Reply-to address</span>
+          <span className="text-[11px] font-medium text-foreground">Reply-to address</span>
           <input
             type="email"
             value={replyTo}
             onChange={(e) => setReplyTo(e.target.value)}
             placeholder="replies@example.com"
-            className="rounded-md border bg-background px-3 py-2 outline-none focus:border-ring"
             maxLength={320}
+            className="rounded-md border bg-background px-2.5 py-1.5 text-[13px] outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/20"
           />
         </label>
         <label className="grid gap-1.5">
-          <span className="text-xs text-muted-foreground">Signature</span>
+          <span className="text-[11px] font-medium text-foreground">Signature</span>
           <textarea
             value={signature}
             onChange={(e) => setSignature(e.target.value)}
             rows={4}
             placeholder="Appended to every outgoing message"
-            className="min-h-[6rem] resize-y rounded-md border bg-background px-3 py-2 outline-none focus:border-ring"
+            className="min-h-[6rem] resize-y rounded-md border bg-background px-2.5 py-1.5 text-[13px] outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/20"
             maxLength={5000}
           />
         </label>
       </div>
-      <div className="mt-4 flex justify-end">
-        <button
-          type="submit"
-          disabled={save.isPending || settingsQ.isLoading}
-          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-        >
-          {save.isPending ? "Saving…" : "Save"}
-        </button>
+      <div className="flex justify-end border-t bg-muted/30 px-5 py-2.5">
+        <PrimaryBtn type="submit" disabled={save.isPending || settingsQ.isLoading}>
+          {save.isPending ? "Saving…" : "Save changes"}
+        </PrimaryBtn>
       </div>
     </form>
   );

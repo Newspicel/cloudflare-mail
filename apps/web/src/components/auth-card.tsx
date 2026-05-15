@@ -1,19 +1,20 @@
+import { Mail } from "lucide-react";
 import type React from "react";
 
 export function CardShell({ title, children }: { title: string; children?: React.ReactNode }) {
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-gradient-to-br from-background to-muted p-6">
-      <div className="w-full max-w-sm rounded-2xl border bg-card p-8 shadow-xl shadow-black/5">
-        <div className="mb-6 flex items-center gap-3">
-          <div className="grid h-10 w-10 place-items-center rounded-xl bg-primary text-primary-foreground text-lg font-semibold">
-            ✉
+    <div className="flex min-h-dvh items-center justify-center bg-muted p-6">
+      <div className="w-full max-w-sm rounded-md border bg-card p-7 shadow-sm">
+        <div className="mb-5 flex items-center gap-2.5">
+          <div className="grid h-8 w-8 place-items-center rounded-md bg-primary text-primary-foreground">
+            <Mail className="h-4 w-4" strokeWidth={2.5} />
           </div>
           <div>
-            <div className="text-lg font-semibold">cfmail</div>
-            <div className="text-xs text-muted-foreground">mail on Cloudflare</div>
+            <div className="text-[15px] font-semibold tracking-tight leading-none">cfmail</div>
+            <div className="mt-1 text-[11px] text-muted-foreground">mail on Cloudflare</div>
           </div>
         </div>
-        <h1 className="mb-4 text-2xl font-semibold tracking-tight">{title}</h1>
+        <h1 className="mb-5 text-[20px] font-semibold tracking-tight">{title}</h1>
         {children}
       </div>
     </div>
@@ -37,14 +38,14 @@ export function Field({
 }) {
   return (
     <label className="mb-3 block">
-      <span className="mb-1 block text-sm font-medium">{label}</span>
+      <span className="mb-1 block text-[12px] font-medium text-foreground">{label}</span>
       <input
         required={required}
         type={type}
         minLength={minLength}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:border-ring"
+        className="w-full rounded-md border bg-background px-3 py-1.5 text-[13px] outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/20"
       />
     </label>
   );
@@ -55,7 +56,7 @@ export function PrimaryButton({ busy, children }: { busy: boolean; children: Rea
     <button
       type="submit"
       disabled={busy}
-      className="mb-3 w-full rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:opacity-95 disabled:opacity-50"
+      className="mb-2 w-full rounded-md bg-primary px-3 py-2 text-[13px] font-medium text-primary-foreground transition hover:brightness-105 disabled:opacity-50"
     >
       {busy ? "…" : children}
     </button>
