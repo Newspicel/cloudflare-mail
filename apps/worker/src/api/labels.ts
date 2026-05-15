@@ -128,20 +128,21 @@ export function labelsRoutes() {
       .innerJoin(label, eq(label.id, messageLabel.labelId))
       .where(inArray(messageLabel.messageId, ids));
 
-    const accessCache = new Map<string, boolean>();
+    const uniqueMailboxIds = [...new Set(rows.map((row) => row.mailboxId))];
+    const accessEntries = await Promise.all(
+      uniqueMailboxIds.map(async (mid) => {
+        try {
+          await requirePerm(db, user.id, mid, Perm.READ);
+          return [mid, true] as const;
+        } catch {
+          return [mid, false] as const;
+        }
+      }),
+    );
+    const accessCache = new Map<string, boolean>(accessEntries);
     const out: Record<string, { id: string; name: string; color: string }[]> = {};
     for (const row of rows) {
-      let ok = accessCache.get(row.mailboxId);
-      if (ok === undefined) {
-        try {
-          await requirePerm(db, user.id, row.mailboxId, Perm.READ);
-          ok = true;
-        } catch {
-          ok = false;
-        }
-        accessCache.set(row.mailboxId, ok);
-      }
-      if (!ok) continue;
+      if (!accessCache.get(row.mailboxId)) continue;
       let list = out[row.messageId];
       if (!list) {
         list = [];
