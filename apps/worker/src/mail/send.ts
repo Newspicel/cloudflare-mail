@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import type { Env } from "../env.ts";
 import { broadcastToUsers } from "../hub.ts";
-import { buildMime, buildThreadingHeaders, snippet, type ThreadingHeaders } from "./mime.ts";
+import { buildMime, snippet, type ThreadingHeaders } from "./mime.ts";
 import { bumpThread, resolveThreadId } from "./threads.ts";
 
 export async function sendFromMailbox(
@@ -57,17 +57,15 @@ export async function sendFromMailbox(
     }),
   );
 
-  const messageIdHdr = `<${crypto.randomUUID()}@${dom.name}>`;
-  const threading: ThreadingHeaders = { messageId: messageIdHdr };
-  if (input.inReplyTo) threading.inReplyTo = input.inReplyTo;
-  if (input.references?.length) threading.references = input.references;
-
   const allRecipients = [...input.to, ...(input.cc ?? []), ...(input.bcc ?? [])];
 
-  const headers = buildThreadingHeaders(threading);
+  const sendHeaders: Record<string, string> = {};
+  if (input.inReplyTo) sendHeaders["In-Reply-To"] = input.inReplyTo;
+  if (input.references?.length) sendHeaders.References = input.references.join(" ");
 
+  let returnedMessageId: string | undefined;
   try {
-    await env.EMAIL.send({
+    const res = await env.EMAIL.send({
       from: fromField,
       to: input.to.map((a) => a.address),
       cc: input.cc?.length ? input.cc.map((a) => a.address) : undefined,
@@ -76,7 +74,7 @@ export async function sendFromMailbox(
       subject: input.subject,
       text,
       html,
-      headers,
+      headers: Object.keys(sendHeaders).length ? sendHeaders : undefined,
       attachments: attachmentBytes.length
         ? attachmentBytes.map((a) => ({
             disposition: "attachment" as const,
@@ -86,10 +84,20 @@ export async function sendFromMailbox(
           }))
         : undefined,
     });
+    returnedMessageId = res?.messageId;
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     throw new HTTPException(502, { message: `send failed: ${detail}` });
   }
+
+  const messageIdHdr = returnedMessageId
+    ? returnedMessageId.startsWith("<")
+      ? returnedMessageId
+      : `<${returnedMessageId}>`
+    : `<${crypto.randomUUID()}@${dom.name}>`;
+  const threading: ThreadingHeaders = { messageId: messageIdHdr };
+  if (input.inReplyTo) threading.inReplyTo = input.inReplyTo;
+  if (input.references?.length) threading.references = input.references;
 
   const sentAt = new Date();
   const messageId = crypto.randomUUID();
