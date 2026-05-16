@@ -36,7 +36,9 @@ export async function sendFromMailbox(
 
   const fromAddr = `${mb.localPart}@${dom.name}`;
   const fromName = mb.displayName ?? undefined;
-  const fromFormatted = fromName ? `${escapeName(fromName)} <${fromAddr}>` : fromAddr;
+  const fromField: string | { name: string; email: string } = fromName
+    ? { name: fromName, email: fromAddr }
+    : fromAddr;
   const replyToAddr = mb.replyTo ?? undefined;
   const signature = mb.signature ?? undefined;
   const text = appendSignatureText(input.text, signature);
@@ -63,27 +65,31 @@ export async function sendFromMailbox(
   const allRecipients = [...input.to, ...(input.cc ?? []), ...(input.bcc ?? [])];
 
   const headers = buildThreadingHeaders(threading);
-  if (replyToAddr) headers["Reply-To"] = replyToAddr;
 
-  await env.EMAIL.send({
-    from: fromFormatted,
-    to: input.to.map(formatAddr),
-    cc: input.cc?.length ? input.cc.map(formatAddr) : undefined,
-    bcc: input.bcc?.length ? input.bcc.map(formatAddr) : undefined,
-    replyTo: replyToAddr,
-    subject: input.subject,
-    text,
-    html,
-    headers,
-    attachments: attachmentBytes.length
-      ? attachmentBytes.map((a) => ({
-          disposition: "attachment" as const,
-          filename: a.filename,
-          type: a.contentType,
-          content: a.data,
-        }))
-      : undefined,
-  });
+  try {
+    await env.EMAIL.send({
+      from: fromField,
+      to: input.to.map((a) => a.address),
+      cc: input.cc?.length ? input.cc.map((a) => a.address) : undefined,
+      bcc: input.bcc?.length ? input.bcc.map((a) => a.address) : undefined,
+      replyTo: replyToAddr,
+      subject: input.subject,
+      text,
+      html,
+      headers,
+      attachments: attachmentBytes.length
+        ? attachmentBytes.map((a) => ({
+            disposition: "attachment" as const,
+            filename: a.filename,
+            type: a.contentType,
+            content: a.data,
+          }))
+        : undefined,
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new HTTPException(502, { message: `send failed: ${detail}` });
+  }
 
   const sentAt = new Date();
   const messageId = crypto.randomUUID();
@@ -147,15 +153,6 @@ export async function sendFromMailbox(
   ]);
 
   return { messageId, threadId };
-}
-
-function formatAddr(a: { name?: string; address: string }): string {
-  return a.name ? `${escapeName(a.name)} <${a.address}>` : a.address;
-}
-
-function escapeName(name: string): string {
-  if (/[,<>@"]/.test(name)) return `"${name.replace(/"/g, '\\"')}"`;
-  return name;
 }
 
 function stripHtml(html: string): string {
