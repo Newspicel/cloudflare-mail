@@ -80,9 +80,43 @@ export const setAuthFromAddress = z.object({
 });
 
 export const updateThread = z.object({
-  archived: z.boolean().optional(),
   trashed: z.boolean().optional(),
+  spam: z.boolean().optional(),
 });
+
+const draftAttachment = z.object({
+  r2Key: z.string().min(1),
+  filename: z.string().min(1).max(255),
+  contentType: z.string().min(1).max(127),
+  sizeBytes: z.number().int().min(0),
+});
+
+export const createDraft = z.object({
+  mailboxId: z.string().min(1),
+  to: z.array(addressObject).max(100).default([]),
+  cc: z.array(addressObject).max(100).optional(),
+  bcc: z.array(addressObject).max(100).optional(),
+  subject: z.string().max(998).default(""),
+  body: z.string().max(5_000_000).default(""),
+  markdown: z.boolean().default(false),
+  inReplyTo: z.string().optional(),
+  references: z.array(z.string()).optional(),
+  attachments: z.array(draftAttachment).max(20).default([]),
+});
+export type CreateDraftInput = z.infer<typeof createDraft>;
+
+export const updateDraft = z.object({
+  to: z.array(addressObject).max(100).optional(),
+  cc: z.array(addressObject).max(100).optional(),
+  bcc: z.array(addressObject).max(100).optional(),
+  subject: z.string().max(998).optional(),
+  body: z.string().max(5_000_000).optional(),
+  markdown: z.boolean().optional(),
+  inReplyTo: z.string().optional(),
+  references: z.array(z.string()).optional(),
+  attachments: z.array(draftAttachment).max(20).optional(),
+});
+export type UpdateDraftInput = z.infer<typeof updateDraft>;
 
 const labelColor = z.string().regex(/^#[0-9a-f]{6}$/i, "expected hex color (#rrggbb)");
 

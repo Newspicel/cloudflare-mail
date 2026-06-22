@@ -19,8 +19,8 @@ export interface ThreadRow {
   msgCount: number;
   unreadCount: number;
   participants: { name?: string; address: string }[];
-  archived: boolean;
   trashed: boolean;
+  spam: boolean;
 }
 
 export interface MessageRow {
@@ -65,11 +65,11 @@ export const mailboxesQuery = queryOptions({
   queryFn: () => api<{ mailboxes: MailboxSummary[] }>("/api/mailboxes"),
 });
 
-export type MailView = "inbox" | "archive" | "trash";
-export const MAIL_VIEWS: MailView[] = ["inbox", "archive", "trash"];
+export type MailView = "inbox" | "drafts" | "sent" | "marked" | "spam" | "trash" | "all";
+export const MAIL_VIEWS: MailView[] = ["inbox", "drafts", "sent", "marked", "spam", "trash", "all"];
 
 export function parseMailView(value: unknown): MailView {
-  return value === "archive" || value === "trash" ? value : "inbox";
+  return MAIL_VIEWS.includes(value as MailView) ? (value as MailView) : "inbox";
 }
 
 export const threadsQuery = (mailboxId: string, view: MailView = "inbox") =>
@@ -78,6 +78,44 @@ export const threadsQuery = (mailboxId: string, view: MailView = "inbox") =>
     queryFn: () =>
       api<{ threads: ThreadRow[] }>(
         `/api/threads?mailboxId=${encodeURIComponent(mailboxId)}&view=${view}`,
+      ),
+    enabled: Boolean(mailboxId),
+  });
+
+export interface DraftRow {
+  id: string;
+  mailboxId: string;
+  inReplyTo: string | null;
+  references: string[] | null;
+  toAddrs: { name?: string; address: string }[];
+  ccAddrs: { name?: string; address: string }[] | null;
+  bccAddrs: { name?: string; address: string }[] | null;
+  subject: string;
+  body: string;
+  markdown: boolean;
+  attachments: { r2Key: string; filename: string; contentType: string; sizeBytes: number }[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const draftsQuery = (mailboxId: string) =>
+  queryOptions({
+    queryKey: ["drafts", mailboxId],
+    queryFn: () =>
+      api<{ drafts: DraftRow[] }>(`/api/drafts?mailboxId=${encodeURIComponent(mailboxId)}`),
+    enabled: Boolean(mailboxId),
+  });
+
+export type FolderCounts = Record<MailView, { total: number; unread: number }>;
+
+// Keyed under the ["threads", mailboxId] prefix so thread invalidations refresh
+// the badges for free; draft mutations also invalidate this prefix.
+export const folderCountsQuery = (mailboxId: string) =>
+  queryOptions({
+    queryKey: ["threads", mailboxId, "counts"],
+    queryFn: () =>
+      api<{ counts: FolderCounts }>(
+        `/api/threads/counts?mailboxId=${encodeURIComponent(mailboxId)}`,
       ),
     enabled: Boolean(mailboxId),
   });

@@ -6,7 +6,7 @@ const SHORTCUTS: { keys: string[]; label: string }[] = [
   { keys: ["c"], label: "Compose" },
   { keys: ["r"], label: "Reply" },
   { keys: ["f"], label: "Forward" },
-  { keys: ["e"], label: "Archive" },
+  { keys: ["!"], label: "Mark as spam" },
   { keys: ["#"], label: "Move to Trash" },
   { keys: ["s"], label: "Star / unstar" },
   { keys: ["u"], label: "Mark unread" },
