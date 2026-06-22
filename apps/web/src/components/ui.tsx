@@ -1,5 +1,8 @@
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/cn.ts";
+import { Skeleton } from "./ui/skeleton.tsx";
+
+export { Skeleton };
 
 export function EmptyState({
   icon: Icon,
@@ -31,10 +34,6 @@ export function EmptyState({
       {action && <div className="mt-1">{action}</div>}
     </div>
   );
-}
-
-export function Skeleton({ className }: { className?: string }) {
-  return <div className={cn("animate-pulse rounded bg-muted", className)} />;
 }
 
 const ROW_KEYS = ["r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8"];

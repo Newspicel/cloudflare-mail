@@ -2,7 +2,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRouter, RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { Toaster } from "sonner";
+import { ConfirmProvider } from "./components/ui/confirm.tsx";
+import { Toaster } from "./components/ui/toaster.tsx";
 import "./styles/globals.css";
 import { initTheme } from "./lib/theme.ts";
 import { routeTree } from "./routeTree.gen.ts";
@@ -31,8 +32,10 @@ if (!rootEl) throw new Error("no #root");
 createRoot(rootEl).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-      <Toaster richColors position="bottom-right" />
+      <ConfirmProvider>
+        <RouterProvider router={router} />
+      </ConfirmProvider>
+      <Toaster />
     </QueryClientProvider>
   </StrictMode>,
 );

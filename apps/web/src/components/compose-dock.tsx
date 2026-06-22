@@ -1,3 +1,4 @@
+import { Dialog } from "@base-ui/react/dialog";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import DOMPurify from "dompurify";
 import { Paperclip, Trash2, X } from "lucide-react";
@@ -7,6 +8,9 @@ import { toast } from "sonner";
 import { ApiError, api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
 import { type MessageRow, mailboxesQuery } from "@/lib/queries.ts";
+import { Button } from "./ui/button.tsx";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select.tsx";
+import { Textarea } from "./ui/textarea.tsx";
 
 marked.setOptions({ breaks: true, gfm: true });
 
@@ -80,6 +84,10 @@ function loadDraft(key: string): DraftData | null {
     return null;
   }
 }
+
+const FIELD_LABEL = "w-12 shrink-0 text-[11px] text-muted-foreground uppercase tracking-wider";
+const FIELD_INPUT =
+  "flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted-foreground";
 
 function ComposePanel({ state: s }: { state: ComposeState }) {
   const qc = useQueryClient();
@@ -223,217 +231,211 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
   }
 
   return (
-    <div className="fixed inset-0 z-40 flex flex-col overflow-hidden border bg-card shadow-xl shadow-black/10 sm:inset-auto sm:bottom-0 sm:right-6 sm:h-[540px] sm:w-[520px] sm:rounded-t-md sm:border-b-0">
-      <div className="flex items-center justify-between border-b bg-muted px-3 py-1.5">
-        <div className="text-[12px] font-semibold tracking-tight">
-          {s.replyToMessage ? "Reply" : s.forwardMessage ? "Forward" : "New message"}
-        </div>
-        <div className="flex items-center gap-0.5">
-          <button
-            type="button"
-            onClick={closeCompose}
-            className="grid h-6 w-6 place-items-center rounded text-muted-foreground hover:bg-background hover:text-foreground"
-            aria-label="Close"
-            title="Close"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      </div>
-      <div className="flex flex-1 flex-col gap-1 overflow-y-auto px-3 py-2 text-[13px]">
-        <label className="flex items-center gap-2 border-b py-1">
-          <span className="w-12 shrink-0 text-[11px] uppercase tracking-wider text-muted-foreground">
-            From
-          </span>
-          <select
-            value={mailboxId}
-            onChange={(e) => setMailboxId(e.target.value)}
-            className="flex-1 bg-transparent outline-none"
-          >
-            {sendable.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.address}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex items-center gap-2 border-b py-1">
-          <span className="w-12 shrink-0 text-[11px] uppercase tracking-wider text-muted-foreground">
-            To
-          </span>
-          <input
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-            placeholder="name@example.com"
-            className="flex-1 bg-transparent outline-none"
-          />
-          {!showCc && (
-            <button
-              type="button"
-              onClick={() => setShowCc(true)}
-              className="shrink-0 text-[11px] font-medium text-muted-foreground hover:text-foreground"
+    <Dialog.Root
+      open
+      modal="trap-focus"
+      disablePointerDismissal
+      onOpenChange={(next) => {
+        if (!next) closeCompose();
+      }}
+    >
+      <Dialog.Portal>
+        <Dialog.Popup className="fixed inset-0 z-40 flex flex-col overflow-hidden border bg-card text-card-foreground shadow-black/15 shadow-xl outline-none transition duration-200 data-ending-style:translate-y-3 data-ending-style:opacity-0 data-starting-style:translate-y-3 data-starting-style:opacity-0 sm:inset-auto sm:right-6 sm:bottom-0 sm:h-[540px] sm:w-[520px] sm:rounded-t-xl sm:border-b-0">
+          <div className="flex items-center justify-between border-b bg-muted px-3 py-2">
+            <Dialog.Title className="font-semibold text-[12px] tracking-tight">
+              {s.replyToMessage ? "Reply" : s.forwardMessage ? "Forward" : "New message"}
+            </Dialog.Title>
+            <Dialog.Close
+              className="grid h-6 w-6 place-items-center rounded text-muted-foreground outline-none transition-colors hover:bg-card hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
+              aria-label="Close"
             >
-              Cc/Bcc
-            </button>
-          )}
-        </label>
-        {showCc && (
-          <>
+              <X className="h-3.5 w-3.5" />
+            </Dialog.Close>
+          </div>
+
+          <div className="flex flex-1 flex-col gap-1 overflow-y-auto px-3 py-2">
+            <div className="flex items-center gap-2 border-b py-1">
+              <span className={FIELD_LABEL}>From</span>
+              <Select value={mailboxId} onValueChange={(v) => setMailboxId(v as string)}>
+                <SelectTrigger
+                  aria-label="From mailbox"
+                  className="h-7 border-0 bg-transparent px-0 shadow-none hover:bg-transparent"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {sendable.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>
+                      {m.address}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <label className="flex items-center gap-2 border-b py-1">
-              <span className="w-12 shrink-0 text-[11px] uppercase tracking-wider text-muted-foreground">
-                Cc
-              </span>
+              <span className={FIELD_LABEL}>To</span>
               <input
-                value={cc}
-                onChange={(e) => setCc(e.target.value)}
-                placeholder="cc@example.com"
-                className="flex-1 bg-transparent outline-none"
+                value={to}
+                onChange={(e) => setTo(e.target.value)}
+                placeholder="name@example.com"
+                className={FIELD_INPUT}
               />
-            </label>
-            <label className="flex items-center gap-2 border-b py-1">
-              <span className="w-12 shrink-0 text-[11px] uppercase tracking-wider text-muted-foreground">
-                Bcc
-              </span>
-              <input
-                value={bcc}
-                onChange={(e) => setBcc(e.target.value)}
-                placeholder="bcc@example.com"
-                className="flex-1 bg-transparent outline-none"
-              />
-            </label>
-          </>
-        )}
-        <label className="flex items-center gap-2 border-b py-1">
-          <span className="w-12 shrink-0 text-[11px] uppercase tracking-wider text-muted-foreground">
-            Subject
-          </span>
-          <input
-            value={subject}
-            onChange={(e) => setSubject(e.target.value)}
-            className="flex-1 bg-transparent outline-none"
-          />
-        </label>
-        {markdown && preview ? (
-          <div
-            // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized via DOMPurify
-            dangerouslySetInnerHTML={{ __html: previewHtml }}
-            className="prose prose-sm flex-1 max-w-none overflow-y-auto py-2 dark:prose-invert"
-          />
-        ) : (
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            className={cn(
-              "flex-1 resize-none bg-transparent py-2 outline-none text-[13px]",
-              markdown && "font-mono",
-            )}
-            placeholder={markdown ? "Write your message in markdown…" : "Write your message…"}
-          />
-        )}
-        {attachments.length > 0 && (
-          <ul className="flex flex-wrap gap-1.5 border-t pt-2">
-            {attachments.map((a) => (
-              <li
-                key={a.r2Key}
-                className="flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-0.5 text-[11px]"
-              >
-                <Paperclip className="h-2.5 w-2.5 shrink-0 text-muted-foreground" />
-                <span className="max-w-[16rem] truncate" title={a.filename}>
-                  {a.filename}
-                </span>
-                <span className="text-muted-foreground">{formatBytes(a.sizeBytes)}</span>
+              {!showCc && (
                 <button
                   type="button"
-                  onClick={() => setAttachments((prev) => prev.filter((x) => x.r2Key !== a.r2Key))}
-                  className="ml-0.5 rounded p-0.5 text-muted-foreground hover:bg-background hover:text-foreground"
-                  aria-label={`Remove ${a.filename}`}
+                  onClick={() => setShowCc(true)}
+                  className="shrink-0 font-medium text-[11px] text-muted-foreground hover:text-foreground"
                 >
-                  <X className="h-2.5 w-2.5" />
+                  Cc/Bcc
                 </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-      <div className="flex items-center justify-between gap-3 border-t bg-muted/40 px-3 py-2">
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => send.mutate()}
-            disabled={send.isPending || uploading > 0 || !mailboxId || !to}
-            className="rounded-md bg-primary px-3 py-1.5 text-[13px] font-medium text-primary-foreground transition hover:brightness-105 disabled:opacity-50"
-          >
-            {send.isPending ? "Sending…" : "Send"}
-          </button>
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={attachments.length >= MAX_ATTACHMENTS}
-            className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
-            aria-label="Attach files"
-            title="Attach files"
-          >
-            <Paperclip className="h-3.5 w-3.5" />
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            className="hidden"
-            onChange={(e) => {
-              void onPickFiles(e.target.files);
-              e.target.value = "";
-            }}
-          />
-          <button
-            type="button"
-            onClick={() => {
-              setMarkdown((v) => {
-                if (v) setPreview(false);
-                return !v;
-              });
-            }}
-            className={cn(
-              "rounded-md border px-2 py-1 text-[11px] font-medium transition",
-              markdown
-                ? "border-primary text-primary"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+              )}
+            </label>
+            {showCc && (
+              <>
+                <label className="flex items-center gap-2 border-b py-1">
+                  <span className={FIELD_LABEL}>Cc</span>
+                  <input
+                    value={cc}
+                    onChange={(e) => setCc(e.target.value)}
+                    placeholder="cc@example.com"
+                    className={FIELD_INPUT}
+                  />
+                </label>
+                <label className="flex items-center gap-2 border-b py-1">
+                  <span className={FIELD_LABEL}>Bcc</span>
+                  <input
+                    value={bcc}
+                    onChange={(e) => setBcc(e.target.value)}
+                    placeholder="bcc@example.com"
+                    className={FIELD_INPUT}
+                  />
+                </label>
+              </>
             )}
-            aria-pressed={markdown}
-            title="Toggle markdown"
-          >
-            MD
-          </button>
-          {markdown && (
-            <button
-              type="button"
-              onClick={() => setPreview((v) => !v)}
-              className="rounded-md border px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
-            >
-              {preview ? "Edit" : "Preview"}
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={discard}
-            className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-            aria-label="Discard draft"
-            title="Discard draft"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
-        </div>
-        <span className="text-[11px] text-muted-foreground">
-          {uploading > 0
-            ? `Uploading ${uploading}…`
-            : sendable.length === 0
-              ? "No sendable mailboxes"
-              : savedHint
-                ? "Draft saved"
-                : null}
-        </span>
-      </div>
-    </div>
+            <label className="flex items-center gap-2 border-b py-1">
+              <span className={FIELD_LABEL}>Subject</span>
+              <input
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                className={FIELD_INPUT}
+              />
+            </label>
+            {markdown && preview ? (
+              <div
+                // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized via DOMPurify
+                dangerouslySetInnerHTML={{ __html: previewHtml }}
+                className="prose prose-sm max-w-none flex-1 overflow-y-auto py-2 dark:prose-invert"
+              />
+            ) : (
+              <Textarea
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                className={cn(
+                  "min-h-40 flex-1 resize-none border-0 bg-transparent px-0 py-2 shadow-none focus-visible:ring-0",
+                  markdown && "font-mono",
+                )}
+                placeholder={markdown ? "Write your message in markdown…" : "Write your message…"}
+              />
+            )}
+            {attachments.length > 0 && (
+              <ul className="flex flex-wrap gap-1.5 border-t pt-2">
+                {attachments.map((a) => (
+                  <li
+                    key={a.r2Key}
+                    className="flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-0.5 text-[11px]"
+                  >
+                    <Paperclip className="h-2.5 w-2.5 shrink-0 text-muted-foreground" />
+                    <span className="max-w-[16rem] truncate" title={a.filename}>
+                      {a.filename}
+                    </span>
+                    <span className="text-muted-foreground">{formatBytes(a.sizeBytes)}</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setAttachments((prev) => prev.filter((x) => x.r2Key !== a.r2Key))
+                      }
+                      className="ml-0.5 rounded p-0.5 text-muted-foreground hover:bg-card hover:text-foreground"
+                      aria-label={`Remove ${a.filename}`}
+                    >
+                      <X className="h-2.5 w-2.5" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between gap-3 border-t bg-muted/40 px-3 py-2">
+            <div className="flex items-center gap-1.5">
+              <Button
+                variant="primary"
+                onClick={() => send.mutate()}
+                disabled={send.isPending || uploading > 0 || !mailboxId || !to}
+              >
+                {send.isPending ? "Sending…" : "Send"}
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={attachments.length >= MAX_ATTACHMENTS}
+                aria-label="Attach files"
+              >
+                <Paperclip />
+              </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  void onPickFiles(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+              <Button
+                variant={markdown ? "outline" : "ghost"}
+                size="sm"
+                onClick={() => {
+                  setMarkdown((v) => {
+                    if (v) setPreview(false);
+                    return !v;
+                  });
+                }}
+                className={cn(markdown && "border-primary text-primary")}
+                aria-pressed={markdown}
+                title="Toggle markdown"
+              >
+                MD
+              </Button>
+              {markdown && (
+                <Button variant="ghost" size="sm" onClick={() => setPreview((v) => !v)}>
+                  {preview ? "Edit" : "Preview"}
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={discard}
+                className="hover:bg-destructive/10 hover:text-destructive"
+                aria-label="Discard draft"
+              >
+                <Trash2 />
+              </Button>
+            </div>
+            <span className="text-[11px] text-muted-foreground">
+              {uploading > 0
+                ? `Uploading ${uploading}…`
+                : sendable.length === 0
+                  ? "No sendable mailboxes"
+                  : savedHint
+                    ? "Draft saved"
+                    : null}
+            </span>
+          </div>
+        </Dialog.Popup>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 
