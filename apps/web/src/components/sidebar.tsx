@@ -28,7 +28,13 @@ const GROUP_META: Record<
   temp: { label: "Temporary", icon: (p) => <Timer {...p} /> },
 };
 
-export function Sidebar() {
+export function Sidebar({
+  mobileOpen = false,
+  onClose,
+}: {
+  mobileOpen?: boolean;
+  onClose?: () => void;
+}) {
   const { data } = useQuery(mailboxesQuery);
   const mailboxes = data?.mailboxes ?? [];
   useNow(60_000);
@@ -45,78 +51,98 @@ export function Sidebar() {
   const activeId = (params as { mailboxId?: string }).mailboxId;
 
   return (
-    <aside className="flex w-60 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground">
-      <div className="flex flex-col gap-2 border-b border-sidebar-border px-3 py-3">
+    <>
+      {mobileOpen && (
         <button
           type="button"
-          onClick={() => openCompose()}
-          className="flex w-full items-center justify-center gap-2 rounded-md bg-primary px-3 py-2 text-[13px] font-medium text-primary-foreground transition hover:brightness-105"
-        >
-          <PenSquare className="h-3.5 w-3.5" /> Compose
-        </button>
-        <NewTempMailbox />
-      </div>
-
-      <nav className="flex flex-1 flex-col gap-4 overflow-y-auto px-2 py-3">
-        {(Object.keys(grouped) as MailboxSummary["type"][]).map((type) => {
-          const items = grouped[type];
-          if (!items.length) return null;
-          const meta = GROUP_META[type];
-          return (
-            <section key={type}>
-              <h3 className="mb-1 flex items-center gap-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                <meta.icon className="h-3 w-3" /> {meta.label}
-              </h3>
-              <ul className="flex flex-col">
-                {items.map((m) => {
-                  const readOnly = m.role === "member" && !has(m.perms, Perm.WRITE);
-                  return (
-                    <li key={m.id}>
-                      <Link
-                        to="/app/m/$mailboxId"
-                        params={{ mailboxId: m.id }}
-                        className={cn(
-                          "group flex items-center justify-between rounded-md px-2 py-1.5 text-[13px] transition",
-                          activeId === m.id
-                            ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
-                            : "text-sidebar-foreground hover:bg-sidebar-accent/60",
-                        )}
-                      >
-                        <span className="truncate">{m.displayName ?? m.address}</span>
-                        <span className="ml-2 flex shrink-0 items-center gap-1">
-                          {readOnly && (
-                            <span role="img" aria-label="Read-only" title="Read-only">
-                              <Lock className="h-3 w-3 text-muted-foreground" />
-                            </span>
-                          )}
-                          {m.expiresAt && <TtlBadge expiresAt={m.expiresAt} />}
-                        </span>
-                      </Link>
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
-          );
-        })}
-
-        {mailboxes.length === 0 && (
-          <div className="mx-2 rounded-md border border-dashed p-3 text-[11px] text-muted-foreground">
-            <Mailbox className="mb-1.5 h-3.5 w-3.5" />
-            No mailboxes — create one from Admin.
-          </div>
+          aria-label="Close menu"
+          onClick={onClose}
+          className="fixed inset-0 z-40 bg-black/40 md:hidden"
+        />
+      )}
+      <aside
+        className={cn(
+          "fixed inset-y-0 left-0 z-50 flex w-64 transform flex-col border-r bg-sidebar text-sidebar-foreground transition-transform md:static md:z-auto md:w-60 md:translate-x-0",
+          mobileOpen ? "translate-x-0" : "-translate-x-full",
         )}
-      </nav>
+      >
+        <div className="flex flex-col gap-2 border-b border-sidebar-border px-3 py-3">
+          <button
+            type="button"
+            onClick={() => {
+              openCompose();
+              onClose?.();
+            }}
+            className="flex w-full items-center justify-center gap-2 rounded-md bg-primary px-3 py-2 text-[13px] font-medium text-primary-foreground transition hover:brightness-105"
+          >
+            <PenSquare className="h-3.5 w-3.5" /> Compose
+          </button>
+          <NewTempMailbox />
+        </div>
 
-      <div className="border-t border-sidebar-border px-2 py-2">
-        <Link
-          to="/app/admin"
-          className="flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-muted-foreground transition hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
-        >
-          <SlidersHorizontal className="h-3.5 w-3.5" /> Admin
-        </Link>
-      </div>
-    </aside>
+        <nav className="flex flex-1 flex-col gap-4 overflow-y-auto px-2 py-3">
+          {(Object.keys(grouped) as MailboxSummary["type"][]).map((type) => {
+            const items = grouped[type];
+            if (!items.length) return null;
+            const meta = GROUP_META[type];
+            return (
+              <section key={type}>
+                <h3 className="mb-1 flex items-center gap-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  <meta.icon className="h-3 w-3" /> {meta.label}
+                </h3>
+                <ul className="flex flex-col">
+                  {items.map((m) => {
+                    const readOnly = m.role === "member" && !has(m.perms, Perm.WRITE);
+                    return (
+                      <li key={m.id}>
+                        <Link
+                          to="/app/m/$mailboxId"
+                          params={{ mailboxId: m.id }}
+                          search={{ view: "inbox" }}
+                          onClick={() => onClose?.()}
+                          className={cn(
+                            "group flex items-center justify-between rounded-md px-2 py-1.5 text-[13px] transition",
+                            activeId === m.id
+                              ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                              : "text-sidebar-foreground hover:bg-sidebar-accent/60",
+                          )}
+                        >
+                          <span className="truncate">{m.displayName ?? m.address}</span>
+                          <span className="ml-2 flex shrink-0 items-center gap-1">
+                            {readOnly && (
+                              <span role="img" aria-label="Read-only" title="Read-only">
+                                <Lock className="h-3 w-3 text-muted-foreground" />
+                              </span>
+                            )}
+                            {m.expiresAt && <TtlBadge expiresAt={m.expiresAt} />}
+                          </span>
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            );
+          })}
+
+          {mailboxes.length === 0 && (
+            <div className="mx-2 rounded-md border border-dashed p-3 text-[11px] text-muted-foreground">
+              <Mailbox className="mb-1.5 h-3.5 w-3.5" />
+              No mailboxes — create one from Admin.
+            </div>
+          )}
+        </nav>
+
+        <div className="border-t border-sidebar-border px-2 py-2">
+          <Link
+            to="/app/admin"
+            className="flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-muted-foreground transition hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5" /> Admin
+          </Link>
+        </div>
+      </aside>
+    </>
   );
 }
 

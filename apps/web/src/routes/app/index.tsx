@@ -9,7 +9,14 @@ function AppIndex() {
   const { queryClient } = Route.useRouteContext();
   const mailboxes = queryClient.getQueryData(mailboxesQuery.queryKey);
   const first = mailboxes?.mailboxes[0];
-  if (first) return <Navigate to="/app/m/$mailboxId" params={{ mailboxId: first.id }} />;
+  if (first)
+    return (
+      <Navigate
+        to="/app/m/$mailboxId"
+        params={{ mailboxId: first.id }}
+        search={{ view: "inbox" }}
+      />
+    );
   return (
     <div className="flex h-full items-center justify-center p-12 text-center">
       <div className="max-w-md rounded-md border bg-card px-8 py-10">
