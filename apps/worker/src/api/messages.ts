@@ -10,6 +10,7 @@ import { z } from "zod";
 import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
 import { sendFromMailbox } from "../mail/send.ts";
+import { recomputeThreadUnread } from "../mail/threads.ts";
 import { requireUser } from "../middleware.ts";
 import { requirePerm } from "../permissions.ts";
 
@@ -40,7 +41,7 @@ export function messagesRoutes() {
 
     const msg = await db.query.message.findFirst({
       where: eq(message.id, id),
-      columns: { mailboxId: true, flags: true },
+      columns: { mailboxId: true, threadId: true, flags: true },
     });
     if (!msg) throw new HTTPException(404, { message: "not found" });
     await requirePerm(db, user.id, msg.mailboxId, Perm.READ);
@@ -51,6 +52,8 @@ export function messagesRoutes() {
     if (patch.trash !== undefined) flags = setFlag(flags, Flag.TRASH, patch.trash);
 
     await db.update(message).set({ flags }).where(eq(message.id, id));
+    // SEEN drives the thread's unread badge; keep the cached count in sync.
+    if (patch.seen !== undefined) await recomputeThreadUnread(db, msg.threadId);
     return c.json({ flags });
   });
 

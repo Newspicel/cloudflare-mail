@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Inbox, ShieldAlert, Timer, Trash2, X } from "lucide-react";
+import { ArchiveRestore, Inbox, Mail, MailOpen, ShieldAlert, Timer, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api.ts";
@@ -186,11 +186,29 @@ function ThreadRowItem({
   selecting: boolean;
   onToggleSelect: () => void;
 }) {
+  const qc = useQueryClient();
   const firstParticipant = thread.participants[0];
   const label = firstParticipant?.name ?? firstParticipant?.address ?? "(unknown)";
   const unread = thread.unreadCount > 0;
+
+  const patch = useMutation({
+    mutationFn: (body: { trashed?: boolean; read?: boolean }) =>
+      api(`/api/threads/${thread.id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["threads", mailboxId] }),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
   return (
-    <li className={cn("group relative flex items-stretch border-b", selected && "bg-accent/40")}>
+    <li
+      className={cn(
+        "group relative flex items-stretch border-b",
+        active
+          ? "bg-accent text-accent-foreground"
+          : selected
+            ? "bg-accent/40"
+            : "hover:bg-muted/60",
+      )}
+    >
       {active && <span aria-hidden className="absolute inset-y-0 left-0 z-10 w-0.5 bg-primary" />}
       <div
         className={cn(
@@ -210,10 +228,7 @@ function ThreadRowItem({
         to="/app/m/$mailboxId/t/$threadId"
         params={{ mailboxId, threadId: thread.id }}
         search={{ view }}
-        className={cn(
-          "flex min-w-0 flex-1 flex-col gap-0.5 py-2.5 pr-4 text-[13px] transition-colors",
-          active ? "bg-accent text-accent-foreground" : "hover:bg-muted/60",
-        )}
+        className="flex min-w-0 flex-1 flex-col gap-0.5 py-2.5 pr-4 text-[13px]"
       >
         <div className="flex items-center justify-between gap-2">
           <span className={cn("truncate", unread && "font-semibold")}>{label}</span>
@@ -244,7 +259,61 @@ function ThreadRowItem({
           )}
         </div>
       </Link>
+      {!selecting && (
+        <div className="absolute inset-y-0 right-2 flex items-center opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+          <div className="flex items-center gap-0.5 rounded-md border bg-card p-0.5 text-muted-foreground shadow-sm">
+            <RowAction
+              icon={unread ? MailOpen : Mail}
+              label={unread ? "Mark as read" : "Mark as unread"}
+              disabled={patch.isPending}
+              onClick={() => patch.mutate({ read: unread })}
+            />
+            {view === "trash" ? (
+              <RowAction
+                icon={ArchiveRestore}
+                label="Restore"
+                disabled={patch.isPending}
+                onClick={() => patch.mutate({ trashed: false })}
+              />
+            ) : (
+              <RowAction
+                icon={Trash2}
+                label="Trash"
+                disabled={patch.isPending}
+                onClick={() => patch.mutate({ trashed: true })}
+              />
+            )}
+          </div>
+        </div>
+      )}
     </li>
+  );
+}
+
+function RowAction({
+  icon: Icon,
+  label,
+  onClick,
+  disabled,
+}: {
+  icon: typeof Trash2;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <Tooltip label={label}>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        className="h-6 w-6 hover:text-foreground"
+        onClick={onClick}
+        disabled={disabled}
+        aria-label={label}
+      >
+        <Icon />
+      </Button>
+    </Tooltip>
   );
 }
 
