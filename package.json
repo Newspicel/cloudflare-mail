@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "turbo run dev --parallel",
     "build": "turbo run build",
-    "deploy": "turbo run build --filter=@cfmail/worker && pnpm --filter @cfmail/worker exec wrangler deploy",
+    "deploy": "turbo run build --filter=@cfmail/worker && pnpm --filter @cfmail/db migrate --remote && pnpm --filter @cfmail/worker exec wrangler deploy",
     "typecheck": "turbo run typecheck",
     "lint": "oxlint && biome check .",
     "lint:fix": "oxlint --fix && biome check --write .",
