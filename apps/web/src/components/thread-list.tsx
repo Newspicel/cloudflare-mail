@@ -236,26 +236,26 @@ function ThreadRowItem({
             {formatTime(thread.lastMsgAt)}
           </span>
         </div>
-        <div
-          className={cn(
-            "truncate text-[12px]",
-            unread ? "font-medium text-foreground" : "text-muted-foreground",
-          )}
-        >
-          {thread.subjectNorm || "(no subject)"}
-        </div>
         <div className="flex items-center gap-2">
-          {thread.msgCount > 1 && (
-            <span className="rounded border bg-muted px-1 font-medium text-[10px] text-muted-foreground">
-              {thread.msgCount}
-            </span>
-          )}
+          <span
+            className={cn(
+              "truncate text-[12px]",
+              unread ? "font-medium text-foreground" : "text-muted-foreground",
+            )}
+          >
+            {thread.subjectNorm || "(no subject)"}
+          </span>
           {unread && (
             <span
-              className="h-1.5 w-1.5 rounded-full bg-primary"
+              className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary"
               role="img"
               aria-label={`${thread.unreadCount} unread`}
             />
+          )}
+          {thread.msgCount > 1 && (
+            <span className="ml-auto shrink-0 rounded border bg-muted px-1 font-medium text-[10px] text-muted-foreground">
+              {thread.msgCount}
+            </span>
           )}
         </div>
       </Link>
