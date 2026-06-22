@@ -120,6 +120,32 @@ export const createMailbox = z.object({
     .optional(),
 });
 
+// Admin: create a mailbox owned by an arbitrary user.
+export const adminCreateMailbox = z.object({
+  domainId: z.string().min(1),
+  localPart,
+  ownerUserId: z.string().min(1),
+  type: MailboxType,
+  displayName: z.string().max(200).optional(),
+});
+
+// Admin: hand a mailbox to a different owner.
+export const migrateMailbox = z.object({
+  ownerUserId: z.string().min(1),
+});
+
+// Admin: delete a mailbox, optionally leaving a redirect at its old address.
+export const adminDeleteMailbox = z.object({
+  redirectToMailboxId: z.string().min(1).optional(),
+});
+
+// Admin: standalone redirect creation.
+export const createRedirect = z.object({
+  domainId: z.string().min(1),
+  localPart,
+  targetMailboxId: z.string().min(1),
+});
+
 export const updateMailboxSettings = z.object({
   displayName: z.string().max(200).nullable().optional(),
   signature: z.string().max(5000).nullable().optional(),

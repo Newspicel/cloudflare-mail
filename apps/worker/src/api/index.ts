@@ -5,6 +5,7 @@ import { logger } from "hono/logger";
 import { authFromCtx } from "../auth-ctx.ts";
 import type { AppBindings } from "../env.ts";
 import { sessionMiddleware } from "../middleware.ts";
+import { adminRoutes } from "./admin.ts";
 import { attachmentsRoutes } from "./attachments.ts";
 import { bootstrapRoutes } from "./bootstrap.ts";
 import { domainsRoutes } from "./domains.ts";
@@ -55,6 +56,7 @@ export function buildApi() {
 
   app.route("/api/domains", domainsRoutes());
   app.route("/api/users", usersRoutes());
+  app.route("/api/admin", adminRoutes());
   app.route("/api/mailboxes", mailboxesRoutes());
   app.route("/api/threads", threadsRoutes());
   app.route("/api/messages", messagesRoutes());

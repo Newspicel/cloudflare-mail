@@ -36,6 +36,8 @@ Do not paste stack details into this file or any other doc. If `package.json` sa
 9. **Admin password reset is intentionally not self-service.** `sendResetPassword` in `auth.ts` no-ops for users with `role === "admin"`. Recovery is via 2FA backup codes or a CLI `wrangler d1 execute` reset. Don't add a UI flow that bypasses this.
 10. **Mailbox creation goes through `mailbox-access.ts#authorizeMailboxCreate`.** That helper checks both `domain.allowedKinds` (does the domain permit this kind?) and `domain_grant` (is this user permitted?). Admins bypass the grant check. Don't duplicate this logic in route handlers.
 11. **Secrets stay out of the repo.** No `.env`, no real tokens in `wrangler.jsonc`. Development is `.dev.vars` (gitignored, but no longer required for `BETTER_AUTH_SECRET` since it's DB-stored).
+12. **Redirects are inbound-only aliases.** The `redirect` table maps `(domainId, localPart)` to a target mailbox. `mail/receive.ts` falls back to it only when no mailbox matches the address — a real mailbox always wins. There is no mailbox row for a redirect, so it cannot send. Inbound messages store the envelope recipient in `message.deliveredTo`; the UI surfaces it when it differs from the To header. Admin-only management lives in `apps/worker/src/api/admin.ts`.
+13. **Drizzle migrations are hand-written.** `drizzle-kit generate` is broken against the current meta snapshot (it stopped at `0002`). Edit `packages/db/src/schema.ts` as the source of truth, then add a hand-written `drizzle/NNNN_*.sql` and a matching `_journal.json` entry — do not rely on `db:generate`.
 
 ## Tooling rules
 

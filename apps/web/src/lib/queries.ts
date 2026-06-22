@@ -30,6 +30,7 @@ export interface MessageRow {
   direction: "in" | "out";
   fromName: string | null;
   fromAddr: string;
+  deliveredTo: string | null;
   toAddrs: { name?: string; address: string }[];
   subject: string;
   snippet: string;
