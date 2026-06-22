@@ -64,10 +64,20 @@ export const mailboxesQuery = queryOptions({
   queryFn: () => api<{ mailboxes: MailboxSummary[] }>("/api/mailboxes"),
 });
 
-export const threadsQuery = (mailboxId: string) =>
+export type MailView = "inbox" | "archive" | "trash";
+export const MAIL_VIEWS: MailView[] = ["inbox", "archive", "trash"];
+
+export function parseMailView(value: unknown): MailView {
+  return value === "archive" || value === "trash" ? value : "inbox";
+}
+
+export const threadsQuery = (mailboxId: string, view: MailView = "inbox") =>
   queryOptions({
-    queryKey: ["threads", mailboxId],
-    queryFn: () => api<{ threads: ThreadRow[] }>(`/api/threads?mailboxId=${mailboxId}`),
+    queryKey: ["threads", mailboxId, view],
+    queryFn: () =>
+      api<{ threads: ThreadRow[] }>(
+        `/api/threads?mailboxId=${encodeURIComponent(mailboxId)}&view=${view}`,
+      ),
     enabled: Boolean(mailboxId),
   });
 

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import DOMPurify from "dompurify";
-import { Minimize2, Paperclip, X } from "lucide-react";
+import { Paperclip, Trash2, X } from "lucide-react";
 import { marked } from "marked";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -12,6 +12,7 @@ marked.setOptions({ breaks: true, gfm: true });
 
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const MAX_ATTACHMENTS = 20;
+const DRAFT_PREFIX = "cfmail:draft:";
 
 interface UploadedAttachment {
   r2Key: string;
@@ -23,18 +24,35 @@ interface UploadedAttachment {
 interface ComposeState {
   open: boolean;
   replyToMessage: MessageRow | null;
+  forwardMessage: MessageRow | null;
   initialTo?: string;
 }
 
+interface DraftData {
+  mailboxId: string;
+  to: string;
+  cc: string;
+  bcc: string;
+  subject: string;
+  text: string;
+  markdown: boolean;
+}
+
 const listeners = new Set<(s: ComposeState) => void>();
-let state: ComposeState = { open: false, replyToMessage: null };
+let state: ComposeState = { open: false, replyToMessage: null, forwardMessage: null };
 
 export function openCompose(partial: Partial<ComposeState> = {}): void {
-  state = { ...state, open: true, replyToMessage: null, initialTo: undefined, ...partial };
+  state = {
+    open: true,
+    replyToMessage: null,
+    forwardMessage: null,
+    initialTo: undefined,
+    ...partial,
+  };
   for (const l of listeners) l(state);
 }
 export function closeCompose(): void {
-  state = { open: false, replyToMessage: null };
+  state = { open: false, replyToMessage: null, forwardMessage: null };
   for (const l of listeners) l(state);
 }
 
@@ -50,22 +68,66 @@ export function ComposeDock() {
   return <ComposePanel state={s} />;
 }
 
+function draftKey(s: ComposeState): string {
+  return `${DRAFT_PREFIX}${s.replyToMessage?.id ?? s.forwardMessage?.id ?? "new"}`;
+}
+
+function loadDraft(key: string): DraftData | null {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as DraftData) : null;
+  } catch {
+    return null;
+  }
+}
+
 function ComposePanel({ state: s }: { state: ComposeState }) {
   const qc = useQueryClient();
   const { data: mailboxes } = useQuery(mailboxesQuery);
   const sendable = (mailboxes?.mailboxes ?? []).filter((m) => (m.perms & 2) === 2);
+  const key = draftKey(s);
+  const saved = useMemo(() => loadDraft(key), [key]);
 
-  const [mailboxId, setMailboxId] = useState(s.replyToMessage?.mailboxId ?? sendable[0]?.id ?? "");
-  const [to, setTo] = useState(s.replyToMessage?.fromAddr ?? s.initialTo ?? "");
-  const [subject, setSubject] = useState(
-    s.replyToMessage ? prefixSubject(s.replyToMessage.subject) : "",
+  const fwd = s.forwardMessage;
+  const [mailboxId, setMailboxId] = useState(
+    saved?.mailboxId ?? s.replyToMessage?.mailboxId ?? fwd?.mailboxId ?? sendable[0]?.id ?? "",
   );
-  const [text, setText] = useState("");
-  const [markdown, setMarkdown] = useState(false);
+  const [to, setTo] = useState(saved?.to ?? s.replyToMessage?.fromAddr ?? s.initialTo ?? "");
+  const [cc, setCc] = useState(saved?.cc ?? "");
+  const [bcc, setBcc] = useState(saved?.bcc ?? "");
+  const [showCc, setShowCc] = useState(Boolean(saved?.cc || saved?.bcc));
+  const [subject, setSubject] = useState(
+    saved?.subject ??
+      (s.replyToMessage
+        ? prefixSubject(s.replyToMessage.subject, "Re")
+        : fwd
+          ? prefixSubject(fwd.subject, "Fwd")
+          : ""),
+  );
+  const [text, setText] = useState(saved?.text ?? (fwd ? quoteForward(fwd) : ""));
+  const [markdown, setMarkdown] = useState(saved?.markdown ?? false);
   const [preview, setPreview] = useState(false);
   const [attachments, setAttachments] = useState<UploadedAttachment[]>([]);
   const [uploading, setUploading] = useState(0);
+  const [savedHint, setSavedHint] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Debounced draft persistence.
+  useEffect(() => {
+    const isEmpty = !to && !cc && !bcc && !subject && !text;
+    const handle = setTimeout(() => {
+      if (isEmpty) {
+        localStorage.removeItem(key);
+        return;
+      }
+      localStorage.setItem(
+        key,
+        JSON.stringify({ mailboxId, to, cc, bcc, subject, text, markdown } satisfies DraftData),
+      );
+      setSavedHint(true);
+    }, 600);
+    return () => clearTimeout(handle);
+  }, [key, mailboxId, to, cc, bcc, subject, text, markdown]);
 
   const previewHtml = useMemo(() => {
     if (!markdown || !text.trim()) return "";
@@ -76,14 +138,15 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
   const send = useMutation({
     mutationFn: async () => {
       const html = markdown && text.trim() ? previewHtml : undefined;
+      const ccList = parseAddrs(cc);
+      const bccList = parseAddrs(bcc);
       return api<{ messageId: string; threadId: string }>("/api/messages/send", {
         method: "POST",
         body: JSON.stringify({
           mailboxId,
-          to: to
-            .split(/[,;]\s*/)
-            .filter(Boolean)
-            .map((address) => ({ address })),
+          to: parseAddrs(to),
+          cc: ccList.length ? ccList : undefined,
+          bcc: bccList.length ? bccList : undefined,
           subject,
           text,
           html,
@@ -100,12 +163,18 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
     onSuccess: () => {
       toast.success("Message sent");
       qc.invalidateQueries({ queryKey: ["threads", mailboxId] });
+      localStorage.removeItem(key);
       closeCompose();
     },
     onError: (err: unknown) => {
       toast.error(err instanceof Error ? err.message : "Send failed");
     },
   });
+
+  function discard() {
+    localStorage.removeItem(key);
+    closeCompose();
+  }
 
   async function uploadFile(file: File): Promise<void> {
     if (file.size === 0) {
@@ -154,30 +223,24 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
   }
 
   return (
-    <div className="fixed bottom-0 right-6 z-40 flex h-[520px] w-[520px] flex-col overflow-hidden rounded-t-md border border-b-0 bg-card shadow-xl shadow-black/10">
+    <div className="fixed inset-0 z-40 flex flex-col overflow-hidden border bg-card shadow-xl shadow-black/10 sm:inset-auto sm:bottom-0 sm:right-6 sm:h-[540px] sm:w-[520px] sm:rounded-t-md sm:border-b-0">
       <div className="flex items-center justify-between border-b bg-muted px-3 py-1.5">
-        <div className="text-[12px] font-semibold tracking-tight">New message</div>
+        <div className="text-[12px] font-semibold tracking-tight">
+          {s.replyToMessage ? "Reply" : s.forwardMessage ? "Forward" : "New message"}
+        </div>
         <div className="flex items-center gap-0.5">
           <button
             type="button"
             onClick={closeCompose}
             className="grid h-6 w-6 place-items-center rounded text-muted-foreground hover:bg-background hover:text-foreground"
-            aria-label="Minimize"
-            title="Close"
-          >
-            <Minimize2 className="h-3 w-3" />
-          </button>
-          <button
-            type="button"
-            onClick={closeCompose}
-            className="grid h-6 w-6 place-items-center rounded text-muted-foreground hover:bg-background hover:text-foreground"
             aria-label="Close"
+            title="Close"
           >
             <X className="h-3.5 w-3.5" />
           </button>
         </div>
       </div>
-      <div className="flex flex-1 flex-col gap-1 px-3 py-2 text-[13px]">
+      <div className="flex flex-1 flex-col gap-1 overflow-y-auto px-3 py-2 text-[13px]">
         <label className="flex items-center gap-2 border-b py-1">
           <span className="w-12 shrink-0 text-[11px] uppercase tracking-wider text-muted-foreground">
             From
@@ -204,7 +267,42 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
             placeholder="name@example.com"
             className="flex-1 bg-transparent outline-none"
           />
+          {!showCc && (
+            <button
+              type="button"
+              onClick={() => setShowCc(true)}
+              className="shrink-0 text-[11px] font-medium text-muted-foreground hover:text-foreground"
+            >
+              Cc/Bcc
+            </button>
+          )}
         </label>
+        {showCc && (
+          <>
+            <label className="flex items-center gap-2 border-b py-1">
+              <span className="w-12 shrink-0 text-[11px] uppercase tracking-wider text-muted-foreground">
+                Cc
+              </span>
+              <input
+                value={cc}
+                onChange={(e) => setCc(e.target.value)}
+                placeholder="cc@example.com"
+                className="flex-1 bg-transparent outline-none"
+              />
+            </label>
+            <label className="flex items-center gap-2 border-b py-1">
+              <span className="w-12 shrink-0 text-[11px] uppercase tracking-wider text-muted-foreground">
+                Bcc
+              </span>
+              <input
+                value={bcc}
+                onChange={(e) => setBcc(e.target.value)}
+                placeholder="bcc@example.com"
+                className="flex-1 bg-transparent outline-none"
+              />
+            </label>
+          </>
+        )}
         <label className="flex items-center gap-2 border-b py-1">
           <span className="w-12 shrink-0 text-[11px] uppercase tracking-wider text-muted-foreground">
             Subject
@@ -315,17 +413,35 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
               {preview ? "Edit" : "Preview"}
             </button>
           )}
+          <button
+            type="button"
+            onClick={discard}
+            className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+            aria-label="Discard draft"
+            title="Discard draft"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
         </div>
         <span className="text-[11px] text-muted-foreground">
           {uploading > 0
             ? `Uploading ${uploading}…`
             : sendable.length === 0
               ? "No sendable mailboxes"
-              : null}
+              : savedHint
+                ? "Draft saved"
+                : null}
         </span>
       </div>
     </div>
   );
+}
+
+function parseAddrs(value: string): { address: string }[] {
+  return value
+    .split(/[,;]\s*/)
+    .filter(Boolean)
+    .map((address) => ({ address }));
 }
 
 function formatBytes(n: number): string {
@@ -334,7 +450,24 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function prefixSubject(s: string): string {
-  if (/^re:/i.test(s.trim())) return s;
-  return `Re: ${s}`;
+function prefixSubject(s: string, prefix: "Re" | "Fwd"): string {
+  const re = prefix === "Re" ? /^re:/i : /^fwd:/i;
+  if (re.test(s.trim())) return s;
+  return `${prefix}: ${s}`;
+}
+
+function quoteForward(msg: MessageRow): string {
+  const when = new Date(msg.sentAt ?? msg.receivedAt ?? msg.createdAt).toLocaleString();
+  const to = msg.toAddrs.map((a) => a.address).join(", ");
+  return [
+    "",
+    "",
+    "---------- Forwarded message ----------",
+    `From: ${msg.fromName ?? msg.fromAddr} <${msg.fromAddr}>`,
+    `Date: ${when}`,
+    `Subject: ${msg.subject}`,
+    `To: ${to}`,
+    "",
+    msg.snippet,
+  ].join("\n");
 }
