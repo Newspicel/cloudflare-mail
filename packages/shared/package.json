@@ -11,9 +11,9 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
-    "zod": "4.3.6"
+    "zod": "4.4.3"
   },
   "devDependencies": {
-    "@typescript/native-preview": "7.0.0-dev.20260420.1"
+    "@typescript/native-preview": "7.0.0-dev.20260622.1"
   }
 }
