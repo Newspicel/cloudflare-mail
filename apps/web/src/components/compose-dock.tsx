@@ -3,11 +3,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import DOMPurify from "dompurify";
 import { Paperclip, Trash2, X } from "lucide-react";
 import { marked } from "marked";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ApiError, api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
-import { type MessageRow, mailboxesQuery } from "@/lib/queries.ts";
+import { type DraftRow, type MessageRow, mailboxesQuery } from "@/lib/queries.ts";
 import { Button } from "./ui/button.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select.tsx";
 import { Textarea } from "./ui/textarea.tsx";
@@ -16,7 +16,6 @@ marked.setOptions({ breaks: true, gfm: true });
 
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const MAX_ATTACHMENTS = 20;
-const DRAFT_PREFIX = "cfmail:draft:";
 
 interface UploadedAttachment {
   r2Key: string;
@@ -30,16 +29,18 @@ interface ComposeState {
   replyToMessage: MessageRow | null;
   forwardMessage: MessageRow | null;
   initialTo?: string;
+  // When set, the composer reopens an existing server-persisted draft.
+  draft?: DraftRow | null;
 }
 
-interface DraftData {
-  mailboxId: string;
-  to: string;
-  cc: string;
-  bcc: string;
+interface DraftSnapshot {
+  to: { address: string }[];
+  cc: { address: string }[];
+  bcc: { address: string }[];
   subject: string;
-  text: string;
+  body: string;
   markdown: boolean;
+  attachments: UploadedAttachment[];
 }
 
 const listeners = new Set<(s: ComposeState) => void>();
@@ -51,6 +52,7 @@ export function openCompose(partial: Partial<ComposeState> = {}): void {
     replyToMessage: null,
     forwardMessage: null,
     initialTo: undefined,
+    draft: null,
     ...partial,
   };
   for (const l of listeners) l(state);
@@ -69,20 +71,17 @@ export function ComposeDock() {
     };
   }, []);
   if (!s.open) return null;
-  return <ComposePanel state={s} />;
+  // Remount when the target changes so the form re-initializes cleanly.
+  return (
+    <ComposePanel
+      key={s.draft?.id ?? s.replyToMessage?.id ?? s.forwardMessage?.id ?? "new"}
+      state={s}
+    />
+  );
 }
 
-function draftKey(s: ComposeState): string {
-  return `${DRAFT_PREFIX}${s.replyToMessage?.id ?? s.forwardMessage?.id ?? "new"}`;
-}
-
-function loadDraft(key: string): DraftData | null {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as DraftData) : null;
-  } catch {
-    return null;
-  }
+function addrsToString(addrs: { name?: string; address: string }[] | null | undefined): string {
+  return (addrs ?? []).map((a) => a.address).join(", ");
 }
 
 const FIELD_LABEL = "w-12 shrink-0 text-[11px] text-muted-foreground uppercase tracking-wider";
@@ -93,49 +92,124 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
   const qc = useQueryClient();
   const { data: mailboxes } = useQuery(mailboxesQuery);
   const sendable = (mailboxes?.mailboxes ?? []).filter((m) => (m.perms & 2) === 2);
-  const key = draftKey(s);
-  const saved = useMemo(() => loadDraft(key), [key]);
-
+  const d = s.draft;
   const fwd = s.forwardMessage;
+
   const [mailboxId, setMailboxId] = useState(
-    saved?.mailboxId ?? s.replyToMessage?.mailboxId ?? fwd?.mailboxId ?? sendable[0]?.id ?? "",
+    d?.mailboxId ?? s.replyToMessage?.mailboxId ?? fwd?.mailboxId ?? sendable[0]?.id ?? "",
   );
-  const [to, setTo] = useState(saved?.to ?? s.replyToMessage?.fromAddr ?? s.initialTo ?? "");
-  const [cc, setCc] = useState(saved?.cc ?? "");
-  const [bcc, setBcc] = useState(saved?.bcc ?? "");
-  const [showCc, setShowCc] = useState(Boolean(saved?.cc || saved?.bcc));
+  const [to, setTo] = useState(
+    d ? addrsToString(d.toAddrs) : (s.replyToMessage?.fromAddr ?? s.initialTo ?? ""),
+  );
+  const [cc, setCc] = useState(d ? addrsToString(d.ccAddrs) : "");
+  const [bcc, setBcc] = useState(d ? addrsToString(d.bccAddrs) : "");
+  const [showCc, setShowCc] = useState(Boolean(cc || bcc));
   const [subject, setSubject] = useState(
-    saved?.subject ??
-      (s.replyToMessage
+    d
+      ? d.subject
+      : s.replyToMessage
         ? prefixSubject(s.replyToMessage.subject, "Re")
         : fwd
           ? prefixSubject(fwd.subject, "Fwd")
-          : ""),
+          : "",
   );
-  const [text, setText] = useState(saved?.text ?? (fwd ? quoteForward(fwd) : ""));
-  const [markdown, setMarkdown] = useState(saved?.markdown ?? false);
+  const [text, setText] = useState(d ? d.body : fwd ? quoteForward(fwd) : "");
+  const [markdown, setMarkdown] = useState(d?.markdown ?? false);
   const [preview, setPreview] = useState(false);
-  const [attachments, setAttachments] = useState<UploadedAttachment[]>([]);
+  const [attachments, setAttachments] = useState<UploadedAttachment[]>(d?.attachments ?? []);
   const [uploading, setUploading] = useState(0);
   const [savedHint, setSavedHint] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Debounced draft persistence.
-  useEffect(() => {
-    const isEmpty = !to && !cc && !bcc && !subject && !text;
-    const handle = setTimeout(() => {
-      if (isEmpty) {
-        localStorage.removeItem(key);
+  // Threading context, carried through from a reopened reply/forward draft.
+  const inReplyTo = d?.inReplyTo ?? undefined;
+  const references = d?.references ?? undefined;
+
+  // ── Server-persisted drafts ────────────────────────────────────────────
+  const draftIdRef = useRef<string | null>(d?.id ?? null);
+  const initialKeyRef = useRef<string | null>(null);
+  const saveRef = useRef<{
+    saving: boolean;
+    queued: { snap: DraftSnapshot; isEmpty: boolean } | null;
+  }>({
+    saving: false,
+    queued: null,
+  });
+
+  const invalidateDrafts = useCallback(() => {
+    if (!mailboxId) return;
+    qc.invalidateQueries({ queryKey: ["drafts", mailboxId] });
+    // Refresh the Drafts badge count (keyed under the threads prefix).
+    qc.invalidateQueries({ queryKey: ["threads", mailboxId, "counts"] });
+  }, [qc, mailboxId]);
+
+  const deleteDraft = useCallback(async () => {
+    const id = draftIdRef.current;
+    if (!id) return;
+    draftIdRef.current = null;
+    await api(`/api/drafts/${id}`, { method: "DELETE" });
+    invalidateDrafts();
+  }, [invalidateDrafts]);
+
+  const flush = useCallback(
+    async (data: { snap: DraftSnapshot; isEmpty: boolean }) => {
+      const st = saveRef.current;
+      if (st.saving) {
+        st.queued = data;
         return;
       }
-      localStorage.setItem(
-        key,
-        JSON.stringify({ mailboxId, to, cc, bcc, subject, text, markdown } satisfies DraftData),
-      );
-      setSavedHint(true);
-    }, 600);
+      st.saving = true;
+      try {
+        if (data.isEmpty) {
+          await deleteDraft();
+        } else {
+          const payload = { ...data.snap, inReplyTo, references };
+          if (draftIdRef.current) {
+            await api(`/api/drafts/${draftIdRef.current}`, {
+              method: "PATCH",
+              body: JSON.stringify(payload),
+            });
+          } else {
+            const res = await api<{ draft: { id: string } }>("/api/drafts", {
+              method: "POST",
+              body: JSON.stringify({ mailboxId, ...payload }),
+            });
+            draftIdRef.current = res.draft.id;
+          }
+          setSavedHint(true);
+          invalidateDrafts();
+        }
+      } catch {
+        // Autosave is best-effort; surface nothing on transient failures.
+      } finally {
+        st.saving = false;
+        const q = st.queued;
+        st.queued = null;
+        if (q) void flush(q);
+      }
+    },
+    [mailboxId, inReplyTo, references, deleteDraft, invalidateDrafts],
+  );
+
+  // Debounced autosave. Skips while the form is untouched (so merely opening a
+  // reply/forward doesn't spawn a draft) and serializes writes via `flush`.
+  useEffect(() => {
+    const snap: DraftSnapshot = {
+      to: parseAddrs(to),
+      cc: parseAddrs(cc),
+      bcc: parseAddrs(bcc),
+      subject,
+      body: text,
+      markdown,
+      attachments,
+    };
+    const isEmpty = !to && !cc && !bcc && !subject && !text && attachments.length === 0;
+    const key = JSON.stringify(snap);
+    if (initialKeyRef.current === null) initialKeyRef.current = key;
+    if (key === initialKeyRef.current) return;
+    const handle = setTimeout(() => void flush({ snap, isEmpty }), 700);
     return () => clearTimeout(handle);
-  }, [key, mailboxId, to, cc, bcc, subject, text, markdown]);
+  }, [to, cc, bcc, subject, text, markdown, attachments, flush]);
 
   const previewHtml = useMemo(() => {
     if (!markdown || !text.trim()) return "";
@@ -168,10 +242,10 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
         }),
       });
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       toast.success("Message sent");
       qc.invalidateQueries({ queryKey: ["threads", mailboxId] });
-      localStorage.removeItem(key);
+      await deleteDraft().catch(() => {});
       closeCompose();
     },
     onError: (err: unknown) => {
@@ -180,7 +254,7 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
   });
 
   function discard() {
-    localStorage.removeItem(key);
+    void deleteDraft().catch(() => {});
     closeCompose();
   }
 

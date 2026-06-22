@@ -24,7 +24,7 @@ export function AppShortcuts() {
   });
 
   const setThreadState = useMutation({
-    mutationFn: (input: { id: string; patch: { archived?: boolean; trashed?: boolean } }) =>
+    mutationFn: (input: { id: string; patch: { trashed?: boolean; spam?: boolean } }) =>
       api(`/api/threads/${input.id}`, { method: "PATCH", body: JSON.stringify(input.patch) }),
     onSuccess: () => {
       if (mailboxId) qc.invalidateQueries({ queryKey: ["threads", mailboxId] });
@@ -34,7 +34,7 @@ export function AppShortcuts() {
   });
 
   const moveThread = useCallback(
-    (patch: { archived?: boolean; trashed?: boolean }, label: string, undo: typeof patch) => {
+    (patch: { trashed?: boolean; spam?: boolean }, label: string, undo: typeof patch) => {
       if (!threadId) return;
       const id = threadId;
       setThreadState.mutate(
@@ -131,7 +131,10 @@ export function AppShortcuts() {
         api(`/api/messages/${last.id}`, {
           method: "PATCH",
           body: JSON.stringify({ starred: !hasFlag(last.flags, Flag.STARRED) }),
-        }).then(() => qc.invalidateQueries({ queryKey: ["thread", threadId] })),
+        }).then(() => {
+          qc.invalidateQueries({ queryKey: ["thread", threadId] });
+          if (mailboxId) qc.invalidateQueries({ queryKey: ["threads", mailboxId] });
+        }),
       );
       return;
     }
@@ -147,14 +150,14 @@ export function AppShortcuts() {
       );
       return;
     }
-    if (e.key === "e" && view !== "archive") {
+    if (e.key === "!" && view !== "spam") {
       e.preventDefault();
-      moveThread({ archived: true }, "Archived", { archived: false });
+      moveThread({ spam: true }, "Marked as spam", { spam: false });
       return;
     }
-    if (e.key === "e" && view === "archive") {
+    if (e.key === "!" && view === "spam") {
       e.preventDefault();
-      moveThread({ archived: false }, "Moved to Inbox", { archived: true });
+      moveThread({ spam: false }, "Moved to Inbox", { spam: true });
       return;
     }
     if (e.key === "#") {

@@ -3,12 +3,13 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import DOMPurify from "dompurify";
 import {
-  Archive,
   ArchiveRestore,
   ArrowLeft,
   Forward,
+  Inbox,
   MailMinus,
   Reply,
+  ShieldAlert,
   Star,
   Trash2,
 } from "lucide-react";
@@ -40,7 +41,7 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
   }, [qc, thread.mailboxId, thread.id]);
 
   const setState = useMutation({
-    mutationFn: (patch: { archived?: boolean; trashed?: boolean }) =>
+    mutationFn: (patch: { trashed?: boolean; spam?: boolean }) =>
       api(`/api/threads/${thread.id}`, { method: "PATCH", body: JSON.stringify(patch) }),
     onSuccess: invalidate,
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
@@ -67,11 +68,7 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
     ).then(invalidate);
   }, [thread.id, messages, readOnly, invalidate]);
 
-  function act(
-    patch: { archived?: boolean; trashed?: boolean },
-    label: string,
-    undo: typeof patch,
-  ) {
+  function act(patch: { trashed?: boolean; spam?: boolean }, label: string, undo: typeof patch) {
     setState.mutate(patch, {
       onSuccess: () => {
         toast.success(label, {
@@ -125,21 +122,21 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
                 </ToolbarButton>
               ) : (
                 <>
-                  {view === "archive" ? (
+                  {view === "spam" ? (
                     <ToolbarButton
-                      onClick={() => act({ archived: false }, "Moved to Inbox", { archived: true })}
+                      onClick={() => act({ spam: false }, "Moved to Inbox", { spam: true })}
                       disabled={setState.isPending}
-                      label="Move to Inbox"
+                      label="Not spam"
                     >
-                      <ArchiveRestore />
+                      <Inbox />
                     </ToolbarButton>
                   ) : (
                     <ToolbarButton
-                      onClick={() => act({ archived: true }, "Archived", { archived: false })}
+                      onClick={() => act({ spam: true }, "Marked as spam", { spam: false })}
                       disabled={setState.isPending}
-                      label="Archive (e)"
+                      label="Mark as spam (!)"
                     >
-                      <Archive />
+                      <ShieldAlert />
                     </ToolbarButton>
                   )}
                   <ToolbarButton

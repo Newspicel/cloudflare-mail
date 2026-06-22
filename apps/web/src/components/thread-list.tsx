@@ -1,12 +1,13 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Archive, Inbox, Timer, Trash2, X } from "lucide-react";
+import { Inbox, ShieldAlert, Timer, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
 import type { MailView, ThreadRow } from "@/lib/queries.ts";
 import { formatRemaining, useNow } from "@/lib/time.ts";
+import { FOLDER_META, FolderTabs } from "./folder-tabs.tsx";
 import { Button } from "./ui/button.tsx";
 import { Checkbox } from "./ui/checkbox.tsx";
 import { Tooltip, TooltipProvider } from "./ui/tooltip.tsx";
@@ -21,12 +22,6 @@ interface Props {
   expiresAt?: string | null;
 }
 
-const VIEW_META: Record<MailView, { label: string; icon: typeof Inbox; empty: string }> = {
-  inbox: { label: "Inbox", icon: Inbox, empty: "No conversations yet." },
-  archive: { label: "Archive", icon: Archive, empty: "Nothing archived." },
-  trash: { label: "Trash", icon: Trash2, empty: "Trash is empty." },
-};
-
 export function ThreadList({
   mailboxId,
   view,
@@ -35,13 +30,13 @@ export function ThreadList({
   selectedThreadId,
   expiresAt,
 }: Props) {
-  const meta = VIEW_META[view];
+  const meta = FOLDER_META[view];
   const qc = useQueryClient();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const selecting = selected.size > 0;
 
   const bulk = useMutation({
-    mutationFn: async (patch: { archived?: boolean; trashed?: boolean }) => {
+    mutationFn: async (patch: { trashed?: boolean; spam?: boolean }) => {
       const ids = [...selected];
       await Promise.all(
         ids.map((id) =>
@@ -82,14 +77,6 @@ export function ThreadList({
             </Tooltip>
             <span className="font-medium text-[12px]">{selected.size} selected</span>
             <div className="ml-auto flex items-center gap-0.5">
-              {view !== "archive" && (
-                <BulkButton
-                  icon={Archive}
-                  label="Archive"
-                  disabled={bulk.isPending}
-                  onClick={() => bulk.mutate({ archived: true })}
-                />
-              )}
               {view === "trash" ? (
                 <BulkButton
                   icon={Inbox}
@@ -97,7 +84,22 @@ export function ThreadList({
                   disabled={bulk.isPending}
                   onClick={() => bulk.mutate({ trashed: false })}
                 />
+              ) : view === "spam" ? (
+                <BulkButton
+                  icon={Inbox}
+                  label="Not spam"
+                  disabled={bulk.isPending}
+                  onClick={() => bulk.mutate({ spam: false })}
+                />
               ) : (
+                <BulkButton
+                  icon={ShieldAlert}
+                  label="Mark as spam"
+                  disabled={bulk.isPending}
+                  onClick={() => bulk.mutate({ spam: true })}
+                />
+              )}
+              {view !== "trash" && (
                 <BulkButton
                   icon={Trash2}
                   label="Trash"
@@ -108,29 +110,8 @@ export function ThreadList({
             </div>
           </div>
         ) : (
-          <div className="flex h-11 shrink-0 items-center gap-0.5 border-b px-2">
-            <div className="flex items-center gap-0.5 rounded-lg bg-muted p-0.5">
-              {(Object.keys(VIEW_META) as MailView[]).map((v) => {
-                const m = VIEW_META[v];
-                const active = v === view;
-                return (
-                  <Link
-                    key={v}
-                    to="/app/m/$mailboxId"
-                    params={{ mailboxId }}
-                    search={{ view: v }}
-                    className={cn(
-                      "flex h-7 items-center gap-1.5 rounded-md px-2.5 font-medium text-[12px] transition-colors",
-                      active
-                        ? "bg-card text-foreground shadow-black/5 shadow-sm"
-                        : "text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    <m.icon className="h-3.5 w-3.5" /> {m.label}
-                  </Link>
-                );
-              })}
-            </div>
+          <div className="flex h-11 shrink-0 items-center gap-2 border-b px-2">
+            <FolderTabs mailboxId={mailboxId} view={view} />
             <span className="ml-auto pr-1 text-[11px] text-muted-foreground tabular-nums">
               {threads.length}
             </span>
@@ -168,7 +149,7 @@ function BulkButton({
   onClick,
   disabled,
 }: {
-  icon: typeof Archive;
+  icon: typeof Trash2;
   label: string;
   onClick: () => void;
   disabled?: boolean;

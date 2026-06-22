@@ -248,13 +248,13 @@ export const thread = sqliteTable(
       .notNull()
       .default(sql`'[]'`),
     unreadCount: integer("unread_count").notNull().default(0),
-    archived: integer("archived", { mode: "boolean" }).notNull().default(false),
     trashed: integer("trashed", { mode: "boolean" }).notNull().default(false),
+    spam: integer("spam", { mode: "boolean" }).notNull().default(false),
   },
   (t) => [
     index("thread_mailbox_last_idx").on(t.mailboxId, t.lastMsgAt),
     index("thread_mailbox_subject_idx").on(t.mailboxId, t.subjectNorm),
-    index("thread_mailbox_state_idx").on(t.mailboxId, t.archived, t.trashed),
+    index("thread_mailbox_state_idx").on(t.mailboxId, t.trashed, t.spam),
   ],
 );
 
@@ -359,6 +359,43 @@ export const mailboxInvite = sqliteTable(
   (t) => [
     uniqueIndex("mailbox_invite_mailbox_email_uq").on(t.mailboxId, t.email),
     index("mailbox_invite_email_idx").on(t.email),
+  ],
+);
+
+// Server-persisted compose drafts. A draft is not a message until sent; on
+// send it flows through the normal outbound path and the draft row is deleted.
+export const draft = sqliteTable(
+  "draft",
+  {
+    id: text("id").primaryKey(),
+    mailboxId: text("mailbox_id")
+      .notNull()
+      .references(() => mailbox.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    // Reply/forward threading context (the thread id is resolved at send time).
+    inReplyTo: text("in_reply_to"),
+    references: text("references", { mode: "json" }).$type<string[]>(),
+    toAddrs: text("to_addrs", { mode: "json" })
+      .$type<{ name?: string; address: string }[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    ccAddrs: text("cc_addrs", { mode: "json" }).$type<{ name?: string; address: string }[]>(),
+    bccAddrs: text("bcc_addrs", { mode: "json" }).$type<{ name?: string; address: string }[]>(),
+    subject: text("subject").notNull().default(""),
+    body: text("body").notNull().default(""),
+    markdown: integer("markdown", { mode: "boolean" }).notNull().default(false),
+    attachments: text("attachments", { mode: "json" })
+      .$type<{ r2Key: string; filename: string; contentType: string; sizeBytes: number }[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(now),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().default(now),
+  },
+  (t) => [
+    index("draft_mailbox_idx").on(t.mailboxId, t.updatedAt),
+    index("draft_user_idx").on(t.userId),
   ],
 );
 

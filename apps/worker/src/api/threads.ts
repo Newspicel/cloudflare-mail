@@ -1,8 +1,9 @@
-import { message, thread } from "@cfmail/db/schema";
+import { draft, message, thread } from "@cfmail/db/schema";
+import { Flag } from "@cfmail/shared/flags";
 import { Perm } from "@cfmail/shared/permissions";
 import { updateThread } from "@cfmail/shared/schemas";
 import { zValidator } from "@hono/zod-validator";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, type SQL, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { dbFromCtx } from "../db.ts";
@@ -22,21 +23,96 @@ export function threadsRoutes() {
     await requirePerm(db, user.id, mailboxId, Perm.READ);
 
     const limit = Math.min(Number(c.req.query("limit") ?? 50), 200);
-    const view = (c.req.query("view") ?? "inbox") as "inbox" | "archive" | "trash";
-    const filter =
-      view === "trash"
-        ? eq(thread.trashed, true)
-        : view === "archive"
-          ? and(eq(thread.archived, true), eq(thread.trashed, false))
-          : and(eq(thread.archived, false), eq(thread.trashed, false));
+    const view = c.req.query("view") ?? "inbox";
+
+    // Threads not in the trash/spam buckets — the basis for inbox/sent/marked.
+    const active = and(eq(thread.trashed, false), eq(thread.spam, false));
+
+    let filter: SQL | undefined;
+    switch (view) {
+      case "trash":
+        filter = eq(thread.trashed, true);
+        break;
+      case "spam":
+        filter = and(eq(thread.spam, true), eq(thread.trashed, false));
+        break;
+      case "all":
+        filter = undefined;
+        break;
+      case "sent":
+        filter = and(active, hasMessage(eq(message.direction, "out")));
+        break;
+      case "marked":
+        filter = and(
+          active,
+          hasMessage(sql`(${message.flags} & ${Flag.STARRED}) = ${Flag.STARRED}`),
+        );
+        break;
+      default:
+        filter = active;
+    }
 
     const rows = await db
       .select()
       .from(thread)
-      .where(and(eq(thread.mailboxId, mailboxId), filter))
+      .where(
+        filter ? and(eq(thread.mailboxId, mailboxId), filter) : eq(thread.mailboxId, mailboxId),
+      )
       .orderBy(desc(thread.lastMsgAt))
       .limit(limit);
     return c.json({ threads: rows });
+  });
+
+  // Per-folder badge counts for the icon bar. `unread` is only meaningful for
+  // the inbox/spam buckets; the rest report totals.
+  r.get("/counts", async (c) => {
+    const db = dbFromCtx(c);
+    const user = c.get("user")!;
+    const mailboxId = c.req.query("mailboxId");
+    if (!mailboxId) throw new HTTPException(400, { message: "mailboxId required" });
+    await requirePerm(db, user.id, mailboxId, Perm.READ);
+
+    const inMailbox = eq(thread.mailboxId, mailboxId);
+    const active = and(inMailbox, eq(thread.trashed, false), eq(thread.spam, false));
+    const inSpam = and(inMailbox, eq(thread.spam, true), eq(thread.trashed, false));
+    const starred = sql`(${message.flags} & ${Flag.STARRED}) = ${Flag.STARRED}`;
+
+    const cnt = async (cond: SQL | undefined): Promise<number> => {
+      const rows = await db.select({ c: count() }).from(thread).where(cond);
+      return rows[0]?.c ?? 0;
+    };
+    const draftCnt = async (): Promise<number> => {
+      const rows = await db
+        .select({ c: count() })
+        .from(draft)
+        .where(and(eq(draft.mailboxId, mailboxId), eq(draft.userId, user.id)));
+      return rows[0]?.c ?? 0;
+    };
+
+    const [inbox, inboxUnread, sent, marked, spam, spamUnread, trash, all, drafts] =
+      await Promise.all([
+        cnt(active),
+        cnt(and(active, gt(thread.unreadCount, 0))),
+        cnt(and(active, hasMessage(eq(message.direction, "out")))),
+        cnt(and(active, hasMessage(starred))),
+        cnt(inSpam),
+        cnt(and(inSpam, gt(thread.unreadCount, 0))),
+        cnt(and(inMailbox, eq(thread.trashed, true))),
+        cnt(inMailbox),
+        draftCnt(),
+      ]);
+
+    return c.json({
+      counts: {
+        inbox: { total: inbox, unread: inboxUnread },
+        drafts: { total: drafts, unread: 0 },
+        sent: { total: sent, unread: 0 },
+        marked: { total: marked, unread: 0 },
+        spam: { total: spam, unread: spamUnread },
+        trash: { total: trash, unread: 0 },
+        all: { total: all, unread: 0 },
+      },
+    });
   });
 
   r.get("/:id", async (c) => {
@@ -65,27 +141,37 @@ export function threadsRoutes() {
 
     const th = await db.query.thread.findFirst({
       where: eq(thread.id, id),
-      columns: { mailboxId: true, archived: true, trashed: true },
+      columns: { mailboxId: true, trashed: true, spam: true },
     });
     if (!th) throw new HTTPException(404, { message: "not found" });
     await requirePerm(db, user.id, th.mailboxId, Perm.WRITE);
 
-    const patch: Partial<{ archived: boolean; trashed: boolean }> = {};
-    if (body.archived !== undefined) patch.archived = body.archived;
+    // Trash and spam are mutually exclusive buckets: entering one clears the
+    // other so a thread only ever shows up in a single folder.
+    const patch: Partial<{ trashed: boolean; spam: boolean }> = {};
     if (body.trashed !== undefined) {
       patch.trashed = body.trashed;
-      // Trashing implies un-archiving so the row only appears in one bucket.
-      if (body.trashed && body.archived === undefined) patch.archived = false;
+      if (body.trashed && body.spam === undefined) patch.spam = false;
+    }
+    if (body.spam !== undefined) {
+      patch.spam = body.spam;
+      if (body.spam && body.trashed === undefined) patch.trashed = false;
     }
     if (Object.keys(patch).length === 0) {
-      return c.json({ archived: th.archived, trashed: th.trashed });
+      return c.json({ trashed: th.trashed, spam: th.spam });
     }
     await db.update(thread).set(patch).where(eq(thread.id, id));
     return c.json({
-      archived: patch.archived ?? th.archived,
       trashed: patch.trashed ?? th.trashed,
+      spam: patch.spam ?? th.spam,
     });
   });
 
   return r;
+}
+
+// Correlated EXISTS over a thread's messages (sent/starred live on rows, not
+// the thread) — lets the sent/marked folders filter by message-level state.
+function hasMessage(cond: SQL): SQL {
+  return sql`exists (select 1 from ${message} where ${message.threadId} = ${thread.id} and ${cond})`;
 }
