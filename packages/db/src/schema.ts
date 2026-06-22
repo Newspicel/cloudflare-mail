@@ -190,6 +190,29 @@ export const mailbox = sqliteTable(
   ],
 );
 
+// Inbound-only aliases. Mail addressed to (domainId, localPart) is delivered
+// into `targetMailboxId`. There is no mailbox row for the alias address, so it
+// cannot send. Created e.g. when an admin deletes a mailbox but wants to keep
+// receiving mail sent to its old address.
+export const redirect = sqliteTable(
+  "redirect",
+  {
+    id: text("id").primaryKey(),
+    domainId: text("domain_id")
+      .notNull()
+      .references(() => domain.id, { onDelete: "cascade" }),
+    localPart: text("local_part").notNull(),
+    targetMailboxId: text("target_mailbox_id")
+      .notNull()
+      .references(() => mailbox.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(now),
+  },
+  (t) => [
+    uniqueIndex("redirect_domain_local_uq").on(t.domainId, t.localPart),
+    index("redirect_target_idx").on(t.targetMailboxId),
+  ],
+);
+
 export const mailboxMember = sqliteTable(
   "mailbox_member",
   {
@@ -251,6 +274,9 @@ export const message = sqliteTable(
     references: text("references", { mode: "json" }).$type<string[]>(),
     fromName: text("from_name"),
     fromAddr: text("from_addr").notNull(),
+    // Envelope recipient the message actually arrived at — differs from the
+    // mailbox address when delivered via a redirect/alias. Null for outbound.
+    deliveredTo: text("delivered_to"),
     toAddrs: text("to_addrs", { mode: "json" })
       .$type<{ name?: string; address: string }[]>()
       .notNull()

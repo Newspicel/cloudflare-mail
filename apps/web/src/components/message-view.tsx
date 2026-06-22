@@ -228,6 +228,14 @@ function ToolbarButton({
   );
 }
 
+// Show the envelope recipient when it isn't already one of the visible To
+// addresses — i.e. mail that arrived via a redirect/alias or Bcc.
+function showsDeliveredTo(msg: MessageRow): boolean {
+  if (msg.direction !== "in" || !msg.deliveredTo) return false;
+  const to = msg.deliveredTo.trim().toLowerCase();
+  return !msg.toAddrs.some((a) => a.address.trim().toLowerCase() === to);
+}
+
 function MessageCard({
   msg,
   readOnly,
@@ -256,6 +264,11 @@ function MessageCard({
           <div className="text-[11px] text-muted-foreground">
             to {msg.toAddrs.map((a) => a.name ?? a.address).join(", ")}
           </div>
+          {showsDeliveredTo(msg) && (
+            <div className="mt-0.5 inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+              Delivered to {msg.deliveredTo}
+            </div>
+          )}
           <LabelChips messageId={msg.id} className="mt-1.5" />
         </div>
         <div className="flex shrink-0 items-center gap-1.5">

@@ -53,6 +53,25 @@ interface Member {
   perms: number;
 }
 
+interface AdminMailbox {
+  id: string;
+  address: string;
+  displayName: string | null;
+  type: "personal" | "group" | "service" | "temp";
+  expiresAt: string | null;
+  ownerUserId: string;
+  ownerEmail: string;
+  ownerName: string;
+}
+
+interface RedirectRow {
+  id: string;
+  address: string;
+  targetMailboxId: string;
+  targetAddress: string;
+  createdAt: string;
+}
+
 type Tab = "domains" | "users" | "mailboxes";
 
 function AdminPage() {
@@ -794,19 +813,38 @@ function MailboxesSection() {
     enabled: Boolean(me.data?.user?.id) && !isAdmin,
   });
 
+  const usersQ = useQuery({
+    queryKey: ["admin-users"],
+    queryFn: () => api<{ users: AdminUser[] }>("/api/users"),
+    enabled: isAdmin,
+  });
+
   const [mbDomain, setMbDomain] = useState("");
   const [mbLocal, setMbLocal] = useState("");
   const [mbType, setMbType] = useState<MailboxSummary["type"]>("personal");
+  const [mbOwner, setMbOwner] = useState("");
+  const ownerId = mbOwner || me.data?.user?.id || "";
 
   const addMailbox = useMutation({
     mutationFn: () =>
-      api<{ id: string }>("/api/mailboxes", {
-        method: "POST",
-        body: JSON.stringify({ domainId: mbDomain, localPart: mbLocal, type: mbType }),
-      }),
+      isAdmin
+        ? api<{ id: string }>("/api/admin/mailboxes", {
+            method: "POST",
+            body: JSON.stringify({
+              domainId: mbDomain,
+              localPart: mbLocal,
+              type: mbType,
+              ownerUserId: ownerId,
+            }),
+          })
+        : api<{ id: string }>("/api/mailboxes", {
+            method: "POST",
+            body: JSON.stringify({ domainId: mbDomain, localPart: mbLocal, type: mbType }),
+          }),
     onSuccess: () => {
       setMbLocal("");
       qc.invalidateQueries({ queryKey: ["mailboxes"] });
+      qc.invalidateQueries({ queryKey: ["admin-mailboxes"] });
       toast.success("Mailbox created");
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
@@ -847,6 +885,13 @@ function MailboxesSection() {
             </p>
           ) : (
             <div className="flex flex-wrap items-center gap-2">
+              <Input
+                value={mbLocal}
+                onChange={(e) => setMbLocal(e.target.value)}
+                placeholder="local-part"
+                className="min-w-[140px] flex-1"
+              />
+              <span className="text-[13px] text-muted-foreground">@</span>
               <Select
                 value={mbDomain}
                 onChange={(e) => {
@@ -867,12 +912,6 @@ function MailboxesSection() {
                   </option>
                 ))}
               </Select>
-              <Input
-                value={mbLocal}
-                onChange={(e) => setMbLocal(e.target.value)}
-                placeholder="local-part"
-                className="min-w-[140px] flex-1"
-              />
               <Select
                 value={mbType}
                 onChange={(e) => setMbType(e.target.value as MailboxSummary["type"])}
@@ -887,9 +926,19 @@ function MailboxesSection() {
                   ));
                 })()}
               </Select>
+              {isAdmin && (
+                <Select value={ownerId} onChange={(e) => setMbOwner(e.target.value)} title="Owner">
+                  {(usersQ.data?.users ?? []).map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.email}
+                      {u.id === me.data?.user?.id ? " (you)" : ""}
+                    </option>
+                  ))}
+                </Select>
+              )}
               <PrimaryBtn
                 onClick={() => addMailbox.mutate()}
-                disabled={!mbDomain || !mbLocal || addMailbox.isPending}
+                disabled={!mbDomain || !mbLocal || (isAdmin && !ownerId) || addMailbox.isPending}
               >
                 Add mailbox
               </PrimaryBtn>
@@ -897,7 +946,302 @@ function MailboxesSection() {
           )}
         </div>
       </Section>
+
+      {isAdmin && <AdminMailboxesSection />}
+      {isAdmin && <RedirectsSection />}
     </div>
+  );
+}
+
+function AdminMailboxesSection() {
+  const qc = useQueryClient();
+  const mailboxesQ = useQuery({
+    queryKey: ["admin-mailboxes"],
+    queryFn: () => api<{ mailboxes: AdminMailbox[] }>("/api/admin/mailboxes"),
+  });
+  const usersQ = useQuery({
+    queryKey: ["admin-users"],
+    queryFn: () => api<{ users: AdminUser[] }>("/api/users"),
+  });
+
+  return (
+    <Section
+      title="All mailboxes"
+      description="Every mailbox in this deployment. Migrate ownership or delete (optionally leaving a redirect)."
+    >
+      <ul className="divide-y rounded-md border">
+        {(mailboxesQ.data?.mailboxes ?? []).map((m) => (
+          <AdminMailboxRow
+            key={m.id}
+            mailbox={m}
+            users={usersQ.data?.users ?? []}
+            allMailboxes={mailboxesQ.data?.mailboxes ?? []}
+            invalidate={() => {
+              qc.invalidateQueries({ queryKey: ["admin-mailboxes"] });
+              qc.invalidateQueries({ queryKey: ["admin-redirects"] });
+              qc.invalidateQueries({ queryKey: ["mailboxes"] });
+            }}
+          />
+        ))}
+        {mailboxesQ.data?.mailboxes.length === 0 && (
+          <li className="px-3 py-8 text-center text-[12px] text-muted-foreground">
+            No mailboxes yet.
+          </li>
+        )}
+      </ul>
+    </Section>
+  );
+}
+
+function AdminMailboxRow({
+  mailbox: m,
+  users,
+  allMailboxes,
+  invalidate,
+}: {
+  mailbox: AdminMailbox;
+  users: AdminUser[];
+  allMailboxes: AdminMailbox[];
+  invalidate: () => void;
+}) {
+  const [migrateOpen, setMigrateOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [newOwner, setNewOwner] = useState(m.ownerUserId);
+  const [redirectTo, setRedirectTo] = useState("");
+
+  const migrate = useMutation({
+    mutationFn: () =>
+      api(`/api/admin/mailboxes/${m.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ ownerUserId: newOwner }),
+      }),
+    onSuccess: () => {
+      setMigrateOpen(false);
+      invalidate();
+      toast.success("Owner changed");
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
+  const remove = useMutation({
+    mutationFn: () =>
+      api(`/api/admin/mailboxes/${m.id}`, {
+        method: "DELETE",
+        body: JSON.stringify(redirectTo ? { redirectToMailboxId: redirectTo } : {}),
+      }),
+    onSuccess: () => {
+      setDeleteOpen(false);
+      invalidate();
+      toast.success(redirectTo ? "Mailbox deleted, redirect created" : "Mailbox deleted");
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
+  const redirectTargets = allMailboxes.filter(
+    (x) => x.id !== m.id && x.type !== "temp" && x.type !== "service",
+  );
+
+  return (
+    <li className="px-3 py-2.5 text-[13px]">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate font-medium">{m.address}</div>
+          <div className="truncate text-[11px] text-muted-foreground">
+            {m.type} · owner {m.ownerEmail}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <GhostBtn
+            onClick={() => {
+              setNewOwner(m.ownerUserId);
+              setMigrateOpen((v) => !v);
+              setDeleteOpen(false);
+            }}
+          >
+            Migrate
+          </GhostBtn>
+          <GhostBtn
+            destructive
+            onClick={() => {
+              setRedirectTo("");
+              setDeleteOpen((v) => !v);
+              setMigrateOpen(false);
+            }}
+          >
+            Delete
+          </GhostBtn>
+        </div>
+      </div>
+
+      {migrateOpen && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-3">
+          <span className="text-[11px] text-muted-foreground">New owner</span>
+          <Select value={newOwner} onChange={(e) => setNewOwner(e.target.value)} className="flex-1">
+            {users.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.email}
+              </option>
+            ))}
+          </Select>
+          <PrimaryBtn
+            onClick={() => migrate.mutate()}
+            disabled={newOwner === m.ownerUserId || migrate.isPending}
+          >
+            Migrate
+          </PrimaryBtn>
+        </div>
+      )}
+
+      {deleteOpen && (
+        <div className="mt-3 space-y-2 rounded-md border border-destructive/30 bg-destructive/5 p-3">
+          <div className="text-[11px] text-muted-foreground">
+            Optionally keep receiving mail sent to <span className="font-medium">{m.address}</span>{" "}
+            by redirecting it to another mailbox.
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Select
+              value={redirectTo}
+              onChange={(e) => setRedirectTo(e.target.value)}
+              className="flex-1"
+            >
+              <option value="">No redirect — delete permanently</option>
+              {redirectTargets.map((t) => (
+                <option key={t.id} value={t.id}>
+                  → {t.address}
+                </option>
+              ))}
+            </Select>
+            <button
+              type="button"
+              onClick={() => remove.mutate()}
+              disabled={remove.isPending}
+              className="rounded-md bg-destructive px-3 py-1.5 text-[13px] font-medium text-white transition hover:brightness-105 disabled:opacity-50"
+            >
+              {redirectTo ? "Delete + redirect" : "Delete"}
+            </button>
+          </div>
+        </div>
+      )}
+    </li>
+  );
+}
+
+function RedirectsSection() {
+  const qc = useQueryClient();
+  const redirectsQ = useQuery({
+    queryKey: ["admin-redirects"],
+    queryFn: () => api<{ redirects: RedirectRow[] }>("/api/admin/redirects"),
+  });
+  const domainsQ = useQuery({
+    queryKey: ["domains"],
+    queryFn: () => api<{ domains: Domain[] }>("/api/domains"),
+  });
+  const mailboxesQ = useQuery({
+    queryKey: ["admin-mailboxes"],
+    queryFn: () => api<{ mailboxes: AdminMailbox[] }>("/api/admin/mailboxes"),
+  });
+
+  const [domainId, setDomainId] = useState("");
+  const [local, setLocal] = useState("");
+  const [target, setTarget] = useState("");
+
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["admin-redirects"] });
+
+  const create = useMutation({
+    mutationFn: () =>
+      api("/api/admin/redirects", {
+        method: "POST",
+        body: JSON.stringify({ domainId, localPart: local, targetMailboxId: target }),
+      }),
+    onSuccess: () => {
+      setLocal("");
+      invalidate();
+      toast.success("Redirect created");
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: string) => api(`/api/admin/redirects/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      invalidate();
+      toast.success("Redirect removed");
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
+  const targets = (mailboxesQ.data?.mailboxes ?? []).filter(
+    (m) => m.type !== "temp" && m.type !== "service",
+  );
+
+  return (
+    <Section
+      title="Redirects"
+      description="Inbound-only aliases. Mail to the address is delivered into the target mailbox; you cannot send from a redirect."
+    >
+      <ul className="divide-y rounded-md border">
+        {(redirectsQ.data?.redirects ?? []).map((rd) => (
+          <li
+            key={rd.id}
+            className="flex items-center justify-between gap-3 px-3 py-2.5 text-[13px]"
+          >
+            <div className="min-w-0">
+              <div className="truncate font-medium">{rd.address}</div>
+              <div className="truncate text-[11px] text-muted-foreground">→ {rd.targetAddress}</div>
+            </div>
+            <GhostBtn destructive onClick={() => remove.mutate(rd.id)}>
+              Remove
+            </GhostBtn>
+          </li>
+        ))}
+        {redirectsQ.data?.redirects.length === 0 && (
+          <li className="px-3 py-6 text-center text-[12px] text-muted-foreground">
+            No redirects yet.
+          </li>
+        )}
+      </ul>
+
+      <div className="mt-4 flex flex-wrap items-center gap-2 border-t pt-4">
+        <Input
+          value={local}
+          onChange={(e) => setLocal(e.target.value)}
+          placeholder="local-part"
+          className="min-w-[120px] flex-1"
+        />
+        <span className="text-[13px] text-muted-foreground">@</span>
+        <Select
+          value={domainId}
+          onChange={(e) => setDomainId(e.target.value)}
+          className="min-w-[150px] flex-1"
+        >
+          <option value="">Select domain…</option>
+          {(domainsQ.data?.domains ?? []).map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.name}
+            </option>
+          ))}
+        </Select>
+        <span className="text-[13px] text-muted-foreground">→</span>
+        <Select
+          value={target}
+          onChange={(e) => setTarget(e.target.value)}
+          className="min-w-[150px] flex-1"
+        >
+          <option value="">Target mailbox…</option>
+          {targets.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.address}
+            </option>
+          ))}
+        </Select>
+        <PrimaryBtn
+          onClick={() => create.mutate()}
+          disabled={!domainId || !local || !target || create.isPending}
+        >
+          Add redirect
+        </PrimaryBtn>
+      </div>
+    </Section>
   );
 }
 

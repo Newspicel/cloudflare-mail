@@ -1,5 +1,5 @@
 import { makeDB } from "@cfmail/db";
-import { attachment, domain, mailbox, mailboxMember, message } from "@cfmail/db/schema";
+import { attachment, domain, mailbox, mailboxMember, message, redirect } from "@cfmail/db/schema";
 import { Flag } from "@cfmail/shared/flags";
 import { and, eq } from "drizzle-orm";
 import type { Env } from "../env.ts";
@@ -27,10 +27,23 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
     return;
   }
 
-  const mb = await db.query.mailbox.findFirst({
+  let mb = await db.query.mailbox.findFirst({
     where: and(eq(mailbox.domainId, dom.id), eq(mailbox.localPart, localPart.toLowerCase())),
     columns: { id: true, type: true, ownerUserId: true, expiresAt: true },
   });
+  if (!mb) {
+    // No direct mailbox — fall back to an inbound-only redirect/alias.
+    const red = await db.query.redirect.findFirst({
+      where: and(eq(redirect.domainId, dom.id), eq(redirect.localPart, localPart.toLowerCase())),
+      columns: { targetMailboxId: true },
+    });
+    if (red) {
+      mb = await db.query.mailbox.findFirst({
+        where: eq(mailbox.id, red.targetMailboxId),
+        columns: { id: true, type: true, ownerUserId: true, expiresAt: true },
+      });
+    }
+  }
   if (!mb) {
     msg.setReject("Address not found");
     return;
@@ -88,6 +101,7 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
     references: parsed.references ? parsed.references.split(/\s+/).filter(Boolean) : null,
     fromName: fromName ?? null,
     fromAddr,
+    deliveredTo: msg.to,
     toAddrs,
     ccAddrs: ccAddrs.length ? ccAddrs : null,
     bccAddrs: null,
