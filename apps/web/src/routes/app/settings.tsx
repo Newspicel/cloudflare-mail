@@ -3,9 +3,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { Switch } from "@/components/ui/switch.tsx";
 import { api } from "@/lib/api.ts";
 import { authClient } from "@/lib/auth-client.ts";
 import { cn } from "@/lib/cn.ts";
+import { disablePush, enablePush, isPushEnabled, pushSupported } from "@/lib/push.ts";
 import { type MailboxSummary, mailboxesQuery, meQuery } from "@/lib/queries.ts";
 
 export const Route = createFileRoute("/app/settings")({
@@ -46,6 +48,8 @@ function SettingsPage() {
 
         <TwoFactorSection enabled={!!me.data?.user?.twoFactorEnabled} />
 
+        <NotificationsSection mailboxes={mailboxesQ.data?.mailboxes ?? []} />
+
         <div>
           <h2 className="mb-3 text-[14px] font-semibold tracking-tight">Mailboxes</h2>
           {editable.length === 0 && (
@@ -64,13 +68,29 @@ function SettingsPage() {
   );
 }
 
+type SpamLevel = "off" | "auth" | "standard" | "ai";
+
 interface MailboxSettings {
   id: string;
   type: "personal" | "group" | "service" | "temp";
   displayName: string | null;
   signature: string | null;
   replyTo: string | null;
+  spamFilter: SpamLevel;
+  spamAiTokenCap: number | null;
+  spamUsage: { period: string; calls: number; tokens: number } | null;
 }
+
+const SPAM_LEVELS: { value: SpamLevel; label: string; hint: string }[] = [
+  { value: "off", label: "Off", hint: "No spam filtering." },
+  { value: "auth", label: "Authentication only", hint: "Flag mail that fails SPF/DKIM/DMARC." },
+  {
+    value: "standard",
+    label: "Standard",
+    hint: "Authentication + content heuristics + IP blocklist.",
+  },
+  { value: "ai", label: "AI", hint: "Standard plus AI review of uncertain mail." },
+];
 
 function Section({
   title,
@@ -250,6 +270,99 @@ function TwoFactorSection({ enabled }: { enabled: boolean }) {
   );
 }
 
+function NotificationsSection({ mailboxes }: { mailboxes: MailboxSummary[] }) {
+  const qc = useQueryClient();
+  const supported = pushSupported();
+  const [deviceOn, setDeviceOn] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    isPushEnabled()
+      .then(setDeviceOn)
+      .catch(() => {});
+  }, []);
+
+  const toggleDevice = async () => {
+    setBusy(true);
+    try {
+      if (deviceOn) {
+        await disablePush();
+        setDeviceOn(false);
+        toast.success("Notifications disabled on this device");
+      } else {
+        await enablePush();
+        setDeviceOn(true);
+        toast.success("Notifications enabled on this device");
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const enabledQ = useQuery({
+    queryKey: ["push-mailboxes"],
+    queryFn: () => api<{ enabled: string[] }>("/api/push/mailboxes"),
+  });
+  const enabledSet = new Set(enabledQ.data?.enabled ?? []);
+
+  const toggleMailbox = useMutation({
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
+      api(`/api/push/mailboxes/${id}`, { method: "PUT", body: JSON.stringify({ enabled }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["push-mailboxes"] }),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
+  // Service mailboxes are send-only — they never receive mail to notify on.
+  const receivable = mailboxes.filter((m) => m.type !== "service");
+
+  return (
+    <Section
+      title="Notifications"
+      description="Get a push notification when new mail arrives. Enable this device, then choose which mailboxes notify you."
+    >
+      <div className="flex items-center justify-between gap-4">
+        <div className="text-[13px]">
+          <div className="font-medium">This device</div>
+          <div className="text-[12px] text-muted-foreground">
+            {supported
+              ? deviceOn
+                ? "Receiving notifications"
+                : "Not enabled"
+              : "Not supported in this browser"}
+          </div>
+        </div>
+        <PrimaryBtn onClick={toggleDevice} disabled={!supported || busy}>
+          {deviceOn ? "Disable" : "Enable"}
+        </PrimaryBtn>
+      </div>
+
+      {receivable.length > 0 && (
+        <div className="mt-4 border-t pt-4">
+          <div className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+            Per mailbox
+          </div>
+          <ul className="divide-y">
+            {receivable.map((m) => (
+              <li key={m.id} className="flex items-center justify-between gap-4 py-2 text-[13px]">
+                <span className="min-w-0 truncate">{m.displayName ?? m.address}</span>
+                <Switch
+                  checked={enabledSet.has(m.id)}
+                  disabled={toggleMailbox.isPending}
+                  onCheckedChange={(checked) =>
+                    toggleMailbox.mutate({ id: m.id, enabled: checked })
+                  }
+                />
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </Section>
+  );
+}
+
 function MailboxSettingsForm({ mailbox }: { mailbox: MailboxSummary }) {
   const qc = useQueryClient();
   const settingsQ = useQuery({
@@ -260,12 +373,16 @@ function MailboxSettingsForm({ mailbox }: { mailbox: MailboxSummary }) {
   const [displayName, setDisplayName] = useState("");
   const [replyTo, setReplyTo] = useState("");
   const [signature, setSignature] = useState("");
+  const [spamFilter, setSpamFilter] = useState<SpamLevel>("standard");
+  const [aiCap, setAiCap] = useState("");
 
   useEffect(() => {
     if (settingsQ.data) {
       setDisplayName(settingsQ.data.displayName ?? "");
       setReplyTo(settingsQ.data.replyTo ?? "");
       setSignature(settingsQ.data.signature ?? "");
+      setSpamFilter(settingsQ.data.spamFilter ?? "standard");
+      setAiCap(settingsQ.data.spamAiTokenCap ? String(settingsQ.data.spamAiTokenCap) : "");
     }
   }, [settingsQ.data]);
 
@@ -277,6 +394,8 @@ function MailboxSettingsForm({ mailbox }: { mailbox: MailboxSummary }) {
           displayName: displayName.trim() || null,
           replyTo: replyTo.trim() || null,
           signature: signature.trim() ? signature : null,
+          spamFilter,
+          spamAiTokenCap: aiCap.trim() ? Number(aiCap) : null,
         }),
       }),
     onSuccess: () => {
@@ -334,6 +453,43 @@ function MailboxSettingsForm({ mailbox }: { mailbox: MailboxSummary }) {
             maxLength={5000}
           />
         </label>
+        {mailbox.type !== "service" && (
+          <label className="grid gap-1.5">
+            <span className="text-[11px] font-medium text-foreground">Spam filter</span>
+            <select
+              value={spamFilter}
+              onChange={(e) => setSpamFilter(e.target.value as SpamLevel)}
+              className="rounded-md border bg-background px-2.5 py-1.5 text-[13px] outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/20"
+            >
+              {SPAM_LEVELS.map((l) => (
+                <option key={l.value} value={l.value}>
+                  {l.label}
+                </option>
+              ))}
+            </select>
+            <span className="text-[11px] text-muted-foreground">
+              {SPAM_LEVELS.find((l) => l.value === spamFilter)?.hint}
+            </span>
+          </label>
+        )}
+        {spamFilter === "ai" && mailbox.type !== "service" && (
+          <label className="grid gap-1.5">
+            <span className="text-[11px] font-medium text-foreground">AI monthly token budget</span>
+            <input
+              type="number"
+              min={0}
+              value={aiCap}
+              onChange={(e) => setAiCap(e.target.value)}
+              placeholder="Unlimited"
+              className="rounded-md border bg-background px-2.5 py-1.5 text-[13px] outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/20"
+            />
+            <span className="text-[11px] text-muted-foreground">
+              {settingsQ.data?.spamUsage
+                ? `Used ${settingsQ.data.spamUsage.tokens.toLocaleString()} tokens across ${settingsQ.data.spamUsage.calls} checks this month (${settingsQ.data.spamUsage.period}). AI falls back to Standard when the budget is reached.`
+                : "Leave empty for unlimited. AI runs only on uncertain mail to keep usage low."}
+            </span>
+          </label>
+        )}
       </div>
       <div className="flex justify-end border-t bg-muted/30 px-5 py-2.5">
         <PrimaryBtn type="submit" disabled={save.isPending || settingsQ.isLoading}>

@@ -5,10 +5,12 @@ import { createRoot } from "react-dom/client";
 import { ConfirmProvider } from "./components/ui/confirm.tsx";
 import { Toaster } from "./components/ui/toaster.tsx";
 import "./styles/globals.css";
+import { registerSW } from "./lib/pwa.ts";
 import { initTheme } from "./lib/theme.ts";
 import { routeTree } from "./routeTree.gen.ts";
 
 initTheme();
+registerSW();
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, refetchOnWindowFocus: false } },

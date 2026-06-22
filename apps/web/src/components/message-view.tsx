@@ -217,6 +217,38 @@ function showsDeliveredTo(msg: MessageRow): boolean {
   return !msg.toAddrs.some((a) => a.address.trim().toLowerCase() === to);
 }
 
+function SpamBanner({ msg }: { msg: MessageRow }) {
+  if (msg.direction !== "in") return null;
+  const verdict = msg.spamVerdict;
+  if (verdict !== "spam" && verdict !== "suspicious") return null;
+  const reasons = msg.spamReasons ?? [];
+  const isSpam = verdict === "spam";
+  return (
+    <div
+      className={cn(
+        "flex items-start gap-2 border-b px-4 py-2.5 text-[12px]",
+        isSpam
+          ? "bg-destructive/10 text-destructive"
+          : "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+      )}
+    >
+      <ShieldAlert className="mt-0.5 size-4 shrink-0" />
+      <div>
+        <div className="font-semibold">
+          {isSpam ? "This message was flagged as spam" : "This message looks suspicious"}
+        </div>
+        {reasons.length > 0 && (
+          <ul className="mt-0.5 list-disc space-y-0.5 pl-4">
+            {reasons.map((r) => (
+              <li key={r}>{r}</li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function MessageCard({
   msg,
   readOnly,
@@ -275,6 +307,7 @@ function MessageCard({
           )}
         </div>
       </header>
+      <SpamBanner msg={msg} />
       <div className="prose prose-sm max-w-none px-4 py-3 dark:prose-invert">
         {bodyHtml ? (
           <div

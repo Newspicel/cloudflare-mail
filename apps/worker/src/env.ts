@@ -7,6 +7,7 @@ export interface Env {
   EMAIL: SendEmail;
   USER_HUB: DurableObjectNamespace;
   ASSETS: Fetcher;
+  AI: Ai;
 }
 
 export interface HonoVars {

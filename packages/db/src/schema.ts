@@ -179,6 +179,14 @@ export const mailbox = sqliteTable(
       .references(() => user.id, { onDelete: "cascade" }),
     signature: text("signature"),
     replyTo: text("reply_to"),
+    // Spam filtering level: off | auth (SPF/DKIM/DMARC only) | standard (auth +
+    // heuristics + DNSBL) | ai (standard + Workers AI on the gray zone).
+    spamFilter: text("spam_filter", { enum: ["off", "auth", "standard", "ai"] })
+      .notNull()
+      .default("standard"),
+    // Monthly Workers AI token budget for spam classification; null = unlimited.
+    // When exceeded, the ai level silently falls back to standard.
+    spamAiTokenCap: integer("spam_ai_token_cap"),
     expiresAt: integer("expires_at", { mode: "timestamp" }),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(now),
   },
@@ -290,6 +298,17 @@ export const message = sqliteTable(
     sentAt: integer("sent_at", { mode: "timestamp" }),
     rawR2Key: text("raw_r2_key"),
     sizeBytes: integer("size_bytes").notNull().default(0),
+    // Spam evaluation result (inbound only; null when filtering is off).
+    spamVerdict: text("spam_verdict", { enum: ["clean", "suspicious", "spam"] }),
+    spamScore: integer("spam_score"),
+    // Human-readable reasons that drive the warning banner.
+    spamReasons: text("spam_reasons", { mode: "json" }).$type<string[]>(),
+    // Summary of the parsed Authentication-Results header.
+    spamAuth: text("spam_auth", { mode: "json" }).$type<{
+      spf?: string;
+      dkim?: string;
+      dmarc?: string;
+    }>(),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(now),
   },
   (t) => [
@@ -315,6 +334,19 @@ export const attachment = sqliteTable(
   },
   (t) => [index("attachment_message_idx").on(t.messageId)],
 );
+
+// Cumulative Workers AI spam-classification usage per mailbox. `period`
+// (YYYY-MM) lets the monthly cap reset without deleting rows.
+export const mailboxSpamUsage = sqliteTable("mailbox_spam_usage", {
+  mailboxId: text("mailbox_id")
+    .primaryKey()
+    .references(() => mailbox.id, { onDelete: "cascade" }),
+  period: text("period").notNull().default(""),
+  calls: integer("calls").notNull().default(0),
+  tokensIn: integer("tokens_in").notNull().default(0),
+  tokensOut: integer("tokens_out").notNull().default(0),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().default(now),
+});
 
 export const label = sqliteTable(
   "label",
@@ -396,6 +428,46 @@ export const draft = sqliteTable(
   (t) => [
     index("draft_mailbox_idx").on(t.mailboxId, t.updatedAt),
     index("draft_user_idx").on(t.userId),
+  ],
+);
+
+// ─── Web Push notifications ─────────────────────────────────────────────────
+
+// One row per browser/device that has granted notification permission and
+// subscribed. Endpoint is the push service URL; p256dh/auth are the client
+// keys used to encrypt the payload (RFC 8291).
+export const pushSubscription = sqliteTable(
+  "push_subscription",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    endpoint: text("endpoint").notNull().unique(),
+    p256dh: text("p256dh").notNull(),
+    auth: text("auth").notNull(),
+    userAgent: text("user_agent"),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(now),
+  },
+  (t) => [index("push_subscription_user_idx").on(t.userId)],
+);
+
+// Per-user opt-in to push notifications for a mailbox. Presence of a row means
+// "notify me about new mail in this mailbox"; absence means off (the default).
+export const mailboxNotify = sqliteTable(
+  "mailbox_notify",
+  {
+    mailboxId: text("mailbox_id")
+      .notNull()
+      .references(() => mailbox.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(now),
+  },
+  (t) => [
+    primaryKey({ columns: [t.mailboxId, t.userId] }),
+    index("mailbox_notify_user_idx").on(t.userId),
   ],
 );
 

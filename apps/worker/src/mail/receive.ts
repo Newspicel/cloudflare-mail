@@ -1,10 +1,20 @@
 import { makeDB } from "@cfmail/db";
-import { attachment, domain, mailbox, mailboxMember, message, redirect } from "@cfmail/db/schema";
+import {
+  attachment,
+  domain,
+  mailbox,
+  mailboxMember,
+  message,
+  redirect,
+  thread,
+} from "@cfmail/db/schema";
 import { Flag } from "@cfmail/shared/flags";
 import { and, eq } from "drizzle-orm";
 import type { Env } from "../env.ts";
 import { broadcastToUsers } from "../hub.ts";
 import { parseMime, snippet, streamToArrayBuffer } from "./mime.ts";
+import { notifyMailbox } from "./push.ts";
+import { evaluateSpam, type SpamEvaluation } from "./spam.ts";
 import { bumpThread, resolveThreadId } from "./threads.ts";
 
 const MAX_EMAIL_BYTES = 25 * 1024 * 1024;
@@ -29,7 +39,14 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
 
   let mb = await db.query.mailbox.findFirst({
     where: and(eq(mailbox.domainId, dom.id), eq(mailbox.localPart, localPart.toLowerCase())),
-    columns: { id: true, type: true, ownerUserId: true, expiresAt: true },
+    columns: {
+      id: true,
+      type: true,
+      ownerUserId: true,
+      expiresAt: true,
+      spamFilter: true,
+      spamAiTokenCap: true,
+    },
   });
   if (!mb) {
     // No direct mailbox — fall back to an inbound-only redirect/alias.
@@ -40,7 +57,14 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
     if (red) {
       mb = await db.query.mailbox.findFirst({
         where: eq(mailbox.id, red.targetMailboxId),
-        columns: { id: true, type: true, ownerUserId: true, expiresAt: true },
+        columns: {
+          id: true,
+          type: true,
+          ownerUserId: true,
+          expiresAt: true,
+          spamFilter: true,
+          spamAiTokenCap: true,
+        },
       });
     }
   }
@@ -71,6 +95,17 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
 
   const parsed = await parseMime(raw);
 
+  let spam: SpamEvaluation | null = null;
+  if (mb.spamFilter !== "off") {
+    spam = await evaluateSpam(env, db, {
+      mailboxId: mb.id,
+      level: mb.spamFilter,
+      aiTokenCap: mb.spamAiTokenCap ?? null,
+      parsed,
+      fromEnvelope: msg.from,
+    });
+  }
+
   const messageId = crypto.randomUUID();
   const toAddrs = (parsed.to ?? []).map((a) => normalizeAddr(a));
   const ccAddrs = (parsed.cc ?? []).map((a) => normalizeAddr(a));
@@ -88,6 +123,14 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
     references: parsed.references ? parsed.references.split(/\s+/).filter(Boolean) : null,
     participants,
   });
+
+  // Only a brand-new thread is auto-filed under Spam — never yank an existing
+  // legitimate conversation into the spam folder over a single message.
+  const existingThread = await db.query.thread.findFirst({
+    where: eq(thread.id, threadId),
+    columns: { msgCount: true },
+  });
+  const isNewThread = (existingThread?.msgCount ?? 0) === 0;
 
   const receivedAt = new Date();
 
@@ -112,7 +155,15 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
     sentAt: null,
     rawR2Key: rawKey,
     sizeBytes: size,
+    spamVerdict: spam?.verdict ?? null,
+    spamScore: spam?.score ?? null,
+    spamReasons: spam?.reasons.length ? spam.reasons : null,
+    spamAuth: spam ? spam.auth : null,
   });
+
+  if (spam?.folderSpam && isNewThread) {
+    await db.update(thread).set({ spam: true }).where(eq(thread.id, threadId));
+  }
 
   await Promise.all(
     (parsed.attachments ?? []).map(async (att, idx) => {
@@ -151,6 +202,17 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
     messageId,
     threadId,
   });
+
+  // Don't push-notify mail filed straight into Spam.
+  if (spam?.verdict !== "spam") {
+    await notifyMailbox(db, {
+      mailboxId: mb.id,
+      userIds: [...userIds],
+      title: fromName ? `${fromName} <${fromAddr}>` : fromAddr,
+      body: parsed.subject?.trim() ? parsed.subject : "(no subject)",
+      url: `/app/m/${mb.id}/t/${threadId}`,
+    });
+  }
 
   // Mark as unseen by default (the Flag.SEEN bit is 0 so nothing to do).
   void Flag;

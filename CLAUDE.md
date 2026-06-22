@@ -29,6 +29,8 @@ Read current state instead of trusting prose here:
 11. **Secrets stay out of the repo.** Dev uses `.dev.vars` (gitignored).
 12. **Redirects are inbound-only aliases** (`redirect` table). Used only when no mailbox matches; a real mailbox always wins. Envelope recipient stored in `message.deliveredTo`.
 13. **Migrations are hand-written.** `drizzle-kit generate` is broken. Edit `schema.ts`, then add a hand-written `drizzle/NNNN_*.sql` + `_journal.json` entry.
+14. **PWA + Web Push.** The web app is an installable PWA (`apps/web/public/manifest.webmanifest` + `sw.js`, registered prod-only from `lib/pwa.ts`). New mail push is best-effort and never fails delivery: VAPID keys lazy-stored in `system_config` (like invariant 7), devices in `push_subscription`, per-user/per-mailbox opt-in in `mailbox_notify`. Fan-out lives in `apps/worker/src/mail/push.ts`; dead subscriptions (404/410) are pruned.
+15. **Spam filtering** (`apps/worker/src/mail/spam.ts`, `evaluateSpam`) runs in `receive.ts` after parse, before insert. Per-mailbox `mailbox.spamFilter` level (`off`/`auth`/`standard`/`ai`); result stored on the message (`spamVerdict`/`spamScore`/`spamReasons`/`spamAuth`). Rules: DMARC `pass` is trusted (short-circuit clean); only a brand-new thread is auto-filed to Spam (never hijack an existing one); DNSBL is a best-effort soft signal that can't mark spam alone; AI (`@cf/meta/llama-3.1-8b-instruct-fast` via `AI` binding) runs only in the gray zone, respects the per-mailbox monthly token cap, and logs usage to `mailbox_spam_usage`.
 
 ## Tooling
 
