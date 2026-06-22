@@ -4,6 +4,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { ArrowRight, Check, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { MailboxSettingsForm } from "@/components/mailbox-settings-form.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { useConfirm } from "@/components/ui/confirm.tsx";
 import {
@@ -1302,6 +1303,7 @@ function AdminMailboxRow({
   const [migrateOpen, setMigrateOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [newOwner, setNewOwner] = useState(m.ownerUserId);
   const [redirectTo, setRedirectTo] = useState("");
 
@@ -1354,9 +1356,22 @@ function AdminMailboxRow({
                 setMembersOpen((v) => !v);
                 setMigrateOpen(false);
                 setDeleteOpen(false);
+                setSettingsOpen(false);
               }}
             >
               {membersOpen ? "Hide members" : "Members"}
+            </GhostBtn>
+          )}
+          {m.type !== "temp" && (
+            <GhostBtn
+              onClick={() => {
+                setSettingsOpen((v) => !v);
+                setMigrateOpen(false);
+                setDeleteOpen(false);
+                setMembersOpen(false);
+              }}
+            >
+              {settingsOpen ? "Hide settings" : "Settings"}
             </GhostBtn>
           )}
           <GhostBtn
@@ -1365,6 +1380,7 @@ function AdminMailboxRow({
               setMigrateOpen((v) => !v);
               setDeleteOpen(false);
               setMembersOpen(false);
+              setSettingsOpen(false);
             }}
           >
             Migrate
@@ -1376,6 +1392,7 @@ function AdminMailboxRow({
               setDeleteOpen(true);
               setMigrateOpen(false);
               setMembersOpen(false);
+              setSettingsOpen(false);
             }}
           >
             Delete
@@ -1384,6 +1401,12 @@ function AdminMailboxRow({
       </div>
 
       {membersOpen && <MembersPanel mailboxId={m.id} />}
+
+      {settingsOpen && (
+        <div className="mt-3">
+          <MailboxSettingsForm mailboxId={m.id} address={m.address} type={m.type} admin />
+        </div>
+      )}
 
       {migrateOpen && (
         <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-3">

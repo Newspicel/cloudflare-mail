@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { MailboxSettingsForm } from "@/components/mailbox-settings-form.tsx";
 import { Switch } from "@/components/ui/switch.tsx";
 import { api } from "@/lib/api.ts";
 import { authClient } from "@/lib/auth-client.ts";
@@ -59,7 +60,7 @@ function SettingsPage() {
           )}
           <div className="space-y-4">
             {editable.map((m) => (
-              <MailboxSettingsForm key={m.id} mailbox={m} />
+              <MailboxSettingsForm key={m.id} mailboxId={m.id} address={m.address} type={m.type} />
             ))}
           </div>
         </div>
@@ -67,30 +68,6 @@ function SettingsPage() {
     </div>
   );
 }
-
-type SpamLevel = "off" | "auth" | "standard" | "ai";
-
-interface MailboxSettings {
-  id: string;
-  type: "personal" | "group" | "service" | "temp";
-  displayName: string | null;
-  signature: string | null;
-  replyTo: string | null;
-  spamFilter: SpamLevel;
-  spamAiTokenCap: number | null;
-  spamUsage: { period: string; calls: number; tokens: number } | null;
-}
-
-const SPAM_LEVELS: { value: SpamLevel; label: string; hint: string }[] = [
-  { value: "off", label: "Off", hint: "No spam filtering." },
-  { value: "auth", label: "Authentication only", hint: "Flag mail that fails SPF/DKIM/DMARC." },
-  {
-    value: "standard",
-    label: "Standard",
-    hint: "Authentication + content heuristics + IP blocklist.",
-  },
-  { value: "ai", label: "AI", hint: "Standard plus AI review of uncertain mail." },
-];
 
 function Section({
   title,
@@ -360,142 +337,5 @@ function NotificationsSection({ mailboxes }: { mailboxes: MailboxSummary[] }) {
         </div>
       )}
     </Section>
-  );
-}
-
-function MailboxSettingsForm({ mailbox }: { mailbox: MailboxSummary }) {
-  const qc = useQueryClient();
-  const settingsQ = useQuery({
-    queryKey: ["mailbox-settings", mailbox.id],
-    queryFn: () => api<MailboxSettings>(`/api/mailboxes/${mailbox.id}/settings`),
-  });
-
-  const [displayName, setDisplayName] = useState("");
-  const [replyTo, setReplyTo] = useState("");
-  const [signature, setSignature] = useState("");
-  const [spamFilter, setSpamFilter] = useState<SpamLevel>("standard");
-  const [aiCap, setAiCap] = useState("");
-
-  useEffect(() => {
-    if (settingsQ.data) {
-      setDisplayName(settingsQ.data.displayName ?? "");
-      setReplyTo(settingsQ.data.replyTo ?? "");
-      setSignature(settingsQ.data.signature ?? "");
-      setSpamFilter(settingsQ.data.spamFilter ?? "standard");
-      setAiCap(settingsQ.data.spamAiTokenCap ? String(settingsQ.data.spamAiTokenCap) : "");
-    }
-  }, [settingsQ.data]);
-
-  const save = useMutation({
-    mutationFn: () =>
-      api(`/api/mailboxes/${mailbox.id}/settings`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          displayName: displayName.trim() || null,
-          replyTo: replyTo.trim() || null,
-          signature: signature.trim() ? signature : null,
-          spamFilter,
-          spamAiTokenCap: aiCap.trim() ? Number(aiCap) : null,
-        }),
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["mailbox-settings", mailbox.id] });
-      qc.invalidateQueries({ queryKey: ["mailboxes"] });
-      toast.success("Settings saved");
-    },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Save failed"),
-  });
-
-  return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        save.mutate();
-      }}
-      className="rounded-md border bg-card"
-    >
-      <header className="flex items-center justify-between border-b px-5 py-3">
-        <div className="min-w-0">
-          <div className="truncate font-medium">{mailbox.address}</div>
-          <div className="text-[11px] text-muted-foreground">{mailbox.type}</div>
-        </div>
-      </header>
-      <div className="grid gap-4 px-5 py-4 text-[13px]">
-        <label className="grid gap-1.5">
-          <span className="text-[11px] font-medium text-foreground">Display name</span>
-          <input
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="e.g. Support"
-            maxLength={200}
-            className="rounded-md border bg-background px-2.5 py-1.5 text-[13px] outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/20"
-          />
-        </label>
-        <label className="grid gap-1.5">
-          <span className="text-[11px] font-medium text-foreground">Reply-to address</span>
-          <input
-            type="email"
-            value={replyTo}
-            onChange={(e) => setReplyTo(e.target.value)}
-            placeholder="replies@example.com"
-            maxLength={320}
-            className="rounded-md border bg-background px-2.5 py-1.5 text-[13px] outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/20"
-          />
-        </label>
-        <label className="grid gap-1.5">
-          <span className="text-[11px] font-medium text-foreground">Signature</span>
-          <textarea
-            value={signature}
-            onChange={(e) => setSignature(e.target.value)}
-            rows={4}
-            placeholder="Appended to every outgoing message"
-            className="min-h-[6rem] resize-y rounded-md border bg-background px-2.5 py-1.5 text-[13px] outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/20"
-            maxLength={5000}
-          />
-        </label>
-        {mailbox.type !== "service" && (
-          <label className="grid gap-1.5">
-            <span className="text-[11px] font-medium text-foreground">Spam filter</span>
-            <select
-              value={spamFilter}
-              onChange={(e) => setSpamFilter(e.target.value as SpamLevel)}
-              className="rounded-md border bg-background px-2.5 py-1.5 text-[13px] outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/20"
-            >
-              {SPAM_LEVELS.map((l) => (
-                <option key={l.value} value={l.value}>
-                  {l.label}
-                </option>
-              ))}
-            </select>
-            <span className="text-[11px] text-muted-foreground">
-              {SPAM_LEVELS.find((l) => l.value === spamFilter)?.hint}
-            </span>
-          </label>
-        )}
-        {spamFilter === "ai" && mailbox.type !== "service" && (
-          <label className="grid gap-1.5">
-            <span className="text-[11px] font-medium text-foreground">AI monthly token budget</span>
-            <input
-              type="number"
-              min={0}
-              value={aiCap}
-              onChange={(e) => setAiCap(e.target.value)}
-              placeholder="Unlimited"
-              className="rounded-md border bg-background px-2.5 py-1.5 text-[13px] outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/20"
-            />
-            <span className="text-[11px] text-muted-foreground">
-              {settingsQ.data?.spamUsage
-                ? `Used ${settingsQ.data.spamUsage.tokens.toLocaleString()} tokens across ${settingsQ.data.spamUsage.calls} checks this month (${settingsQ.data.spamUsage.period}). AI falls back to Standard when the budget is reached.`
-                : "Leave empty for unlimited. AI runs only on uncertain mail to keep usage low."}
-            </span>
-          </label>
-        )}
-      </div>
-      <div className="flex justify-end border-t bg-muted/30 px-5 py-2.5">
-        <PrimaryBtn type="submit" disabled={save.isPending || settingsQ.isLoading}>
-          {save.isPending ? "Saving…" : "Save changes"}
-        </PrimaryBtn>
-      </div>
-    </form>
   );
 }
