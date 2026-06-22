@@ -96,6 +96,7 @@ export const twoFactor = sqliteTable(
       .references(() => user.id, { onDelete: "cascade" }),
     secret: text("secret").notNull(),
     backupCodes: text("backup_codes").notNull(),
+    verified: integer("verified", { mode: "boolean" }).default(true),
   },
   (t) => [index("two_factor_user_idx").on(t.userId)],
 );
