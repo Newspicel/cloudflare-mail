@@ -6,6 +6,10 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**", ".wrangler/**"]
     },
+    "@cfmail/worker#build": {
+      "dependsOn": ["^build", "@cfmail/web#build"],
+      "outputs": ["dist/**", ".wrangler/**"]
+    },
     "dev": {
       "cache": false,
       "persistent": true
