@@ -1,9 +1,10 @@
-import { domain, mailbox, redirect, user } from "@cfmail/db/schema";
+import { domain, mailbox, mailboxSpamUsage, redirect, user } from "@cfmail/db/schema";
 import {
   adminCreateMailbox,
   adminDeleteMailbox,
   createRedirect,
   migrateMailbox,
+  updateMailboxSettings,
 } from "@cfmail/shared/schemas";
 import { zValidator } from "@hono/zod-validator";
 import { aliasedTable, and, asc, desc, eq } from "drizzle-orm";
@@ -110,6 +111,76 @@ export function adminRoutes() {
     if (owner.id === mb.ownerUserId) return c.json({ ok: true });
 
     await db.update(mailbox).set({ ownerUserId: body.ownerUserId }).where(eq(mailbox.id, id));
+    return c.json({ ok: true });
+  });
+
+  // Full per-mailbox settings, for any mailbox. Mirrors the owner-facing
+  // /api/mailboxes/:id/settings but admin-only — the spam filter level is an
+  // admin decision (see PATCH below), so it lives here rather than there.
+  r.get("/mailboxes/:id/settings", async (c) => {
+    const db = dbFromCtx(c);
+    const id = c.req.param("id");
+    const mb = await db.query.mailbox.findFirst({
+      where: eq(mailbox.id, id),
+      columns: {
+        id: true,
+        displayName: true,
+        signature: true,
+        replyTo: true,
+        type: true,
+        spamFilter: true,
+        spamAiTokenCap: true,
+      },
+    });
+    if (!mb) throw new HTTPException(404, { message: "not found" });
+    const usage = await db.query.mailboxSpamUsage.findFirst({
+      where: eq(mailboxSpamUsage.mailboxId, id),
+      columns: { period: true, calls: true, tokensIn: true, tokensOut: true },
+    });
+    return c.json({
+      id: mb.id,
+      type: mb.type,
+      displayName: mb.displayName,
+      signature: mb.signature,
+      replyTo: mb.replyTo,
+      spamFilter: mb.spamFilter,
+      spamAiTokenCap: mb.spamAiTokenCap,
+      spamUsage: usage
+        ? { period: usage.period, calls: usage.calls, tokens: usage.tokensIn + usage.tokensOut }
+        : null,
+    });
+  });
+
+  r.patch("/mailboxes/:id/settings", zValidator("json", updateMailboxSettings), async (c) => {
+    const db = dbFromCtx(c);
+    const id = c.req.param("id");
+    const body = c.req.valid("json");
+
+    const mb = await db.query.mailbox.findFirst({
+      where: eq(mailbox.id, id),
+      columns: { type: true },
+    });
+    if (!mb) throw new HTTPException(404, { message: "not found" });
+    if (mb.type === "temp")
+      throw new HTTPException(400, { message: "temp mailboxes are not editable" });
+
+    const patch: Partial<{
+      displayName: string | null;
+      signature: string | null;
+      replyTo: string | null;
+      spamFilter: "off" | "auth" | "standard" | "ai";
+      spamAiTokenCap: number | null;
+    }> = {};
+    if (body.displayName !== undefined)
+      patch.displayName = body.displayName?.trim() ? body.displayName.trim() : null;
+    if (body.signature !== undefined)
+      patch.signature = body.signature?.trim() ? body.signature : null;
+    if (body.replyTo !== undefined) patch.replyTo = body.replyTo ? body.replyTo : null;
+    if (body.spamFilter !== undefined) patch.spamFilter = body.spamFilter;
+    if (body.spamAiTokenCap !== undefined) patch.spamAiTokenCap = body.spamAiTokenCap;
+    if (Object.keys(patch).length === 0) return c.json({ ok: true });
+
+    await db.update(mailbox).set(patch).where(eq(mailbox.id, id));
     return c.json({ ok: true });
   });
 

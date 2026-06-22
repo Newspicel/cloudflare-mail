@@ -166,12 +166,12 @@ export function mailboxesRoutes() {
       throw new HTTPException(400, { message: "temp mailboxes are not editable" });
     }
 
+    // Spam filter level + AI budget are admin-only (see /api/admin/mailboxes/:id/settings);
+    // owners can edit identity fields but not the spam policy applied to their mailbox.
     const patch: Partial<{
       displayName: string | null;
       signature: string | null;
       replyTo: string | null;
-      spamFilter: "off" | "auth" | "standard" | "ai";
-      spamAiTokenCap: number | null;
     }> = {};
     if (body.displayName !== undefined) {
       patch.displayName = body.displayName?.trim() ? body.displayName.trim() : null;
@@ -181,12 +181,6 @@ export function mailboxesRoutes() {
     }
     if (body.replyTo !== undefined) {
       patch.replyTo = body.replyTo ? body.replyTo : null;
-    }
-    if (body.spamFilter !== undefined) {
-      patch.spamFilter = body.spamFilter;
-    }
-    if (body.spamAiTokenCap !== undefined) {
-      patch.spamAiTokenCap = body.spamAiTokenCap;
     }
     if (Object.keys(patch).length === 0) return c.json({ ok: true });
 
