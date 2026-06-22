@@ -10,7 +10,7 @@ const CF_DKIM_SELECTORS = ["cf2024-1", "cf2024-2", "cf2024-3"];
 type DohRecord = { type: number; data: string };
 type DohResponse = { Answer?: DohRecord[] };
 
-async function dohQuery(name: string, type: "TXT" | "CNAME"): Promise<string[]> {
+export async function dohQuery(name: string, type: "TXT" | "CNAME" | "A"): Promise<string[]> {
   const url = new URL(DOH_URL);
   url.searchParams.set("name", name);
   url.searchParams.set("type", type);

@@ -28,6 +28,9 @@
       "bucket_name": "cfmail-blobs"
     }
   ],
+  "ai": {
+    "binding": "AI"
+  },
   "durable_objects": {
     "bindings": [
       {

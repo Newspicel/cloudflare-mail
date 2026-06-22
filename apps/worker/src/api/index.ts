@@ -14,6 +14,7 @@ import { labelsRoutes } from "./labels.ts";
 import { mailboxesRoutes } from "./mailboxes.ts";
 import { messagesRoutes } from "./messages.ts";
 import { publicShareRoutes } from "./publicShare.ts";
+import { pushRoutes } from "./push.ts";
 import { searchRoutes } from "./search.ts";
 import { streamRoute } from "./stream.ts";
 import { tempRoutes } from "./temp.ts";
@@ -65,6 +66,7 @@ export function buildApi() {
   app.route("/api/labels", labelsRoutes());
   app.route("/api/attachments", attachmentsRoutes());
   app.route("/api/temp", tempRoutes());
+  app.route("/api/push", pushRoutes());
   app.route("/api/t", publicShareRoutes());
   app.route("/api/search", searchRoutes());
   app.get("/api/stream", streamRoute);

@@ -238,3 +238,68 @@ describe("handleInbound — full pipeline", () => {
     ]);
   });
 });
+
+describe("handleInbound — spam filtering (default standard level)", () => {
+  const SENDER = "stranger@elsewhere.com";
+
+  function eml(
+    authResults: string | null,
+    extra: { subject?: string; body?: string } = {},
+  ): string {
+    const lines = [`From: Stranger <${SENDER}>`, `To: Me <${ADDRESS}>`];
+    if (authResults) lines.push(`Authentication-Results: ${authResults}`);
+    lines.push(
+      `Subject: ${extra.subject ?? "Hi there"}`,
+      ``,
+      extra.body ?? "A normal message body.",
+      ``,
+    );
+    return lines.join("\r\n");
+  }
+
+  it("files DMARC-failing mail into Spam with a verdict and reasons", async () => {
+    const msg = stubInbound({
+      from: SENDER,
+      to: ADDRESS,
+      raw: eml("mx.cloudflare.net; spf=fail; dkim=fail; dmarc=fail"),
+    });
+    await handleInbound(msg, e);
+
+    const row = (await db.query.message.findMany({ where: eq(message.mailboxId, MAILBOX_ID) }))[0]!;
+    expect(row.spamVerdict).toBe("spam");
+    expect(row.spamReasons?.length).toBeGreaterThan(0);
+
+    const th = (await db.query.thread.findMany({ where: eq(thread.mailboxId, MAILBOX_ID) }))[0]!;
+    expect(th.spam).toBe(true);
+  });
+
+  it("leaves fully authenticated mail clean in the inbox", async () => {
+    const msg = stubInbound({
+      from: SENDER,
+      to: ADDRESS,
+      raw: eml("mx.cloudflare.net; spf=pass; dkim=pass; dmarc=pass"),
+    });
+    await handleInbound(msg, e);
+
+    const row = (await db.query.message.findMany({ where: eq(message.mailboxId, MAILBOX_ID) }))[0]!;
+    expect(row.spamVerdict).toBe("clean");
+
+    const th = (await db.query.thread.findMany({ where: eq(thread.mailboxId, MAILBOX_ID) }))[0]!;
+    expect(th.spam).toBe(false);
+  });
+
+  it("marks partially authenticated mail (no DMARC) suspicious but keeps it in the inbox", async () => {
+    const msg = stubInbound({
+      from: SENDER,
+      to: ADDRESS,
+      raw: eml("mx.cloudflare.net; spf=pass; dkim=none; dmarc=none"),
+    });
+    await handleInbound(msg, e);
+
+    const row = (await db.query.message.findMany({ where: eq(message.mailboxId, MAILBOX_ID) }))[0]!;
+    expect(row.spamVerdict).toBe("suspicious");
+
+    const th = (await db.query.thread.findMany({ where: eq(thread.mailboxId, MAILBOX_ID) }))[0]!;
+    expect(th.spam).toBe(false);
+  });
+});

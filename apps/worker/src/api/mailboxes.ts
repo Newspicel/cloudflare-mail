@@ -1,4 +1,12 @@
-import { domain, mailbox, mailboxInvite, mailboxMember, shareToken, user } from "@cfmail/db/schema";
+import {
+  domain,
+  mailbox,
+  mailboxInvite,
+  mailboxMember,
+  mailboxSpamUsage,
+  shareToken,
+  user,
+} from "@cfmail/db/schema";
 import { grant, Perm } from "@cfmail/shared/permissions";
 import {
   createMailbox,
@@ -109,15 +117,36 @@ export function mailboxesRoutes() {
     await requirePerm(db, u.id, id, Perm.READ);
     const mb = await db.query.mailbox.findFirst({
       where: eq(mailbox.id, id),
-      columns: { id: true, displayName: true, signature: true, replyTo: true, type: true },
+      columns: {
+        id: true,
+        displayName: true,
+        signature: true,
+        replyTo: true,
+        type: true,
+        spamFilter: true,
+        spamAiTokenCap: true,
+      },
     });
     if (!mb) throw new HTTPException(404, { message: "not found" });
+    const usage = await db.query.mailboxSpamUsage.findFirst({
+      where: eq(mailboxSpamUsage.mailboxId, id),
+      columns: { period: true, calls: true, tokensIn: true, tokensOut: true },
+    });
     return c.json({
       id: mb.id,
       type: mb.type,
       displayName: mb.displayName,
       signature: mb.signature,
       replyTo: mb.replyTo,
+      spamFilter: mb.spamFilter,
+      spamAiTokenCap: mb.spamAiTokenCap,
+      spamUsage: usage
+        ? {
+            period: usage.period,
+            calls: usage.calls,
+            tokens: usage.tokensIn + usage.tokensOut,
+          }
+        : null,
     });
   });
 
@@ -141,6 +170,8 @@ export function mailboxesRoutes() {
       displayName: string | null;
       signature: string | null;
       replyTo: string | null;
+      spamFilter: "off" | "auth" | "standard" | "ai";
+      spamAiTokenCap: number | null;
     }> = {};
     if (body.displayName !== undefined) {
       patch.displayName = body.displayName?.trim() ? body.displayName.trim() : null;
@@ -150,6 +181,12 @@ export function mailboxesRoutes() {
     }
     if (body.replyTo !== undefined) {
       patch.replyTo = body.replyTo ? body.replyTo : null;
+    }
+    if (body.spamFilter !== undefined) {
+      patch.spamFilter = body.spamFilter;
+    }
+    if (body.spamAiTokenCap !== undefined) {
+      patch.spamAiTokenCap = body.spamAiTokenCap;
     }
     if (Object.keys(patch).length === 0) return c.json({ ok: true });
 

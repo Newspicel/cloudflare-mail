@@ -181,6 +181,9 @@ export const createRedirect = z.object({
   targetMailboxId: z.string().min(1),
 });
 
+export const spamFilterLevel = z.enum(["off", "auth", "standard", "ai"]);
+export type SpamFilterLevel = z.infer<typeof spamFilterLevel>;
+
 export const updateMailboxSettings = z.object({
   displayName: z.string().max(200).nullable().optional(),
   signature: z.string().max(5000).nullable().optional(),
@@ -188,6 +191,8 @@ export const updateMailboxSettings = z.object({
     .union([emailAddress, z.literal("")])
     .nullable()
     .optional(),
+  spamFilter: spamFilterLevel.optional(),
+  spamAiTokenCap: z.number().int().positive().max(100_000_000).nullable().optional(),
 });
 export type UpdateMailboxSettingsInput = z.infer<typeof updateMailboxSettings>;
 

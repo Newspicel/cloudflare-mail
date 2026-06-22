@@ -38,6 +38,8 @@ export interface MessageRow {
   receivedAt: string | null;
   sentAt: string | null;
   createdAt: string;
+  spamVerdict: "clean" | "suspicious" | "spam" | null;
+  spamReasons: string[] | null;
 }
 
 export interface MeUser {
