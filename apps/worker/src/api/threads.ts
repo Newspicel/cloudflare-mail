@@ -8,6 +8,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
+import { recomputeThreadUnread } from "../mail/threads.ts";
 import { requireUser } from "../middleware.ts";
 import { requirePerm } from "../permissions.ts";
 
@@ -141,7 +142,7 @@ export function threadsRoutes() {
 
     const th = await db.query.thread.findFirst({
       where: eq(thread.id, id),
-      columns: { mailboxId: true, trashed: true, spam: true },
+      columns: { mailboxId: true, trashed: true, spam: true, unreadCount: true },
     });
     if (!th) throw new HTTPException(404, { message: "not found" });
     await requirePerm(db, user.id, th.mailboxId, Perm.WRITE);
@@ -157,13 +158,27 @@ export function threadsRoutes() {
       patch.spam = body.spam;
       if (body.spam && body.trashed === undefined) patch.trashed = false;
     }
-    if (Object.keys(patch).length === 0) {
-      return c.json({ trashed: th.trashed, spam: th.spam });
+    if (Object.keys(patch).length > 0) {
+      await db.update(thread).set(patch).where(eq(thread.id, id));
     }
-    await db.update(thread).set(patch).where(eq(thread.id, id));
+
+    // Read/unread lives on message SEEN flags; flip every inbound message, then
+    // reconcile the thread's cached unreadCount.
+    let unreadCount = th.unreadCount;
+    if (body.read !== undefined) {
+      const seenBit = sql`${message.flags} | ${Flag.SEEN}`;
+      const clearBit = sql`${message.flags} & ${~Flag.SEEN}`;
+      await db
+        .update(message)
+        .set({ flags: body.read ? seenBit : clearBit })
+        .where(and(eq(message.threadId, id), eq(message.direction, "in")));
+      unreadCount = await recomputeThreadUnread(db, id);
+    }
+
     return c.json({
       trashed: patch.trashed ?? th.trashed,
       spam: patch.spam ?? th.spam,
+      unreadCount,
     });
   });
 

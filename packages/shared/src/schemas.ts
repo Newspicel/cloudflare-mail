@@ -82,6 +82,7 @@ export const setAuthFromAddress = z.object({
 export const updateThread = z.object({
   trashed: z.boolean().optional(),
   spam: z.boolean().optional(),
+  read: z.boolean().optional(),
 });
 
 const draftAttachment = z.object({

@@ -27,7 +27,7 @@ export const FOLDER_META: Record<MailView, { label: string; icon: LucideIcon; em
 export function FolderTabs({ mailboxId, view }: { mailboxId: string; view: MailView }) {
   const { data } = useQuery(folderCountsQuery(mailboxId));
   return (
-    <div className="flex items-center gap-0.5 overflow-x-auto rounded-lg bg-muted p-0.5">
+    <div className="flex flex-1 items-center justify-between gap-0.5 rounded-lg bg-muted p-0.5">
       {MAIL_VIEWS.map((v) => {
         const m = FOLDER_META[v];
         const active = v === view;

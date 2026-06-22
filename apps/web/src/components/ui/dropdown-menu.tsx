@@ -47,12 +47,13 @@ export function DropdownMenuItem({
   );
 }
 
-export function DropdownMenuLabel({
-  className,
-  ...props
-}: React.ComponentProps<typeof Menu.GroupLabel>) {
+// A standalone section heading. Base UI's Menu.GroupLabel requires a wrapping
+// Menu.Group (throws #31 otherwise); these labels are plain headers, so render
+// a styled presentation div instead.
+export function DropdownMenuLabel({ className, ...props }: React.ComponentProps<"div">) {
   return (
-    <Menu.GroupLabel
+    <div
+      role="presentation"
       className={cn("px-2 py-1.5 font-medium text-muted-foreground text-xs", className)}
       {...props}
     />

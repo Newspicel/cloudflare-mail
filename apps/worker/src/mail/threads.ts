@@ -1,6 +1,7 @@
 import type { DB } from "@cfmail/db";
 import { message, thread } from "@cfmail/db/schema";
-import { and, desc, eq, gte } from "drizzle-orm";
+import { Flag } from "@cfmail/shared/flags";
+import { and, count, desc, eq, gte, sql } from "drizzle-orm";
 import { normalizeSubject } from "./mime.ts";
 
 const SUBJECT_WINDOW_SECONDS = 60 * 60 * 24 * 7;
@@ -87,6 +88,25 @@ async function deriveThreadId(mailboxId: string, rootHeader: string): Promise<st
   bytes[8] = (bytes[8]! & 0x3f) | 0x80;
   const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+
+// Reconcile a thread's unread badge with its messages — inbound messages
+// missing the SEEN flag. Call after toggling SEEN so list badges stay in sync
+// (the receive path is the only other writer of unreadCount).
+export async function recomputeThreadUnread(db: DB, threadId: string): Promise<number> {
+  const rows = await db
+    .select({ c: count() })
+    .from(message)
+    .where(
+      and(
+        eq(message.threadId, threadId),
+        eq(message.direction, "in"),
+        sql`(${message.flags} & ${Flag.SEEN}) = 0`,
+      ),
+    );
+  const n = rows[0]?.c ?? 0;
+  await db.update(thread).set({ unreadCount: n }).where(eq(thread.id, threadId));
+  return n;
 }
 
 export async function bumpThread(
