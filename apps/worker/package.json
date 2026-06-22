@@ -14,19 +14,19 @@
   "dependencies": {
     "@cfmail/db": "workspace:*",
     "@cfmail/shared": "workspace:*",
-    "@hono/zod-validator": "0.7.6",
-    "better-auth": "1.6.5",
+    "@hono/zod-validator": "0.8.0",
+    "better-auth": "1.6.20",
     "drizzle-orm": "0.45.2",
-    "hono": "4.12.14",
+    "hono": "4.12.26",
     "mimetext": "3.0.28",
     "postal-mime": "2.7.4",
-    "zod": "4.3.6"
+    "zod": "4.4.3"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "0.14.8",
-    "@cloudflare/workers-types": "4.20260420.1",
-    "@typescript/native-preview": "7.0.0-dev.20260420.1",
-    "vitest": "4.1.4",
-    "wrangler": "4.84.0"
+    "@cloudflare/vitest-pool-workers": "0.16.18",
+    "@cloudflare/workers-types": "4.20260621.1",
+    "@typescript/native-preview": "7.0.0-dev.20260622.1",
+    "vitest": "4.1.9",
+    "wrangler": "4.103.0"
   }
 }
