@@ -4,6 +4,18 @@ import { createFileRoute } from "@tanstack/react-router";
 import { ArrowRight, Check, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button.tsx";
+import { useConfirm } from "@/components/ui/confirm.tsx";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog.tsx";
+import { inputClass } from "@/components/ui/input.tsx";
 import { api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
 import { type MailboxSummary, mailboxesQuery, meQuery } from "@/lib/queries.ts";
@@ -170,25 +182,14 @@ function Section({
 }
 
 function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
-  return (
-    <input
-      {...props}
-      className={cn(
-        "rounded-md border bg-background px-2.5 py-1.5 text-[13px] outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/20",
-        props.className,
-      )}
-    />
-  );
+  return <input {...props} className={cn(inputClass, props.className)} />;
 }
 
 function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <select
       {...props}
-      className={cn(
-        "rounded-md border bg-background px-2 py-1.5 text-[13px] outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/20",
-        props.className,
-      )}
+      className={cn(inputClass, "cursor-pointer appearance-none pr-2", props.className)}
     />
   );
 }
@@ -205,14 +206,9 @@ function PrimaryBtn({
   type?: "button" | "submit";
 }) {
   return (
-    <button
-      type={type}
-      onClick={onClick}
-      disabled={disabled}
-      className="rounded-md bg-primary px-3 py-1.5 text-[13px] font-medium text-primary-foreground transition hover:brightness-105 disabled:opacity-50"
-    >
+    <Button type={type} variant="primary" onClick={onClick} disabled={disabled}>
       {children}
-    </button>
+    </Button>
   );
 }
 
@@ -228,19 +224,17 @@ function GhostBtn({
   children: React.ReactNode;
 }) {
   return (
-    <button
-      type="button"
+    <Button
+      variant="outline"
+      size="sm"
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        "rounded-md border px-2 py-1 text-[11px] font-medium transition disabled:opacity-50",
-        destructive
-          ? "text-destructive hover:bg-destructive/10"
-          : "text-muted-foreground hover:bg-muted hover:text-foreground",
+        destructive && "text-destructive hover:bg-destructive/10 hover:text-destructive",
       )}
     >
       {children}
-    </button>
+    </Button>
   );
 }
 
@@ -392,6 +386,7 @@ function KindCheckboxes({ value, onChange }: { value: number; onChange: (v: numb
 
 function DomainRow({ domain: d }: { domain: Domain }) {
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const recheck = useMutation({
     mutationFn: () => api(`/api/domains/${d.id}/check`, { method: "POST" }),
     onSuccess: () => {
@@ -445,8 +440,14 @@ function DomainRow({ domain: d }: { domain: Domain }) {
           </GhostBtn>
           <GhostBtn
             destructive
-            onClick={() => {
-              if (confirm(`Remove ${d.name}?`)) deleteDom.mutate();
+            onClick={async () => {
+              const ok = await confirm({
+                title: `Remove ${d.name}?`,
+                description: "The domain and its DNS records will be removed from this instance.",
+                confirmLabel: "Remove",
+                destructive: true,
+              });
+              if (ok) deleteDom.mutate();
             }}
           >
             Remove
@@ -638,6 +639,7 @@ function UsersSection() {
 
 function UserRow({ user }: { user: AdminUser }) {
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const me = useQuery(meQuery);
   const isMe = me.data?.user?.id === user.id;
   const [open, setOpen] = useState(false);
@@ -689,8 +691,14 @@ function UserRow({ user }: { user: AdminUser }) {
           {!isMe && (
             <GhostBtn
               destructive
-              onClick={() => {
-                if (confirm(`Delete ${user.email}?`)) remove.mutate();
+              onClick={async () => {
+                const ok = await confirm({
+                  title: `Delete ${user.email}?`,
+                  description: "This permanently removes the user account.",
+                  confirmLabel: "Delete",
+                  destructive: true,
+                });
+                if (ok) remove.mutate();
               }}
             >
               Delete
@@ -1365,7 +1373,7 @@ function AdminMailboxRow({
             destructive
             onClick={() => {
               setRedirectTo("");
-              setDeleteOpen((v) => !v);
+              setDeleteOpen(true);
               setMigrateOpen(false);
               setMembersOpen(false);
             }}
@@ -1396,17 +1404,21 @@ function AdminMailboxRow({
         </div>
       )}
 
-      {deleteOpen && (
-        <div className="mt-3 space-y-2 rounded-md border border-destructive/30 bg-destructive/5 p-3">
-          <div className="text-[11px] text-muted-foreground">
-            Optionally keep receiving mail sent to <span className="font-medium">{m.address}</span>{" "}
-            by redirecting it to another mailbox.
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete {m.address}?</DialogTitle>
+            <DialogDescription>
+              Optionally keep receiving mail sent to this address by redirecting it to another
+              mailbox. Otherwise the mailbox and its messages are removed permanently.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-1 text-[11px]">
+            <span className="text-muted-foreground">Redirect inbound mail</span>
             <Select
+              aria-label="Redirect inbound mail"
               value={redirectTo}
               onChange={(e) => setRedirectTo(e.target.value)}
-              className="flex-1"
             >
               <option value="">No redirect — delete permanently</option>
               {redirectTargets.map((t) => (
@@ -1415,17 +1427,19 @@ function AdminMailboxRow({
                 </option>
               ))}
             </Select>
-            <button
-              type="button"
+          </div>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline">Cancel</Button>} />
+            <Button
+              variant="destructive"
               onClick={() => remove.mutate()}
               disabled={remove.isPending}
-              className="rounded-md bg-destructive px-3 py-1.5 text-[13px] font-medium text-white transition hover:brightness-105 disabled:opacity-50"
             >
-              {redirectTo ? "Delete + redirect" : "Delete"}
-            </button>
-          </div>
-        </div>
-      )}
+              {remove.isPending ? "Deleting…" : redirectTo ? "Delete + redirect" : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </li>
   );
 }

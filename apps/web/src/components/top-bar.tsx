@@ -1,20 +1,64 @@
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { LogOut, Mail, Menu, Monitor, Moon, Search, Settings, Sun } from "lucide-react";
+import { Check, LogOut, Mail, Menu, Monitor, Moon, Search, Settings, Sun } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { authClient } from "@/lib/auth-client.ts";
 import { cn } from "@/lib/cn.ts";
 import { meQuery, type SearchResult, searchQuery } from "@/lib/queries.ts";
 import { type Theme, useTheme } from "@/lib/theme.ts";
+import { Button } from "./ui/button.tsx";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu.tsx";
 
 const SEARCH_DEBOUNCE_MS = 200;
 const MIN_SEARCH_CHARS = 2;
 
 export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
   const { data } = useQuery(meQuery);
+
+  return (
+    <header className="flex h-12 shrink-0 items-center gap-3 border-b bg-card px-3 sm:px-4">
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={onMenuClick}
+        className="shrink-0 md:hidden"
+        aria-label="Toggle menu"
+      >
+        <Menu />
+      </Button>
+      <div className="flex items-center gap-2">
+        <div className="grid h-7 w-7 place-items-center rounded-md bg-primary text-primary-foreground shadow-primary/20 shadow-sm">
+          <Mail className="h-3.5 w-3.5" strokeWidth={2.5} />
+        </div>
+        <span className="hidden font-semibold text-[13px] tracking-tight sm:inline">cfmail</span>
+        <span className="ml-2 hidden h-5 w-px bg-border sm:block" />
+        <span className="hidden text-[12px] text-muted-foreground sm:block">Mail</span>
+      </div>
+
+      <SearchBox />
+
+      <AccountMenu email={data?.user?.email} name={data?.user?.name} />
+    </header>
+  );
+}
+
+const THEME_OPTIONS: { value: Theme; label: string; icon: typeof Monitor }[] = [
+  { value: "system", label: "System", icon: Monitor },
+  { value: "light", label: "Light", icon: Sun },
+  { value: "dark", label: "Dark", icon: Moon },
+];
+
+function AccountMenu({ email, name }: { email?: string | null; name?: string | null }) {
   const nav = useNavigate();
-  const initial =
-    data?.user?.name?.[0]?.toUpperCase() ?? data?.user?.email?.[0]?.toUpperCase() ?? "?";
+  const { theme, setTheme } = useTheme();
+  const initial = name?.[0]?.toUpperCase() ?? email?.[0]?.toUpperCase() ?? "?";
 
   async function signOut() {
     await authClient.signOut();
@@ -22,80 +66,41 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
   }
 
   return (
-    <header className="flex h-12 shrink-0 items-center gap-3 border-b bg-card px-3 sm:px-4">
-      <button
-        type="button"
-        onClick={onMenuClick}
-        className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground md:hidden"
-        aria-label="Toggle menu"
-      >
-        <Menu className="h-4 w-4" />
-      </button>
-      <div className="flex items-center gap-2">
-        <div className="grid h-7 w-7 place-items-center rounded-md bg-primary text-primary-foreground">
-          <Mail className="h-3.5 w-3.5" strokeWidth={2.5} />
-        </div>
-        <span className="hidden text-[13px] font-semibold tracking-tight sm:inline">cfmail</span>
-        <span className="ml-2 hidden h-5 w-px bg-border sm:block" />
-        <span className="hidden text-[12px] text-muted-foreground sm:block">Mail</span>
-      </div>
-
-      <SearchBox />
-
-      <div className="flex items-center gap-0.5">
-        <ThemeToggle />
-        <IconButton onClick={() => nav({ to: "/app/settings" })} ariaLabel="Settings">
-          <Settings className="h-4 w-4" />
-        </IconButton>
-        <IconButton onClick={signOut} ariaLabel="Sign out">
-          <LogOut className="h-4 w-4" />
-        </IconButton>
-      </div>
-      <button
-        type="button"
-        onClick={() => nav({ to: "/app/settings" })}
-        className="ml-1 grid h-7 w-7 place-items-center rounded-full bg-accent text-[12px] font-medium text-accent-foreground hover:ring-2 hover:ring-ring/30"
-        title={data?.user?.email}
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className="ml-auto grid h-8 w-8 shrink-0 select-none place-items-center rounded-full bg-primary/12 font-semibold text-[12px] text-primary outline-none transition hover:bg-primary/20 focus-visible:ring-2 focus-visible:ring-ring/45"
+        aria-label="Account menu"
       >
         {initial}
-      </button>
-    </header>
-  );
-}
-
-function IconButton({
-  onClick,
-  ariaLabel,
-  children,
-}: {
-  onClick: () => void;
-  ariaLabel: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
-      aria-label={ariaLabel}
-      title={ariaLabel}
-    >
-      {children}
-    </button>
-  );
-}
-
-function ThemeToggle() {
-  const { theme, setTheme } = useTheme();
-  const order: Theme[] = ["system", "light", "dark"];
-  const next = order[(order.indexOf(theme) + 1) % order.length] ?? "system";
-  const label =
-    theme === "system" ? "System theme" : theme === "dark" ? "Dark theme" : "Light theme";
-  const Icon = theme === "dark" ? Moon : theme === "light" ? Sun : Monitor;
-  return (
-    <IconButton onClick={() => setTheme(next)} ariaLabel={label}>
-      <Icon className="h-4 w-4" />
-    </IconButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent className="min-w-[13rem]">
+        {email && (
+          <>
+            <DropdownMenuLabel className="truncate normal-case">{email}</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+          </>
+        )}
+        <DropdownMenuItem onClick={() => nav({ to: "/app/settings" })}>
+          <Settings /> Settings
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel>Theme</DropdownMenuLabel>
+        {THEME_OPTIONS.map((opt) => (
+          <DropdownMenuItem
+            key={opt.value}
+            closeOnClick={false}
+            onClick={() => setTheme(opt.value)}
+          >
+            <opt.icon /> {opt.label}
+            {theme === opt.value && <Check className="ml-auto !text-primary" />}
+          </DropdownMenuItem>
+        ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem variant="destructive" onClick={signOut}>
+          <LogOut /> Sign out
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -129,10 +134,6 @@ function SearchBox() {
 
   const query = useQuery(searchQuery(debounced));
   const results = useMemo(() => query.data?.results ?? [], [query.data]);
-
-  useEffect(() => {
-    setActiveIdx(0);
-  }, []);
 
   function go(result: SearchResult) {
     setOpen(false);
@@ -169,7 +170,7 @@ function SearchBox() {
 
   return (
     <div ref={rootRef} className="relative mx-auto w-full max-w-xl">
-      <label className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-[13px] text-muted-foreground transition focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20">
+      <label className="flex items-center gap-2 rounded-full border bg-muted/60 px-3.5 py-1.5 text-[13px] text-muted-foreground transition focus-within:border-ring focus-within:bg-card focus-within:ring-2 focus-within:ring-ring/30">
         <Search className="h-3.5 w-3.5" />
         <input
           ref={inputRef}
@@ -184,31 +185,30 @@ function SearchBox() {
           placeholder="Search mail…"
           className="w-full bg-transparent text-foreground outline-none placeholder:text-muted-foreground"
           aria-label="Search mail"
+          aria-expanded={showDropdown}
+          aria-controls="search-results"
+          role="combobox"
         />
-        <kbd className="hidden shrink-0 items-center gap-0.5 rounded border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline-flex">
-          ⌘K
+        <kbd className="hidden shrink-0 items-center gap-0.5 rounded border bg-card px-1.5 py-0.5 font-medium text-[10px] text-muted-foreground sm:inline-flex">
+          /
         </kbd>
       </label>
 
       {showDropdown && (
-        <div className="absolute left-0 right-0 top-full z-40 mt-1 overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md">
+        <div className="absolute top-full right-0 left-0 z-40 mt-2 overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-black/10 shadow-lg">
           {query.isLoading && !query.data ? (
             <div className="p-3 text-[12px] text-muted-foreground">Searching…</div>
           ) : query.isError ? (
             <div className="flex items-center justify-between gap-2 p-3 text-[12px]">
               <span className="text-destructive">Search failed</span>
-              <button
-                type="button"
-                onClick={() => query.refetch()}
-                className="rounded-md border px-2 py-0.5 font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
-              >
+              <Button variant="outline" size="sm" onClick={() => query.refetch()}>
                 Retry
-              </button>
+              </Button>
             </div>
           ) : results.length === 0 ? (
             <div className="p-3 text-[12px] text-muted-foreground">No matches</div>
           ) : (
-            <ul className="max-h-[60vh] overflow-y-auto">
+            <ul id="search-results" className="max-h-[60vh] overflow-y-auto p-1">
               {results.map((r, i) => (
                 <li key={r.messageId}>
                   <button
@@ -216,7 +216,7 @@ function SearchBox() {
                     onClick={() => go(r)}
                     onMouseEnter={() => setActiveIdx(i)}
                     className={cn(
-                      "flex w-full flex-col gap-0.5 border-b px-3 py-2 text-left text-[13px] last:border-b-0",
+                      "flex w-full flex-col gap-0.5 rounded-md px-3 py-2 text-left text-[13px]",
                       i === activeIdx ? "bg-accent text-accent-foreground" : "hover:bg-muted/60",
                     )}
                   >

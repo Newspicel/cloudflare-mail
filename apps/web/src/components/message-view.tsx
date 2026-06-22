@@ -19,6 +19,9 @@ import { cn } from "@/lib/cn.ts";
 import type { MailView, MessageRow, ThreadRow } from "@/lib/queries.ts";
 import { openCompose } from "./compose-dock.tsx";
 import { LabelChips, LabelsMenu } from "./labels-menu.tsx";
+import { Badge } from "./ui/badge.tsx";
+import { Button } from "./ui/button.tsx";
+import { Tooltip, TooltipProvider } from "./ui/tooltip.tsx";
 
 interface Props {
   thread: ThreadRow;
@@ -89,142 +92,123 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
   }
 
   return (
-    <div className="flex h-full flex-col bg-background">
-      <div className="flex items-center gap-1 border-b bg-card px-2 py-2 sm:px-4">
-        <ToolbarButton onClick={() => history.back()} ariaLabel="Back">
-          <ArrowLeft className="h-4 w-4" />
-        </ToolbarButton>
-        <h1 className="flex-1 truncate text-[14px] font-semibold tracking-tight">
-          {messages[0]?.subject || thread.subjectNorm || "(no subject)"}
-        </h1>
-        {!readOnly && messages.at(-1) && (
-          <LabelsMenu mailboxId={thread.mailboxId} messageId={messages.at(-1)!.id} />
-        )}
-        {!readOnly && (
-          <>
-            <ToolbarButton
-              onClick={markUnread}
-              disabled={setMsg.isPending}
-              ariaLabel="Mark unread (u)"
-            >
-              <MailMinus className="h-4 w-4" />
-            </ToolbarButton>
-            {view === "trash" ? (
+    <TooltipProvider delay={400}>
+      <div className="flex h-full flex-col bg-background">
+        <div className="flex items-center gap-1 border-b bg-card px-2 py-2 sm:px-4">
+          <Tooltip label="Back">
+            <Button variant="ghost" size="icon" onClick={() => history.back()} aria-label="Back">
+              <ArrowLeft />
+            </Button>
+          </Tooltip>
+          <h1 className="flex-1 truncate font-semibold text-[14px] tracking-tight">
+            {messages[0]?.subject || thread.subjectNorm || "(no subject)"}
+          </h1>
+          {!readOnly && messages.at(-1) && (
+            <LabelsMenu mailboxId={thread.mailboxId} messageId={messages.at(-1)!.id} />
+          )}
+          {!readOnly && (
+            <>
               <ToolbarButton
-                onClick={() => act({ trashed: false }, "Restored", { trashed: true })}
-                disabled={setState.isPending}
-                ariaLabel="Restore"
+                onClick={markUnread}
+                disabled={setMsg.isPending}
+                label="Mark unread (u)"
               >
-                <ArchiveRestore className="h-4 w-4" />
+                <MailMinus />
               </ToolbarButton>
-            ) : (
-              <>
-                {view === "archive" ? (
-                  <ToolbarButton
-                    onClick={() => act({ archived: false }, "Moved to Inbox", { archived: true })}
-                    disabled={setState.isPending}
-                    ariaLabel="Move to Inbox"
-                  >
-                    <ArchiveRestore className="h-4 w-4" />
-                  </ToolbarButton>
-                ) : (
-                  <ToolbarButton
-                    onClick={() => act({ archived: true }, "Archived", { archived: false })}
-                    disabled={setState.isPending}
-                    ariaLabel="Archive (e)"
-                  >
-                    <Archive className="h-4 w-4" />
-                  </ToolbarButton>
-                )}
+              {view === "trash" ? (
                 <ToolbarButton
-                  onClick={() => act({ trashed: true }, "Moved to Trash", { trashed: false })}
+                  onClick={() => act({ trashed: false }, "Restored", { trashed: true })}
                   disabled={setState.isPending}
-                  ariaLabel="Trash (#)"
+                  label="Restore"
                 >
-                  <Trash2 className="h-4 w-4" />
+                  <ArchiveRestore />
                 </ToolbarButton>
-              </>
-            )}
-          </>
+              ) : (
+                <>
+                  {view === "archive" ? (
+                    <ToolbarButton
+                      onClick={() => act({ archived: false }, "Moved to Inbox", { archived: true })}
+                      disabled={setState.isPending}
+                      label="Move to Inbox"
+                    >
+                      <ArchiveRestore />
+                    </ToolbarButton>
+                  ) : (
+                    <ToolbarButton
+                      onClick={() => act({ archived: true }, "Archived", { archived: false })}
+                      disabled={setState.isPending}
+                      label="Archive (e)"
+                    >
+                      <Archive />
+                    </ToolbarButton>
+                  )}
+                  <ToolbarButton
+                    onClick={() => act({ trashed: true }, "Moved to Trash", { trashed: false })}
+                    disabled={setState.isPending}
+                    label="Trash (#)"
+                  >
+                    <Trash2 />
+                  </ToolbarButton>
+                </>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="flex-1 space-y-3 overflow-y-auto p-3 sm:p-4">
+          {messages.map((m) => (
+            <MessageCard
+              key={m.id}
+              msg={m}
+              readOnly={readOnly}
+              onToggleStar={() =>
+                setMsg.mutate({
+                  id: m.id,
+                  patch: { starred: !hasFlag(m.flags, Flag.STARRED) },
+                })
+              }
+            />
+          ))}
+        </div>
+
+        {!readOnly && (
+          <div className="flex items-center gap-2 border-t bg-card p-3">
+            <Button
+              variant="secondary"
+              onClick={() => openCompose({ replyToMessage: messages.at(-1) ?? null })}
+            >
+              <Reply /> Reply
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => openCompose({ forwardMessage: messages.at(-1) ?? null })}
+            >
+              <Forward /> Forward
+            </Button>
+          </div>
         )}
       </div>
-
-      <div className="flex-1 space-y-3 overflow-y-auto p-3 sm:p-4">
-        {messages.map((m) => (
-          <MessageCard
-            key={m.id}
-            msg={m}
-            readOnly={readOnly}
-            onToggleStar={() =>
-              setMsg.mutate({
-                id: m.id,
-                patch: { starred: !hasFlag(m.flags, Flag.STARRED) },
-              })
-            }
-          />
-        ))}
-      </div>
-
-      {!readOnly && (
-        <div className="flex items-center gap-2 border-t bg-card p-3">
-          <ActionButton
-            icon={Reply}
-            label="Reply"
-            onClick={() => openCompose({ replyToMessage: messages.at(-1) ?? null })}
-          />
-          <ActionButton
-            icon={Forward}
-            label="Forward"
-            onClick={() => openCompose({ forwardMessage: messages.at(-1) ?? null })}
-          />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ActionButton({
-  icon: Icon,
-  label,
-  onClick,
-}: {
-  icon: typeof Reply;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex items-center gap-2 rounded-md border px-3 py-1.5 text-[13px] font-medium text-foreground transition hover:bg-muted"
-    >
-      <Icon className="h-3.5 w-3.5" /> {label}
-    </button>
+    </TooltipProvider>
   );
 }
 
 function ToolbarButton({
   onClick,
   disabled,
-  ariaLabel,
+  label,
   children,
 }: {
   onClick: () => void;
   disabled?: boolean;
-  ariaLabel: string;
+  label: string;
   children: React.ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:opacity-50"
-      aria-label={ariaLabel}
-      title={ariaLabel}
-    >
-      {children}
-    </button>
+    <Tooltip label={label}>
+      <Button variant="ghost" size="icon" onClick={onClick} disabled={disabled} aria-label={label}>
+        {children}
+      </Button>
+    </Tooltip>
   );
 }
 
@@ -254,10 +238,10 @@ function MessageCard({
   const when = new Date(msg.sentAt ?? msg.receivedAt ?? msg.createdAt);
 
   return (
-    <article className="rounded-md border bg-card">
+    <article className="overflow-hidden rounded-lg border bg-card shadow-black/[0.02] shadow-sm">
       <header className="flex items-start justify-between gap-4 border-b px-4 py-2.5">
         <div className="min-w-0">
-          <div className="text-[13px] font-semibold">
+          <div className="font-semibold text-[13px]">
             {msg.fromName ?? msg.fromAddr}{" "}
             <span className="font-normal text-muted-foreground">&lt;{msg.fromAddr}&gt;</span>
           </div>
@@ -265,9 +249,9 @@ function MessageCard({
             to {msg.toAddrs.map((a) => a.name ?? a.address).join(", ")}
           </div>
           {showsDeliveredTo(msg) && (
-            <div className="mt-0.5 inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+            <Badge variant="default" className="mt-1">
               Delivered to {msg.deliveredTo}
-            </div>
+            </Badge>
           )}
           <LabelChips messageId={msg.id} className="mt-1.5" />
         </div>
@@ -281,19 +265,16 @@ function MessageCard({
             })}
           </time>
           {!readOnly && (
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="icon-sm"
               onClick={onToggleStar}
-              className={cn(
-                "grid h-7 w-7 place-items-center rounded-md transition hover:bg-muted",
-                starred ? "text-amber-500" : "text-muted-foreground hover:text-foreground",
-              )}
+              className={cn(starred && "text-amber-500 hover:text-amber-500")}
               aria-label={starred ? "Unstar" : "Star"}
               aria-pressed={starred}
-              title={starred ? "Unstar" : "Star"}
             >
-              <Star className={cn("h-4 w-4", starred && "fill-current")} />
-            </button>
+              <Star className={cn(starred && "fill-current")} />
+            </Button>
           )}
         </div>
       </header>

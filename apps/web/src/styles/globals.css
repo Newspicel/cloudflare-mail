@@ -32,6 +32,7 @@
   --color-success: oklch(0.62 0.16 150);
   --color-success-foreground: oklch(1 0 0);
   --color-warning: oklch(0.78 0.15 80);
+  --color-warning-foreground: oklch(0.42 0.09 75);
   --color-sidebar: oklch(0.975 0 0);
   --color-sidebar-foreground: oklch(0.22 0 0);
   --color-sidebar-border: oklch(0.9 0 0);
@@ -62,6 +63,7 @@
   --color-success: oklch(0.7 0.16 150);
   --color-success-foreground: oklch(0.16 0 0);
   --color-warning: oklch(0.78 0.15 80);
+  --color-warning-foreground: oklch(0.88 0.1 85);
   --color-sidebar: oklch(0.18 0 0);
   --color-sidebar-foreground: oklch(0.94 0 0);
   --color-sidebar-border: oklch(0.26 0 0);

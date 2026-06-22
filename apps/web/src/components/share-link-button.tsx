@@ -1,9 +1,10 @@
 import { useMutation } from "@tanstack/react-query";
-import { Check, Copy, Link as LinkIcon, Share2, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Check, Copy, Link as LinkIcon, Share2 } from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api.ts";
-import { cn } from "@/lib/cn.ts";
+import { Button } from "./ui/button.tsx";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
 
 interface CreatedToken {
   id: string;
@@ -21,27 +22,6 @@ export function ShareLinkButton({ mailboxId }: { mailboxId: string }) {
   const [open, setOpen] = useState(false);
   const [ttlSeconds, setTtlSeconds] = useState(TTL_PRESETS[1]!.seconds);
   const [created, setCreated] = useState<CreatedToken | null>(null);
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onClick = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) close();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
-    document.addEventListener("mousedown", onClick);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onClick);
-      document.removeEventListener("keydown", onKey);
-    };
-    function close() {
-      setOpen(false);
-      setCreated(null);
-    }
-  }, [open]);
 
   const create = useMutation({
     mutationFn: () =>
@@ -54,79 +34,55 @@ export function ShareLinkButton({ mailboxId }: { mailboxId: string }) {
   });
 
   return (
-    <div ref={rootRef} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className={cn(
-          "flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[12px] font-medium transition",
-          open
-            ? "bg-muted text-foreground"
-            : "text-muted-foreground hover:bg-muted hover:text-foreground",
-        )}
-      >
-        <Share2 className="h-3 w-3" /> Share
-      </button>
-      {open && (
-        <div className="absolute right-0 top-full z-30 mt-1 w-80 rounded-md border bg-popover p-3 text-popover-foreground shadow-md">
-          <div className="mb-2 flex items-center justify-between">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Read-only share link
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                setOpen(false);
-                setCreated(null);
-              }}
-              className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-              aria-label="Close"
-            >
-              <X className="h-3 w-3" />
-            </button>
-          </div>
-
-          {created ? (
-            <CreatedPanel created={created} />
-          ) : (
-            <div className="flex flex-col gap-3">
-              <div className="flex flex-col gap-1 text-[11px]">
-                <span className="text-muted-foreground">Expires after</span>
-                <div className="flex gap-1">
-                  {TTL_PRESETS.map((p) => (
-                    <button
-                      key={p.seconds}
-                      type="button"
-                      onClick={() => setTtlSeconds(p.seconds)}
-                      className={cn(
-                        "flex-1 rounded-md border px-2 py-1.5 text-[11px] font-medium transition",
-                        ttlSeconds === p.seconds
-                          ? "border-primary bg-primary text-primary-foreground"
-                          : "hover:bg-muted",
-                      )}
-                    >
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => create.mutate()}
-                disabled={create.isPending}
-                className="flex items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[13px] font-medium text-primary-foreground transition hover:brightness-105 disabled:opacity-50"
-              >
-                <LinkIcon className="h-3 w-3" />
-                {create.isPending ? "Creating…" : "Create link"}
-              </button>
-              <p className="text-[11px] leading-relaxed text-muted-foreground">
-                Anyone with the link can read this mailbox's messages until the link expires.
-              </p>
-            </div>
-          )}
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) setCreated(null);
+      }}
+    >
+      <PopoverTrigger
+        render={
+          <Button variant="ghost" size="sm">
+            <Share2 /> Share
+          </Button>
+        }
+      />
+      <PopoverContent align="end" className="w-80 p-3">
+        <div className="mb-2 font-semibold text-[10px] text-muted-foreground uppercase tracking-wider">
+          Read-only share link
         </div>
-      )}
-    </div>
+        {created ? (
+          <CreatedPanel created={created} />
+        ) : (
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1 text-[11px]">
+              <span className="text-muted-foreground">Expires after</span>
+              <div className="flex gap-1">
+                {TTL_PRESETS.map((p) => (
+                  <Button
+                    key={p.seconds}
+                    variant={ttlSeconds === p.seconds ? "primary" : "outline"}
+                    size="sm"
+                    className="flex-1"
+                    onClick={() => setTtlSeconds(p.seconds)}
+                  >
+                    {p.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            <Button variant="primary" onClick={() => create.mutate()} disabled={create.isPending}>
+              <LinkIcon />
+              {create.isPending ? "Creating…" : "Create link"}
+            </Button>
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              Anyone with the link can read this mailbox's messages until the link expires.
+            </p>
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -149,14 +105,9 @@ function CreatedPanel({ created }: { created: CreatedToken }) {
       <div className="rounded-md border bg-muted/40 p-2">
         <div className="flex items-center gap-1">
           <code className="flex-1 truncate text-[11px]">{created.url}</code>
-          <button
-            type="button"
-            onClick={copy}
-            className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-            aria-label="Copy link"
-          >
-            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-          </button>
+          <Button variant="ghost" size="icon-sm" onClick={copy} aria-label="Copy link">
+            {copied ? <Check /> : <Copy />}
+          </Button>
         </div>
         <div className="mt-1 text-[10px] text-muted-foreground">
           Expires {new Date(created.expiresAt).toLocaleString()}
