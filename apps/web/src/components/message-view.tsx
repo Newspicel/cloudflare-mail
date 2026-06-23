@@ -29,6 +29,7 @@ import { messageBodyQuery } from "@/lib/queries.ts";
 import { keys } from "@/lib/query-keys.ts";
 import { sanitizeEmailHtml } from "@/lib/sanitize-email.ts";
 import { openCompose } from "./compose-dock.tsx";
+import { EmailFrame } from "./email-frame.tsx";
 import { LabelChips, LabelsMenu } from "./labels-menu.tsx";
 import { Badge } from "./ui/badge.tsx";
 import { Button } from "./ui/button.tsx";
@@ -393,21 +394,17 @@ function MessageCard({
         </div>
       </header>
       <SpamBanner msg={msg} />
-      <div className="prose prose-sm max-w-none px-4 py-3 dark:prose-invert">
-        {bodyHtml ? (
-          <div
-            className="[&_*]:max-w-full"
-            // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized via DOMPurify
-            dangerouslySetInnerHTML={{ __html: bodyHtml }}
-          />
-        ) : (
-          // Plain-text body once loaded; the snippet shows while the body is in
-          // flight (or if parsing yields neither html nor text).
-          <pre className="whitespace-pre-wrap font-sans text-[13px]">
-            {body.data?.text ?? msg.snippet}
-          </pre>
-        )}
-      </div>
+      {bodyHtml ? (
+        // Untrusted HTML renders in a sandboxed, scriptless iframe so a
+        // sanitizer bypass can't reach the app origin or the session.
+        <EmailFrame html={bodyHtml} />
+      ) : (
+        // Plain-text body once loaded; the snippet shows while the body is in
+        // flight (or if parsing yields neither html nor text).
+        <pre className="whitespace-pre-wrap px-4 py-3 font-sans text-[13px]">
+          {body.data?.text ?? msg.snippet}
+        </pre>
+      )}
     </article>
   );
 }
