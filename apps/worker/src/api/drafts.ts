@@ -9,7 +9,7 @@ import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
 import { assertOwnedAttachmentKeys } from "../mail/attachment-keys.ts";
 import { requireUser } from "../middleware.ts";
-import { requirePerm } from "../permissions.ts";
+import { ALL_MAILBOXES, requirePerm } from "../permissions.ts";
 import { serializeDraft } from "./serialize.ts";
 
 export function draftsRoutes() {
@@ -22,13 +22,18 @@ export function draftsRoutes() {
     const user = c.get("user")!;
     const mailboxId = c.req.query("mailboxId");
     if (!mailboxId) throw new HTTPException(400, { message: "mailboxId required" });
-    await requirePerm(db, user.id, mailboxId, Perm.READ);
 
-    const rows = await db
-      .select()
-      .from(draft)
-      .where(and(eq(draft.mailboxId, mailboxId), eq(draft.userId, user.id)))
-      .orderBy(desc(draft.updatedAt));
+    // "All" view: every draft the user authored, regardless of mailbox. Drafts
+    // are already scoped to the author, so no per-mailbox permission check.
+    let where: ReturnType<typeof eq> | ReturnType<typeof and>;
+    if (mailboxId === ALL_MAILBOXES) {
+      where = eq(draft.userId, user.id);
+    } else {
+      await requirePerm(db, user.id, mailboxId, Perm.READ);
+      where = and(eq(draft.mailboxId, mailboxId), eq(draft.userId, user.id));
+    }
+
+    const rows = await db.select().from(draft).where(where).orderBy(desc(draft.updatedAt));
     return c.json({ drafts: rows.map(serializeDraft) });
   });
 

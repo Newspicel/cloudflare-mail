@@ -14,6 +14,9 @@ export function invalidateThreadChange(
   threadId?: string,
 ): void {
   qc.invalidateQueries({ queryKey: keys.threadsRoot(mailboxId) });
+  // The combined "All" view caches under a separate "all" root, so a per-mailbox
+  // change has to nudge it too (no-op if that view isn't mounted).
+  if (mailboxId !== "all") qc.invalidateQueries({ queryKey: keys.threadsRoot("all") });
   if (threadId) qc.invalidateQueries({ queryKey: keys.thread(threadId) });
   qc.invalidateQueries({ queryKey: keys.mailboxes() });
 }

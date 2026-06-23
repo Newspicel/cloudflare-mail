@@ -4,14 +4,14 @@ import { Perm } from "@cfmail/shared/permissions";
 import type { FolderCountsResponseDto } from "@cfmail/shared/responses";
 import { updateThread } from "@cfmail/shared/schemas";
 import { zValidator } from "@hono/zod-validator";
-import { and, asc, count, desc, eq, gt, type SQL, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, inArray, type SQL, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
 import { recomputeThreadUnread } from "../mail/threads.ts";
 import { requireUser } from "../middleware.ts";
-import { requirePerm } from "../permissions.ts";
+import { ALL_MAILBOXES, accessibleMailboxIds, requirePerm } from "../permissions.ts";
 import { serializeMessage, serializeThread } from "./serialize.ts";
 
 export function threadsRoutes() {
@@ -23,7 +23,18 @@ export function threadsRoutes() {
     const user = c.get("user")!;
     const mailboxId = c.req.query("mailboxId");
     if (!mailboxId) throw new HTTPException(400, { message: "mailboxId required" });
-    await requirePerm(db, user.id, mailboxId, Perm.READ);
+
+    // The combined "All" view spans every mailbox the user can read; a normal
+    // request is scoped (and permission-checked) to a single mailbox.
+    let scope: SQL;
+    if (mailboxId === ALL_MAILBOXES) {
+      const ids = await accessibleMailboxIds(db, user.id);
+      if (ids.length === 0) return c.json({ threads: [] });
+      scope = inArray(thread.mailboxId, ids);
+    } else {
+      await requirePerm(db, user.id, mailboxId, Perm.READ);
+      scope = eq(thread.mailboxId, mailboxId);
+    }
 
     const limit = Math.min(Number(c.req.query("limit") ?? 50), 200);
     const view = c.req.query("view") ?? "inbox";
@@ -58,9 +69,7 @@ export function threadsRoutes() {
     const rows = await db
       .select()
       .from(thread)
-      .where(
-        filter ? and(eq(thread.mailboxId, mailboxId), filter) : eq(thread.mailboxId, mailboxId),
-      )
+      .where(filter ? and(scope, filter) : scope)
       .orderBy(desc(thread.lastMsgAt))
       .limit(limit);
     return c.json({ threads: rows.map(serializeThread) });
@@ -73,9 +82,19 @@ export function threadsRoutes() {
     const user = c.get("user")!;
     const mailboxId = c.req.query("mailboxId");
     if (!mailboxId) throw new HTTPException(400, { message: "mailboxId required" });
-    await requirePerm(db, user.id, mailboxId, Perm.READ);
 
-    const inMailbox = eq(thread.mailboxId, mailboxId);
+    const isAll = mailboxId === ALL_MAILBOXES;
+    let inMailbox: SQL;
+    if (isAll) {
+      const ids = await accessibleMailboxIds(db, user.id);
+      if (ids.length === 0)
+        return c.json({ counts: emptyCounts() } satisfies FolderCountsResponseDto);
+      inMailbox = inArray(thread.mailboxId, ids);
+    } else {
+      await requirePerm(db, user.id, mailboxId, Perm.READ);
+      inMailbox = eq(thread.mailboxId, mailboxId);
+    }
+
     const active = and(inMailbox, eq(thread.trashed, false), eq(thread.spam, false));
     const inSpam = and(inMailbox, eq(thread.spam, true), eq(thread.trashed, false));
     const starred = sql`(${message.flags} & ${Flag.STARRED}) = ${Flag.STARRED}`;
@@ -85,10 +104,12 @@ export function threadsRoutes() {
       return rows[0]?.c ?? 0;
     };
     const draftCnt = async (): Promise<number> => {
-      const rows = await db
-        .select({ c: count() })
-        .from(draft)
-        .where(and(eq(draft.mailboxId, mailboxId), eq(draft.userId, user.id)));
+      // Drafts are per-author; the "All" view counts the user's drafts across
+      // every mailbox, otherwise just the one.
+      const where = isAll
+        ? eq(draft.userId, user.id)
+        : and(eq(draft.mailboxId, mailboxId), eq(draft.userId, user.id));
+      const rows = await db.select({ c: count() }).from(draft).where(where);
       return rows[0]?.c ?? 0;
     };
 
@@ -186,6 +207,19 @@ export function threadsRoutes() {
   });
 
   return r;
+}
+
+function emptyCounts(): FolderCountsResponseDto["counts"] {
+  const zero = { total: 0, unread: 0 };
+  return {
+    inbox: zero,
+    drafts: zero,
+    sent: zero,
+    marked: zero,
+    spam: zero,
+    trash: zero,
+    all: zero,
+  };
 }
 
 // Correlated EXISTS over a thread's messages (sent/starred live on rows, not

@@ -335,6 +335,8 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
     onSuccess: async () => {
       toast.success("Message sent");
       if (mailboxId) qc.invalidateQueries({ queryKey: keys.threadsRoot(mailboxId) });
+      // Keep the combined "All" view's lists/counts in sync with the send.
+      qc.invalidateQueries({ queryKey: keys.threadsRoot("all") });
       await deleteDraft().catch(() => {});
       closeCompose();
     },

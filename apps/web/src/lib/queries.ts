@@ -56,6 +56,11 @@ export const contactsQuery = queryOptions({
   staleTime: 5 * 60_000,
 });
 
+// Sentinel mailbox id for the combined "All" view — the worker aggregates every
+// mailbox the user can read behind it. Mirrors the backend constant of the same
+// name; real ids are UUIDs so it never collides.
+export const ALL_MAILBOXES = "all";
+
 export const MAIL_VIEWS: MailView[] = ["inbox", "drafts", "sent", "marked", "spam", "trash", "all"];
 
 export function parseMailView(value: unknown): MailView {
