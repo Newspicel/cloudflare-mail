@@ -16,6 +16,12 @@ export function setThreadDrag(e: DragEvent, data: ThreadDragData): void {
   e.dataTransfer.setData(THREAD_MIME, JSON.stringify(data));
   e.dataTransfer.setData("text/plain", data.threadId);
   e.dataTransfer.effectAllowed = "move";
+  // Pin the drag image to the row itself. Without this the browser falls back
+  // to its default ghost, which a transformed ancestor can balloon into a
+  // snapshot of the whole window. Offset keeps the ghost under the cursor.
+  const row = e.currentTarget as HTMLElement;
+  const rect = row.getBoundingClientRect();
+  e.dataTransfer.setDragImage(row, e.clientX - rect.left, e.clientY - rect.top);
 }
 
 export function readThreadDrag(e: DragEvent): ThreadDragData | null {
