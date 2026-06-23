@@ -18,17 +18,17 @@
     "@pushforge/builder": "2.0.5",
     "better-auth": "1.6.20",
     "drizzle-orm": "0.45.2",
-    "hono": "4.12.26",
+    "hono": "4.12.27",
     "mimetext": "3.0.28",
     "openpgp": "^6.3.1",
     "postal-mime": "2.7.4",
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "0.16.18",
-    "@cloudflare/workers-types": "4.20260621.1",
-    "@typescript/native-preview": "7.0.0-dev.20260622.1",
+    "@cloudflare/vitest-pool-workers": "0.16.19",
+    "@cloudflare/workers-types": "4.20260623.1",
+    "@typescript/native-preview": "7.0.0-dev.20260623.1",
     "vitest": "4.1.9",
-    "wrangler": "4.103.0"
+    "wrangler": "4.104.0"
   }
 }
