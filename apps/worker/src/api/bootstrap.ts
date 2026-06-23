@@ -2,7 +2,7 @@ import { account, user } from "@cfmail/db/schema";
 import { bootstrapAdmin } from "@cfmail/shared/schemas";
 import { zValidator } from "@hono/zod-validator";
 import { hashPassword } from "better-auth/crypto";
-import { count, eq } from "drizzle-orm";
+import { count, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { authFromCtx } from "../auth-ctx.ts";
@@ -23,24 +23,22 @@ export function bootstrapRoutes() {
     const db = dbFromCtx(c);
     const body = c.req.valid("json");
 
-    // Race-safe: refuse if any user already exists.
-    const existing = await db.select({ id: user.id }).from(user).limit(1);
-    if (existing.length > 0) {
-      throw new HTTPException(409, { message: "already bootstrapped" });
-    }
-
     const email = body.email.toLowerCase();
     const userId = crypto.randomUUID();
     const accountId = crypto.randomUUID();
     const password = await hashPassword(body.password);
 
-    await db.insert(user).values({
-      id: userId,
-      name: body.name,
-      email,
-      emailVerified: true,
-      role: "admin",
-    });
+    // Atomic first-user claim: the row is written only if the table is still
+    // empty, so two concurrent bootstraps can't both succeed. If we didn't
+    // win the insert, someone else already bootstrapped.
+    const claim = await db.run(
+      sql`INSERT INTO "user" (id, name, email, email_verified, role)
+          SELECT ${userId}, ${body.name}, ${email}, 1, 'admin'
+          WHERE NOT EXISTS (SELECT 1 FROM "user")`,
+    );
+    if (claim.meta.changes === 0) {
+      throw new HTTPException(409, { message: "already bootstrapped" });
+    }
     await db.insert(account).values({
       id: accountId,
       userId,
