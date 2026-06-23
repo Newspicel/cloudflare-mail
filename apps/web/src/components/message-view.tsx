@@ -22,19 +22,19 @@ import {
   invalidateThreadChange,
   patchMessageFlags,
   removeThreadsFromLists,
-  restoreSnapshot,
-  snapshotMailboxThreads,
 } from "@/lib/invalidate.ts";
 import type { MailView, MessageRow, ThreadRow } from "@/lib/queries.ts";
 import { messageBodyQuery } from "@/lib/queries.ts";
 import { keys } from "@/lib/query-keys.ts";
 import { sanitizeEmailHtml } from "@/lib/sanitize-email.ts";
+import { useThreadListMutation } from "@/lib/thread-mutations.ts";
 import { openCompose } from "./compose-dock.tsx";
 import { EmailFrame } from "./email-frame.tsx";
 import { LabelChips, LabelsMenu } from "./labels-menu.tsx";
 import { MoveToFolderMenu } from "./move-to-folder-menu.tsx";
 import { Badge } from "./ui/badge.tsx";
 import { Button } from "./ui/button.tsx";
+import { IconButton } from "./ui/icon-button.tsx";
 import { Tooltip, TooltipProvider } from "./ui/tooltip.tsx";
 
 interface Props {
@@ -55,20 +55,12 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
 
   // Trash/spam optimistically drops the thread from the open mailbox's lists;
   // `act()` navigates away, so the row vanishes instantly. Settle reconciles.
-  const setState = useMutation({
-    mutationFn: (patch: { trashed?: boolean; spam?: boolean }) =>
+  const setState = useThreadListMutation<{ trashed?: boolean; spam?: boolean }>({
+    mailboxId: thread.mailboxId,
+    threadId: thread.id,
+    mutationFn: (patch) =>
       api(`/api/threads/${thread.id}`, { method: "PATCH", body: JSON.stringify(patch) }),
-    onMutate: async () => {
-      await qc.cancelQueries({ queryKey: keys.threadsRoot(thread.mailboxId) });
-      const snapshot = snapshotMailboxThreads(qc, thread.mailboxId);
-      removeThreadsFromLists(qc, thread.mailboxId, [thread.id]);
-      return { snapshot };
-    },
-    onError: (e: unknown, _patch, ctx) => {
-      if (ctx) restoreSnapshot(qc, ctx.snapshot);
-      toast.error(e instanceof Error ? e.message : "Failed");
-    },
-    onSettled: invalidate,
+    optimistic: (_patch, client) => removeThreadsFromLists(client, thread.mailboxId, [thread.id]),
   });
 
   const setMsg = useMutation({
@@ -131,11 +123,7 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
     <TooltipProvider delay={400}>
       <div className="flex h-full flex-col bg-background">
         <div className="flex h-11 shrink-0 items-center gap-1 border-b bg-card px-2 sm:px-4">
-          <Tooltip label="Back">
-            <Button variant="ghost" size="icon" onClick={() => history.back()} aria-label="Back">
-              <ArrowLeft />
-            </Button>
-          </Tooltip>
+          <IconButton icon={ArrowLeft} label="Back" onClick={() => history.back()} />
           <h1 className="flex-1 truncate font-semibold text-[14px] tracking-tight">
             {messages[0]?.subject || thread.subjectNorm || "(no subject)"}
           </h1>
@@ -158,47 +146,42 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
           )}
           {!readOnly && (
             <>
-              <ToolbarButton
+              <IconButton
+                icon={MailMinus}
                 onClick={markUnread}
                 disabled={setMsg.isPending}
                 label="Mark unread (u)"
-              >
-                <MailMinus />
-              </ToolbarButton>
+              />
               {view === "trash" ? (
-                <ToolbarButton
+                <IconButton
+                  icon={ArchiveRestore}
                   onClick={() => act({ trashed: false }, "Restored", { trashed: true })}
                   disabled={setState.isPending}
                   label="Restore"
-                >
-                  <ArchiveRestore />
-                </ToolbarButton>
+                />
               ) : (
                 <>
                   {view === "spam" ? (
-                    <ToolbarButton
+                    <IconButton
+                      icon={Inbox}
                       onClick={() => act({ spam: false }, "Moved to Inbox", { spam: true })}
                       disabled={setState.isPending}
                       label="Not spam"
-                    >
-                      <Inbox />
-                    </ToolbarButton>
+                    />
                   ) : (
-                    <ToolbarButton
+                    <IconButton
+                      icon={ShieldAlert}
                       onClick={() => act({ spam: true }, "Marked as spam", { spam: false })}
                       disabled={setState.isPending}
                       label="Mark as spam (!)"
-                    >
-                      <ShieldAlert />
-                    </ToolbarButton>
+                    />
                   )}
-                  <ToolbarButton
+                  <IconButton
+                    icon={Trash2}
                     onClick={() => act({ trashed: true }, "Moved to Trash", { trashed: false })}
                     disabled={setState.isPending}
                     label="Trash (#)"
-                  >
-                    <Trash2 />
-                  </ToolbarButton>
+                  />
                 </>
               )}
             </>
@@ -222,26 +205,6 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
         </div>
       </div>
     </TooltipProvider>
-  );
-}
-
-function ToolbarButton({
-  onClick,
-  disabled,
-  label,
-  children,
-}: {
-  onClick: () => void;
-  disabled?: boolean;
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <Tooltip label={label}>
-      <Button variant="ghost" size="icon" onClick={onClick} disabled={disabled} aria-label={label}>
-        {children}
-      </Button>
-    </Tooltip>
   );
 }
 
