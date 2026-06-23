@@ -1,21 +1,45 @@
+import type { MailView, UserPrefs } from "@cfmail/shared";
 import { has, Perm } from "@cfmail/shared/permissions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, Trash2 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { MailboxSettingsForm } from "@/components/mailbox-settings-form.tsx";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar.tsx";
+import { useConfirmHelpers } from "@/components/ui/confirm.tsx";
 import { Switch } from "@/components/ui/switch.tsx";
 import { api } from "@/lib/api.ts";
 import { authClient } from "@/lib/auth-client.ts";
 import { cn } from "@/lib/cn.ts";
+import { useUserPrefs } from "@/lib/prefs.ts";
 import { disablePush, enablePush, isPushEnabled, pushSupported } from "@/lib/push.ts";
-import { type MailboxSummary, mailboxesQuery, meQuery } from "@/lib/queries.ts";
+import {
+  type FolderRow,
+  foldersQuery,
+  type MailboxSummary,
+  type MeUser,
+  mailboxesQuery,
+  meQuery,
+} from "@/lib/queries.ts";
+import { keys } from "@/lib/query-keys.ts";
+import { type Theme, useTheme } from "@/lib/theme.ts";
 
 export const Route = createFileRoute("/app/settings")({
   component: SettingsPage,
 });
+
+const NAV = [
+  ["profile", "Profile"],
+  ["appearance", "Appearance"],
+  ["reading", "Reading"],
+  ["compose", "Compose"],
+  ["security", "Security"],
+  ["notifications", "Notifications"],
+  ["folders", "Folders"],
+  ["mailboxes", "Mailboxes"],
+] as const;
 
 function SettingsPage() {
   const me = useQuery(meQuery);
@@ -26,44 +50,58 @@ function SettingsPage() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="mx-auto max-w-3xl space-y-6 px-4 py-6 sm:px-8 sm:py-8">
-        <header>
-          <h1 className="text-[22px] font-semibold tracking-tight">Settings</h1>
-          <p className="mt-1 text-[13px] text-muted-foreground">
-            Profile, security, and per-mailbox preferences.
-          </p>
-        </header>
+      <div className="mx-auto flex max-w-4xl gap-8 px-4 py-6 sm:px-8 sm:py-8">
+        <nav className="sticky top-8 hidden h-max w-36 shrink-0 flex-col gap-0.5 text-[13px] lg:flex">
+          {NAV.map(([id, label]) => (
+            <a
+              key={id}
+              href={`#${id}`}
+              className="rounded-md px-2.5 py-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              {label}
+            </a>
+          ))}
+        </nav>
 
-        <Section title="Profile">
-          <dl className="grid grid-cols-[120px_1fr] gap-y-2 text-[13px]">
-            <dt className="text-muted-foreground">Name</dt>
-            <dd className="font-medium">{me.data?.user?.name}</dd>
-            <dt className="text-muted-foreground">Email</dt>
-            <dd>{me.data?.user?.email}</dd>
-            <dt className="text-muted-foreground">Role</dt>
-            <dd>
-              <span className="inline-flex items-center rounded border bg-muted px-1.5 py-0 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-                {me.data?.user?.role ?? "—"}
-              </span>
-            </dd>
-          </dl>
-        </Section>
+        <div className="min-w-0 flex-1 space-y-6">
+          <header>
+            <h1 className="text-[22px] font-semibold tracking-tight">Settings</h1>
+            <p className="mt-1 text-[13px] text-muted-foreground">
+              Profile, appearance, security, and per-mailbox preferences.
+            </p>
+          </header>
 
-        <TwoFactorSection enabled={!!me.data?.user?.twoFactorEnabled} />
+          <ProfileSection
+            name={me.data?.user?.name ?? ""}
+            email={me.data?.user?.email ?? ""}
+            image={me.data?.user?.image ?? ""}
+            role={me.data?.user?.role}
+          />
+          <AppearanceSection />
+          <ReadingSection />
+          <ComposeSection />
+          <SecuritySection />
+          <TwoFactorSection enabled={!!me.data?.user?.twoFactorEnabled} />
+          <NotificationsSection mailboxes={mailboxesQ.data?.mailboxes ?? []} />
+          <FoldersSection />
 
-        <NotificationsSection mailboxes={mailboxesQ.data?.mailboxes ?? []} />
-
-        <div>
-          <h2 className="mb-3 text-[14px] font-semibold tracking-tight">Mailboxes</h2>
-          {editable.length === 0 && (
-            <div className="rounded-md border bg-card px-5 py-4 text-[13px] text-muted-foreground">
-              No editable mailboxes yet.
+          <div id="mailboxes">
+            <h2 className="mb-3 text-[14px] font-semibold tracking-tight">Mailboxes</h2>
+            {editable.length === 0 && (
+              <div className="rounded-md border bg-card px-5 py-4 text-[13px] text-muted-foreground">
+                No editable mailboxes yet.
+              </div>
+            )}
+            <div className="space-y-4">
+              {editable.map((m) => (
+                <MailboxSettingsForm
+                  key={m.id}
+                  mailboxId={m.id}
+                  address={m.address}
+                  type={m.type}
+                />
+              ))}
             </div>
-          )}
-          <div className="space-y-4">
-            {editable.map((m) => (
-              <MailboxSettingsForm key={m.id} mailboxId={m.id} address={m.address} type={m.type} />
-            ))}
           </div>
         </div>
       </div>
@@ -71,17 +109,21 @@ function SettingsPage() {
   );
 }
 
+// ─── Shared primitives ──────────────────────────────────────────────────────
+
 function Section({
+  id,
   title,
   description,
   children,
 }: {
+  id?: string;
   title: string;
   description?: string;
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-md border bg-card">
+    <section id={id} className="scroll-mt-8 rounded-md border bg-card">
       <header className="border-b px-5 py-3">
         <h2 className="text-[14px] font-semibold tracking-tight">{title}</h2>
         {description && <p className="mt-0.5 text-[12px] text-muted-foreground">{description}</p>}
@@ -115,6 +157,61 @@ function PrimaryBtn(props: React.ButtonHTMLAttributes<HTMLButtonElement>) {
   );
 }
 
+/** A labelled row: text on the left, control on the right. */
+function Row({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 py-2 first:pt-0 last:pb-0">
+      <div className="min-w-0 text-[13px]">
+        <div className="font-medium">{label}</div>
+        {hint && <div className="text-[12px] text-muted-foreground">{hint}</div>}
+      </div>
+      <div className="shrink-0">{children}</div>
+    </div>
+  );
+}
+
+/** Small segmented control for picking one of a few enum values. */
+function Segmented<T extends string>({
+  value,
+  options,
+  onChange,
+  disabled,
+}: {
+  value: T;
+  options: ReadonlyArray<readonly [T, string]>;
+  onChange: (v: T) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="inline-flex rounded-md border bg-background p-0.5">
+      {options.map(([v, label]) => (
+        <button
+          key={v}
+          type="button"
+          disabled={disabled}
+          onClick={() => onChange(v)}
+          className={cn(
+            "rounded px-2.5 py-1 text-[12px] font-medium transition-colors disabled:opacity-50",
+            value === v
+              ? "bg-primary text-primary-foreground"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function CopyButton({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -136,6 +233,573 @@ function CopyButton({ value, label }: { value: string; label: string }) {
     </button>
   );
 }
+
+// ─── Profile ────────────────────────────────────────────────────────────────
+
+function initials(name: string): string {
+  return (
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0])
+      .join("") || "?"
+  );
+}
+
+function ProfileSection({
+  name,
+  email,
+  image,
+  role,
+}: {
+  name: string;
+  email: string;
+  image: string;
+  role?: string;
+}) {
+  const qc = useQueryClient();
+  const [draftName, setDraftName] = useState(name);
+  const [draftImage, setDraftImage] = useState(image);
+
+  useEffect(() => {
+    setDraftName(name);
+  }, [name]);
+  useEffect(() => {
+    setDraftImage(image);
+  }, [image]);
+
+  const dirty = draftName.trim() !== name || draftImage.trim() !== (image ?? "");
+
+  const save = useMutation({
+    mutationFn: async () => {
+      const nextName = draftName.trim();
+      const nextImage = draftImage.trim();
+      const res = await authClient.updateUser({ name: nextName, image: nextImage || undefined });
+      if (res.error) throw new Error(res.error.message ?? "Failed to save");
+      return { name: nextName, image: nextImage || null };
+    },
+    // Write into the cache directly — the session cookie cache can lag ~60s.
+    onSuccess: (next) => {
+      qc.setQueryData<{ user: MeUser | null }>(meQuery.queryKey, (old) =>
+        old?.user ? { ...old, user: { ...old.user, ...next } } : old,
+      );
+      toast.success("Profile updated");
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
+  return (
+    <Section id="profile" title="Profile" description="Your name and avatar, shown across the app.">
+      <div className="flex items-start gap-4">
+        <Avatar className="size-14 text-base">
+          {draftImage.trim() && <AvatarImage src={draftImage.trim()} alt={draftName} />}
+          <AvatarFallback>{initials(draftName)}</AvatarFallback>
+        </Avatar>
+        <div className="min-w-0 flex-1 space-y-3">
+          <label htmlFor="profile-name" className="block">
+            <span className="mb-1 block text-[12px] font-medium text-muted-foreground">Name</span>
+            <Input
+              id="profile-name"
+              value={draftName}
+              onChange={(e) => setDraftName(e.target.value)}
+              maxLength={120}
+              className="w-full"
+            />
+          </label>
+          <label htmlFor="profile-image" className="block">
+            <span className="mb-1 block text-[12px] font-medium text-muted-foreground">
+              Avatar image URL
+            </span>
+            <Input
+              id="profile-image"
+              value={draftImage}
+              onChange={(e) => setDraftImage(e.target.value)}
+              placeholder="https://…"
+              className="w-full"
+            />
+          </label>
+          <dl className="grid grid-cols-[80px_1fr] gap-y-1 text-[13px]">
+            <dt className="text-muted-foreground">Email</dt>
+            <dd>{email}</dd>
+            <dt className="text-muted-foreground">Role</dt>
+            <dd>
+              <span className="inline-flex items-center rounded border bg-muted px-1.5 py-0 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                {role ?? "—"}
+              </span>
+            </dd>
+          </dl>
+          <PrimaryBtn
+            onClick={() => save.mutate()}
+            disabled={!dirty || !draftName.trim() || save.isPending}
+          >
+            Save profile
+          </PrimaryBtn>
+        </div>
+      </div>
+    </Section>
+  );
+}
+
+// ─── Appearance ─────────────────────────────────────────────────────────────
+
+const THEME_OPTIONS = [
+  ["light", "Light"],
+  ["dark", "Dark"],
+  ["system", "System"],
+] as const;
+
+const DENSITY_OPTIONS = [
+  ["comfortable", "Comfortable"],
+  ["compact", "Compact"],
+] as const;
+
+function AppearanceSection() {
+  const { theme, setTheme } = useTheme();
+  const { prefs, setPrefs, saving } = useUserPrefs();
+
+  return (
+    <Section
+      id="appearance"
+      title="Appearance"
+      description="Theme is saved on this device; density syncs to your account."
+    >
+      <div className="divide-y">
+        <Row label="Theme" hint="System follows your OS setting.">
+          <Segmented<Theme> value={theme} options={THEME_OPTIONS} onChange={(v) => setTheme(v)} />
+        </Row>
+        <Row label="List density" hint="How tightly conversations are packed.">
+          <Segmented
+            value={prefs.density ?? "comfortable"}
+            options={DENSITY_OPTIONS}
+            onChange={(v) => setPrefs({ density: v })}
+            disabled={saving}
+          />
+        </Row>
+      </div>
+    </Section>
+  );
+}
+
+// ─── Reading ────────────────────────────────────────────────────────────────
+
+const VIEW_OPTIONS = [
+  ["inbox", "Inbox"],
+  ["all", "All mail"],
+  ["marked", "Marked"],
+] as const;
+
+function ReadingSection() {
+  const { prefs, setPrefs, saving } = useUserPrefs();
+
+  return (
+    <Section id="reading" title="Reading" description="How mail opens and is marked.">
+      <div className="divide-y">
+        <Row label="Default view" hint="Which view opens when you pick a mailbox.">
+          <Segmented<MailView>
+            value={(prefs.defaultView as MailView) ?? "inbox"}
+            options={VIEW_OPTIONS}
+            onChange={(v) => setPrefs({ defaultView: v })}
+            disabled={saving}
+          />
+        </Row>
+        <Row
+          label="Mark read when opened"
+          hint="Turn off to keep threads unread until you mark them."
+        >
+          <Switch
+            checked={prefs.autoMarkRead !== false}
+            disabled={saving}
+            onCheckedChange={(checked) => setPrefs({ autoMarkRead: checked })}
+          />
+        </Row>
+      </div>
+    </Section>
+  );
+}
+
+// ─── Compose ────────────────────────────────────────────────────────────────
+
+const MODE_OPTIONS = [
+  ["text", "Plain"],
+  ["markdown", "Markdown"],
+  ["html", "Rich text"],
+] as const;
+
+function ComposeSection() {
+  const { prefs, setPrefs, saving } = useUserPrefs();
+
+  return (
+    <Section id="compose" title="Compose" description="Defaults when writing a new message.">
+      <div className="divide-y">
+        <Row label="Open in a new window" hint="Pop new messages out instead of the in-app dock.">
+          <Switch
+            checked={!!prefs.composeInNewWindow}
+            disabled={saving}
+            onCheckedChange={(checked) => setPrefs({ composeInNewWindow: checked })}
+          />
+        </Row>
+        <Row label="Default editor" hint="Starting format for a new message.">
+          <Segmented<NonNullable<UserPrefs["composeDefaultMode"]>>
+            value={prefs.composeDefaultMode ?? "text"}
+            options={MODE_OPTIONS}
+            onChange={(v) => setPrefs({ composeDefaultMode: v })}
+            disabled={saving}
+          />
+        </Row>
+        <Row label="Send with ⌘/Ctrl + Enter" hint="Keyboard shortcut to send the open message.">
+          <Switch
+            checked={!!prefs.sendShortcut}
+            disabled={saving}
+            onCheckedChange={(checked) => setPrefs({ sendShortcut: checked })}
+          />
+        </Row>
+        <Row label="Reply all by default" hint="Reply includes everyone on the thread.">
+          <Switch
+            checked={!!prefs.replyAllDefault}
+            disabled={saving}
+            onCheckedChange={(checked) => setPrefs({ replyAllDefault: checked })}
+          />
+        </Row>
+      </div>
+    </Section>
+  );
+}
+
+// ─── Security ───────────────────────────────────────────────────────────────
+
+interface SessionRow {
+  id: string;
+  token: string;
+  userAgent?: string | null;
+  ipAddress?: string | null;
+  createdAt: string | Date;
+}
+
+function shortUA(ua?: string | null): string {
+  if (!ua) return "Unknown device";
+  const browser = /Firefox/.test(ua)
+    ? "Firefox"
+    : /Edg/.test(ua)
+      ? "Edge"
+      : /Chrome/.test(ua)
+        ? "Chrome"
+        : /Safari/.test(ua)
+          ? "Safari"
+          : "Browser";
+  const os = /Macintosh|Mac OS/.test(ua)
+    ? "macOS"
+    : /Windows/.test(ua)
+      ? "Windows"
+      : /Android/.test(ua)
+        ? "Android"
+        : /iPhone|iPad|iOS/.test(ua)
+          ? "iOS"
+          : /Linux/.test(ua)
+            ? "Linux"
+            : "";
+  return os ? `${browser} · ${os}` : browser;
+}
+
+function SecuritySection() {
+  const qc = useQueryClient();
+  const { data: current } = authClient.useSession();
+  const currentToken = current?.session?.token;
+
+  const [curPw, setCurPw] = useState("");
+  const [newPw, setNewPw] = useState("");
+
+  const changePw = useMutation({
+    mutationFn: async () => {
+      const res = await authClient.changePassword({
+        currentPassword: curPw,
+        newPassword: newPw,
+        revokeOtherSessions: true,
+      });
+      if (res.error) throw new Error(res.error.message ?? "Failed");
+    },
+    onSuccess: () => {
+      setCurPw("");
+      setNewPw("");
+      qc.invalidateQueries({ queryKey: ["sessions"] });
+      toast.success("Password changed; other devices signed out");
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
+  const sessionsQ = useQuery({
+    queryKey: ["sessions"],
+    queryFn: async () => {
+      const res = await authClient.listSessions();
+      if (res.error) throw new Error(res.error.message ?? "Failed");
+      return (res.data ?? []) as unknown as SessionRow[];
+    },
+  });
+
+  const revoke = useMutation({
+    mutationFn: async (token: string) => {
+      const res = await authClient.revokeSession({ token });
+      if (res.error) throw new Error(res.error.message ?? "Failed");
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["sessions"] }),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
+  const revokeOthers = useMutation({
+    mutationFn: async () => {
+      const res = await authClient.revokeOtherSessions();
+      if (res.error) throw new Error(res.error.message ?? "Failed");
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["sessions"] });
+      toast.success("Signed out other devices");
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
+  const sessions = sessionsQ.data ?? [];
+  const hasOthers = sessions.some((s) => s.token !== currentToken);
+
+  return (
+    <Section id="security" title="Security" description="Password and active sessions.">
+      <div className="space-y-3">
+        <div className="text-[12px] font-medium uppercase tracking-wider text-muted-foreground">
+          Change password
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Input
+            type="password"
+            placeholder="Current password"
+            value={curPw}
+            onChange={(e) => setCurPw(e.target.value)}
+            className="flex-1"
+            autoComplete="current-password"
+          />
+          <Input
+            type="password"
+            placeholder="New password"
+            value={newPw}
+            onChange={(e) => setNewPw(e.target.value)}
+            className="flex-1"
+            autoComplete="new-password"
+          />
+          <PrimaryBtn
+            onClick={() => changePw.mutate()}
+            disabled={!curPw || newPw.length < 8 || changePw.isPending}
+          >
+            Update
+          </PrimaryBtn>
+        </div>
+        <p className="text-[11px] text-muted-foreground">
+          Changing your password signs out all other devices.
+        </p>
+      </div>
+
+      <div className="mt-5 border-t pt-4">
+        <div className="mb-2 flex items-center justify-between">
+          <div className="text-[12px] font-medium uppercase tracking-wider text-muted-foreground">
+            Active sessions
+          </div>
+          {hasOthers && (
+            <button
+              type="button"
+              onClick={() => revokeOthers.mutate()}
+              disabled={revokeOthers.isPending}
+              className="rounded-md border px-2 py-1 text-[11px] font-medium text-destructive transition hover:bg-destructive/10 disabled:opacity-50"
+            >
+              Sign out other devices
+            </button>
+          )}
+        </div>
+        {sessionsQ.isLoading && <div className="text-[12px] text-muted-foreground">Loading…</div>}
+        <ul className="divide-y">
+          {sessions.map((s) => {
+            const isCurrent = s.token === currentToken;
+            return (
+              <li key={s.id} className="flex items-center justify-between gap-4 py-2 text-[13px]">
+                <div className="min-w-0">
+                  <div className="font-medium">
+                    {shortUA(s.userAgent)}
+                    {isCurrent && (
+                      <span className="ml-2 rounded bg-primary/15 px-1.5 py-0 text-[10px] font-medium uppercase tracking-wider text-primary">
+                        This device
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-muted-foreground">{s.ipAddress ?? "—"}</div>
+                </div>
+                {!isCurrent && (
+                  <button
+                    type="button"
+                    onClick={() => revoke.mutate(s.token)}
+                    disabled={revoke.isPending}
+                    className="rounded-md border px-2 py-1 text-[11px] font-medium text-muted-foreground transition hover:bg-muted disabled:opacity-50"
+                  >
+                    Revoke
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </Section>
+  );
+}
+
+// ─── Folders ────────────────────────────────────────────────────────────────
+
+function FoldersSection() {
+  const qc = useQueryClient();
+  const { data } = useQuery(foldersQuery);
+  const { confirmDelete } = useConfirmHelpers();
+  const folders = data?.folders ?? [];
+
+  const update = useMutation({
+    mutationFn: ({
+      id,
+      ...body
+    }: {
+      id: string;
+      name?: string;
+      color?: string;
+      position?: number;
+    }) => api(`/api/folders/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.folders() }),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: string) => api(`/api/folders/${id}`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.folders() }),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
+  // Swap a folder's position with its neighbour to reorder.
+  const move = (index: number, dir: -1 | 1) => {
+    const a = folders[index];
+    const b = folders[index + dir];
+    if (!a || !b) return;
+    update.mutate({ id: a.id, position: b.position });
+    update.mutate({ id: b.id, position: a.position });
+  };
+
+  async function onDelete(f: FolderRow) {
+    const ok = await confirmDelete(
+      `folder "${f.name}"`,
+      "The folder is removed; its conversations return to their mailboxes.",
+    );
+    if (ok) remove.mutate(f.id);
+  }
+
+  return (
+    <Section
+      id="folders"
+      title="Folders"
+      description="Rename, recolor, and reorder your custom folders."
+    >
+      {folders.length === 0 ? (
+        <div className="text-[13px] text-muted-foreground">
+          No folders yet. Create one from the sidebar.
+        </div>
+      ) : (
+        <ul className="divide-y">
+          {folders.map((f, i) => (
+            <FolderRowEditor
+              key={f.id}
+              folder={f}
+              isFirst={i === 0}
+              isLast={i === folders.length - 1}
+              busy={update.isPending || remove.isPending}
+              onRename={(name) => name !== f.name && update.mutate({ id: f.id, name })}
+              onRecolor={(color) => update.mutate({ id: f.id, color })}
+              onMoveUp={() => move(i, -1)}
+              onMoveDown={() => move(i, 1)}
+              onDelete={() => onDelete(f)}
+            />
+          ))}
+        </ul>
+      )}
+    </Section>
+  );
+}
+
+function FolderRowEditor({
+  folder,
+  isFirst,
+  isLast,
+  busy,
+  onRename,
+  onRecolor,
+  onMoveUp,
+  onMoveDown,
+  onDelete,
+}: {
+  folder: FolderRow;
+  isFirst: boolean;
+  isLast: boolean;
+  busy: boolean;
+  onRename: (name: string) => void;
+  onRecolor: (color: string) => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onDelete: () => void;
+}) {
+  const [name, setName] = useState(folder.name);
+  useEffect(() => setName(folder.name), [folder.name]);
+
+  return (
+    <li className="flex items-center gap-2 py-2">
+      <input
+        type="color"
+        value={folder.color}
+        onChange={(e) => onRecolor(e.target.value)}
+        disabled={busy}
+        aria-label={`Color for ${folder.name}`}
+        className="size-7 shrink-0 cursor-pointer rounded border bg-transparent"
+      />
+      <Input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        onBlur={() => name.trim() && onRename(name.trim())}
+        onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+        maxLength={64}
+        className="min-w-0 flex-1"
+      />
+      <div className="flex shrink-0 items-center gap-0.5">
+        <button
+          type="button"
+          aria-label="Move up"
+          disabled={isFirst || busy}
+          onClick={onMoveUp}
+          className="rounded px-1.5 py-1 text-[13px] text-muted-foreground transition hover:bg-muted disabled:opacity-30"
+        >
+          ↑
+        </button>
+        <button
+          type="button"
+          aria-label="Move down"
+          disabled={isLast || busy}
+          onClick={onMoveDown}
+          className="rounded px-1.5 py-1 text-[13px] text-muted-foreground transition hover:bg-muted disabled:opacity-30"
+        >
+          ↓
+        </button>
+        <button
+          type="button"
+          aria-label={`Delete ${folder.name}`}
+          disabled={busy}
+          onClick={onDelete}
+          className="rounded p-1.5 text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+        >
+          <Trash2 className="size-3.5" />
+        </button>
+      </div>
+    </li>
+  );
+}
+
+// ─── Two-factor (unchanged) ─────────────────────────────────────────────────
 
 function totpSecret(uri: string): string | null {
   try {
@@ -199,6 +863,7 @@ function TwoFactorSection({ enabled }: { enabled: boolean }) {
 
   return (
     <Section
+      id="two-factor"
       title="Two-factor authentication"
       description={
         enabled
@@ -292,6 +957,8 @@ function TwoFactorSection({ enabled }: { enabled: boolean }) {
   );
 }
 
+// ─── Notifications (unchanged) ──────────────────────────────────────────────
+
 function NotificationsSection({ mailboxes }: { mailboxes: MailboxSummary[] }) {
   const qc = useQueryClient();
   const supported = pushSupported();
@@ -341,6 +1008,7 @@ function NotificationsSection({ mailboxes }: { mailboxes: MailboxSummary[] }) {
 
   return (
     <Section
+      id="notifications"
       title="Notifications"
       description="Get a push notification when new mail arrives. Enable this device, then choose which mailboxes notify you."
     >

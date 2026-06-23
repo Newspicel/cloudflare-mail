@@ -68,8 +68,35 @@ export interface MeUserDto {
   id: string;
   name: string;
   email: string;
+  image?: string | null;
   role: UserRole;
   twoFactorEnabled?: boolean;
+  /** Raw JSON string of UserPrefs (see parseUserPrefs). */
+  preferences?: string | null;
+}
+
+/** App-level, per-user preferences. Stored as a JSON string on the user row. */
+export interface UserPrefs {
+  // reading & display
+  density?: "comfortable" | "compact";
+  defaultView?: MailView;
+  autoMarkRead?: boolean;
+  // compose
+  composeInNewWindow?: boolean;
+  composeDefaultMode?: "text" | "markdown" | "html";
+  sendShortcut?: boolean;
+  replyAllDefault?: boolean;
+}
+
+/** Parse the raw `preferences` JSON string into a typed object; never throws. */
+export function parseUserPrefs(raw: string | null | undefined): UserPrefs {
+  if (!raw) return {};
+  try {
+    const v = JSON.parse(raw);
+    return v && typeof v === "object" ? (v as UserPrefs) : {};
+  } catch {
+    return {};
+  }
 }
 
 export interface MessageLabelDto {

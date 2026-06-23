@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ApiError, api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
+import { useUserPrefs } from "@/lib/prefs.ts";
 import {
   contactsQuery,
   type DraftRow,
@@ -74,15 +75,41 @@ interface DraftSnapshot {
 const listeners = new Set<(s: ComposeState) => void>();
 let state: ComposeState = { open: false, replyToMessage: null, forwardMessage: null };
 
+// Compose-related user prefs, mirrored from the React Query cache by the always-
+// mounted <ComposeDock> so the module-level openCompose() can honor them.
+interface ComposePrefs {
+  composeInNewWindow?: boolean;
+  replyAllDefault?: boolean;
+}
+let composePrefs: ComposePrefs = {};
+export function setComposePrefs(p: ComposePrefs): void {
+  composePrefs = p;
+}
+
 export function openCompose(partial: Partial<ComposeState> = {}): void {
+  const fresh = !partial.replyToMessage && !partial.forwardMessage && !partial.draft;
+  // Pop a brand-new message out to its own window when preferred. Safe from the
+  // popup blocker because openCompose runs inside the originating click/keydown.
+  if (fresh && composePrefs.composeInNewWindow) {
+    const url = partial.initialTo
+      ? `/compose?to=${encodeURIComponent(partial.initialTo)}`
+      : "/compose";
+    if (window.open(url, "_blank", "popup,width=720,height=860")) return;
+    // Popup blocked — fall back to the in-app dock.
+  }
+  // A reply defaults to reply-all when the user opted in (unless the caller,
+  // e.g. the explicit "Reply all" button, set it).
+  const replyAll = partial.replyToMessage
+    ? (partial.replyAll ?? composePrefs.replyAllDefault ?? false)
+    : false;
   state = {
     open: true,
     replyToMessage: null,
-    replyAll: false,
     forwardMessage: null,
     initialTo: undefined,
     draft: null,
     ...partial,
+    replyAll,
   };
   for (const l of listeners) l(state);
 }
@@ -93,12 +120,20 @@ export function closeCompose(): void {
 
 export function ComposeDock() {
   const [s, setS] = useState(state);
+  const { prefs } = useUserPrefs();
   useEffect(() => {
     listeners.add(setS);
     return () => {
       listeners.delete(setS);
     };
   }, []);
+  // Keep the module-level cache that openCompose() reads in sync with prefs.
+  useEffect(() => {
+    setComposePrefs({
+      composeInNewWindow: prefs.composeInNewWindow,
+      replyAllDefault: prefs.replyAllDefault,
+    });
+  }, [prefs.composeInNewWindow, prefs.replyAllDefault]);
   if (!s.open) return null;
   // Remount when the target changes so the form re-initializes cleanly.
   return (
@@ -127,6 +162,7 @@ export function ComposeForm({
 }) {
   const isWindow = variant === "window";
   const qc = useQueryClient();
+  const { prefs } = useUserPrefs();
   const { data: mailboxes } = useQuery(mailboxesQuery);
   const { data: contactsData } = useQuery(contactsQuery);
   const contacts = contactsData?.contacts ?? [];
@@ -199,7 +235,8 @@ export function ComposeForm({
   );
   // Body editor format. Default is a plain-text email; it only becomes an HTML
   // mail once rich formatting is actually used (or markdown is rendered).
-  const initialFormat: BodyFormat = d?.format ?? (d?.markdown ? "markdown" : "text");
+  const initialFormat: BodyFormat =
+    d?.format ?? (d?.markdown ? "markdown" : (prefs.composeDefaultMode ?? "text"));
   const [mode, setMode] = useState<BodyFormat>(initialFormat);
   // `text` holds the plain/markdown source; `html` holds the rich-mode body.
   const [text, setText] = useState(d && initialFormat !== "html" ? d.body : "");
@@ -457,6 +494,16 @@ export function ComposeForm({
       if (!ok) return;
     }
     send.mutate();
+  }
+
+  // ⌘/Ctrl+Enter sends, when enabled in preferences. Bound on the compose
+  // container so it only fires while the composer is focused.
+  function onContainerKeyDown(e: React.KeyboardEvent) {
+    if (!prefs.sendShortcut) return;
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault();
+      if (!send.isPending && uploading === 0 && mailboxId && hasRecipients(to)) attemptSend();
+    }
   }
 
   // A formatting tool was used. In HTML mode run it directly; otherwise promote
@@ -815,7 +862,11 @@ export function ComposeForm({
 
   if (isWindow) {
     return (
-      <div className="flex h-dvh flex-col overflow-hidden bg-card text-card-foreground">
+      // biome-ignore lint/a11y/noStaticElementInteractions: container-level ⌘/Ctrl+Enter send shortcut; inner fields stay the focus targets
+      <div
+        onKeyDown={onContainerKeyDown}
+        className="flex h-dvh flex-col overflow-hidden bg-card text-card-foreground"
+      >
         {content}
       </div>
     );
@@ -831,6 +882,7 @@ export function ComposeForm({
     >
       <Dialog.Portal>
         <Dialog.Popup
+          onKeyDown={onContainerKeyDown}
           className={cn(
             "fixed inset-0 z-40 flex flex-col overflow-hidden border bg-card text-card-foreground shadow-black/20 shadow-2xl outline-none transition-all duration-200 data-ending-style:translate-y-3 data-ending-style:opacity-0 data-starting-style:translate-y-3 data-starting-style:opacity-0 sm:inset-auto sm:right-6 sm:bottom-0 sm:rounded-t-xl sm:border-b-0",
             expanded

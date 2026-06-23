@@ -3,6 +3,7 @@ import { Mails } from "lucide-react";
 import type * as React from "react";
 import { cn } from "@/lib/cn.ts";
 import { setThreadDrag } from "@/lib/dnd.ts";
+import { useUserPrefs } from "@/lib/prefs.ts";
 import type { MailView, MessageLabel, ThreadRow } from "@/lib/queries.ts";
 import { formatTime } from "@/lib/time.ts";
 
@@ -35,6 +36,8 @@ export function ThreadRowView({
   leading,
   actions,
 }: Props) {
+  const { prefs } = useUserPrefs();
+  const compact = prefs.density === "compact";
   const firstParticipant = thread.participants[0];
   const label = firstParticipant?.name ?? firstParticipant?.address ?? "(unknown)";
   const unread = thread.unreadCount > 0;
@@ -48,7 +51,8 @@ export function ThreadRowView({
 
   // Without a leading column the body provides its own left padding.
   const linkClassName = cn(
-    "flex min-w-0 flex-1 flex-col gap-0.5 py-2.5 pr-4 text-[13px]",
+    "flex min-w-0 flex-1 flex-col gap-0.5 pr-4 text-[13px]",
+    compact ? "py-1.5" : "py-2.5",
     !leading && "pl-3",
   );
 
