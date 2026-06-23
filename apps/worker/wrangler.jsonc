@@ -12,57 +12,57 @@
     "mime-types": "./src/shims/mime-types.ts",
     // better-auth statically imports a few ATTR_* constants from here even with
     // telemetry off; the shim drops the ~54 KB convention table.
-    "@opentelemetry/semantic-conventions": "./src/shims/semantic-conventions.ts",
+    "@opentelemetry/semantic-conventions": "./src/shims/semantic-conventions.ts"
   },
   "observability": {
     "enabled": true,
-    "logs": { "enabled": true },
+    "logs": { "enabled": true }
   },
   "assets": {
     "directory": "../web/dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"],
+    "run_worker_first": ["/api/*"]
   },
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "cfmail",
       "database_id": "2d535672-f246-47d8-ba54-ad19d272eb29",
-      "migrations_dir": "../../packages/db/drizzle",
-    },
+      "migrations_dir": "../../packages/db/drizzle"
+    }
   ],
   "r2_buckets": [
     {
       "binding": "BLOBS",
-      "bucket_name": "cfmail-blobs",
-    },
+      "bucket_name": "cfmail-blobs"
+    }
   ],
   "ai": {
     "binding": "AI",
-    "remote": true,
+    "remote": true
   },
   "durable_objects": {
     "bindings": [
       {
         "name": "USER_HUB",
-        "class_name": "UserHub",
-      },
-    ],
+        "class_name": "UserHub"
+      }
+    ]
   },
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": ["UserHub"],
-    },
+      "new_sqlite_classes": ["UserHub"]
+    }
   ],
   "send_email": [
     {
       "name": "EMAIL",
-      "remote": true,
-    },
+      "remote": true
+    }
   ],
   "triggers": {
-    "crons": ["*/1 * * * *"],
-  },
+    "crons": ["*/1 * * * *"]
+  }
 }
