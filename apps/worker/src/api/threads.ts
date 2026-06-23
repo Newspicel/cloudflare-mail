@@ -50,7 +50,7 @@ export function threadsRoutes() {
         );
         break;
       default:
-        filter = active;
+        filter = and(active, hasMessage(eq(message.direction, "in")));
     }
 
     const rows = await db
@@ -92,8 +92,8 @@ export function threadsRoutes() {
 
     const [inbox, inboxUnread, sent, marked, spam, spamUnread, trash, all, drafts] =
       await Promise.all([
-        cnt(active),
-        cnt(and(active, gt(thread.unreadCount, 0))),
+        cnt(and(active, hasMessage(eq(message.direction, "in")))),
+        cnt(and(active, hasMessage(eq(message.direction, "in")), gt(thread.unreadCount, 0))),
         cnt(and(active, hasMessage(eq(message.direction, "out")))),
         cnt(and(active, hasMessage(starred))),
         cnt(inSpam),
