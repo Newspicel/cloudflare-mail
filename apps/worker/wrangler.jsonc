@@ -8,7 +8,10 @@
   // mimetext only uses mime-types#contentType to validate attachment types;
   // the shim avoids bundling the ~134 KB mime-db table.
   "alias": {
-    "mime-types": "./src/shims/mime-types.ts"
+    "mime-types": "./src/shims/mime-types.ts",
+    // better-auth statically imports a few ATTR_* constants from here even with
+    // telemetry off; the shim drops the ~54 KB convention table.
+    "@opentelemetry/semantic-conventions": "./src/shims/semantic-conventions.ts"
   },
   "observability": {
     "enabled": true,

@@ -29,7 +29,8 @@ export async function createAuth({ env, db, baseURL }: CreateAuthOpts) {
     baseURL,
     secret,
     trustedOrigins: [baseURL],
-    // Drops @opentelemetry/semantic-conventions (~54 KB) from the bundle.
+    // Off at runtime; the bundle drop happens via the semantic-conventions
+    // shim alias in wrangler.jsonc (the flag alone doesn't tree-shake it).
     telemetry: { enabled: false },
     database: drizzleAdapter(database, {
       provider: "sqlite",
