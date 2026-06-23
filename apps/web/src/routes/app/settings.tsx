@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Check, Copy, Trash2 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { MailboxSettingsForm } from "@/components/mailbox-settings-form.tsx";
 import { RulesSection } from "@/components/rules-settings.tsx";
@@ -262,8 +262,10 @@ function ProfileSection({
   role?: string;
 }) {
   const qc = useQueryClient();
+  const fileRef = useRef<HTMLInputElement>(null);
   const [draftName, setDraftName] = useState(name);
   const [draftImage, setDraftImage] = useState(image);
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     setDraftName(name);
@@ -273,6 +275,31 @@ function ProfileSection({
   }, [image]);
 
   const dirty = draftName.trim() !== name || draftImage.trim() !== (image ?? "");
+
+  async function onPickFile(file: File | undefined): Promise<void> {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Pick an image file");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Image exceeds 5 MB");
+      return;
+    }
+    setUploading(true);
+    try {
+      const { url } = await api<{ url: string }>("/api/avatar", {
+        method: "POST",
+        headers: { "content-type": file.type },
+        body: await file.arrayBuffer(),
+      });
+      setDraftImage(url);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  }
 
   const save = useMutation({
     mutationFn: async () => {
@@ -295,10 +322,42 @@ function ProfileSection({
   return (
     <Section id="profile" title="Profile" description="Your name and avatar, shown across the app.">
       <div className="flex items-start gap-4">
-        <Avatar className="size-14 text-base">
-          {draftImage.trim() && <AvatarImage src={draftImage.trim()} alt={draftName} />}
-          <AvatarFallback>{initials(draftName)}</AvatarFallback>
-        </Avatar>
+        <div className="flex flex-col items-center gap-2">
+          <Avatar className="size-14 text-base">
+            {draftImage.trim() && <AvatarImage src={draftImage.trim()} alt={draftName} />}
+            <AvatarFallback>{initials(draftName)}</AvatarFallback>
+          </Avatar>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            className="hidden"
+            onChange={(e) => {
+              void onPickFile(e.target.files?.[0]);
+              e.target.value = "";
+            }}
+          />
+          <div className="flex flex-col items-center gap-1 text-[12px]">
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              disabled={uploading}
+              className="font-medium text-primary hover:underline disabled:opacity-50"
+            >
+              {uploading ? "Uploading…" : draftImage.trim() ? "Change" : "Upload"}
+            </button>
+            {draftImage.trim() && (
+              <button
+                type="button"
+                onClick={() => setDraftImage("")}
+                disabled={uploading}
+                className="text-muted-foreground hover:underline disabled:opacity-50"
+              >
+                Remove
+              </button>
+            )}
+          </div>
+        </div>
         <div className="min-w-0 flex-1 space-y-3">
           <label htmlFor="profile-name" className="block">
             <span className="mb-1 block text-[12px] font-medium text-muted-foreground">Name</span>
@@ -307,18 +366,6 @@ function ProfileSection({
               value={draftName}
               onChange={(e) => setDraftName(e.target.value)}
               maxLength={120}
-              className="w-full"
-            />
-          </label>
-          <label htmlFor="profile-image" className="block">
-            <span className="mb-1 block text-[12px] font-medium text-muted-foreground">
-              Avatar image URL
-            </span>
-            <Input
-              id="profile-image"
-              value={draftImage}
-              onChange={(e) => setDraftImage(e.target.value)}
-              placeholder="https://…"
               className="w-full"
             />
           </label>

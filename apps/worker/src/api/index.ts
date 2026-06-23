@@ -8,6 +8,7 @@ import { sessionMiddleware } from "../middleware.ts";
 import { adminRoutes } from "./admin.ts";
 import { adminBlockRoutes } from "./admin-block.ts";
 import { attachmentsRoutes } from "./attachments.ts";
+import { avatarRoutes } from "./avatar.ts";
 import { blocklistRoutes } from "./blocklist.ts";
 import { bootstrapRoutes } from "./bootstrap.ts";
 import { contactsRoutes } from "./contacts.ts";
@@ -85,6 +86,7 @@ export function buildApi() {
   app.route("/api/folders", foldersRoutes());
   app.route("/api/rules", rulesRoutes());
   app.route("/api/attachments", attachmentsRoutes());
+  app.route("/api/avatar", avatarRoutes());
   app.route("/api/temp", tempRoutes());
   app.route("/api/push", pushRoutes());
   app.route("/api/search", searchRoutes());
