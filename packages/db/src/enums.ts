@@ -50,3 +50,38 @@ export type BlockEntryType = (typeof BLOCK_ENTRY_TYPES)[number];
 // Lifecycle of a user-submitted block request awaiting admin review.
 export const BLOCK_REQUEST_STATUS = ["pending", "approved", "denied"] as const;
 export type BlockRequestStatus = (typeof BLOCK_REQUEST_STATUS)[number];
+
+// ─── Inbound rules / filters ────────────────────────────────────────────────
+
+// Message field a rule condition matches against. `deliveredTo` is the envelope
+// recipient (the specific incoming address, incl. plus-aliases).
+export const RULE_FIELDS = ["from", "to", "cc", "subject", "body", "deliveredTo"] as const;
+export type RuleField = (typeof RULE_FIELDS)[number];
+
+// How a condition value is compared. `wildcard` supports `*`/`?` globs; `regex`
+// is opt-in power-user matching (compiled with safety caps, see mail/rules.ts).
+export const RULE_OPS = [
+  "contains",
+  "equals",
+  "startsWith",
+  "endsWith",
+  "wildcard",
+  "regex",
+] as const;
+export type RuleOp = (typeof RULE_OPS)[number];
+
+// Combinator across a rule's conditions: all = AND, any = OR.
+export const RULE_CONDITION_MODES = ["all", "any"] as const;
+export type RuleConditionMode = (typeof RULE_CONDITION_MODES)[number];
+
+// What a matched rule does. `stopProcessing` halts evaluation of lower-priority
+// rules; `hardBlock` SMTP-rejects the message (nothing stored).
+export const RULE_ACTION_TYPES = [
+  "applyLabel",
+  "moveFolder",
+  "markRead",
+  "markSpam",
+  "hardBlock",
+  "stopProcessing",
+] as const;
+export type RuleActionType = (typeof RULE_ACTION_TYPES)[number];

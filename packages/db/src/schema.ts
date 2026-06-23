@@ -18,11 +18,26 @@ import {
   PGP_MODES,
   PGP_VERIFY,
   QUOTE_KINDS,
+  RULE_CONDITION_MODES,
+  type RuleField,
+  type RuleOp,
   SERVICE_MODES,
   SPAM_FILTER_LEVELS,
   SPAM_VERDICTS,
   USER_ROLES,
 } from "./enums.ts";
+
+// JSON shapes stored on the `rule` table. A condition matches one message field
+// with one operator; an action is a discriminated union keyed by `type` (only
+// applyLabel/moveFolder carry a target id).
+export type RuleCondition = { field: RuleField; op: RuleOp; value: string };
+export type RuleAction =
+  | { type: "applyLabel"; labelId: string }
+  | { type: "moveFolder"; folderId: string }
+  | { type: "markRead" }
+  | { type: "markSpam" }
+  | { type: "hardBlock" }
+  | { type: "stopProcessing" };
 
 const now = sql`(unixepoch())`;
 
@@ -502,6 +517,41 @@ export const threadFolder = sqliteTable(
     primaryKey({ columns: [t.userId, t.threadId] }),
     index("thread_folder_folder_idx").on(t.folderId),
     index("thread_folder_thread_idx").on(t.threadId),
+  ],
+);
+
+// ─── Inbound rules / filters ────────────────────────────────────────────────
+
+// Per-mailbox automation: when an inbound message matches `conditions`, apply
+// `actions` (label, file to folder, mark read/spam, hard-block). Belongs to
+// exactly one mailbox; `createdBy` records the owner so the user-scoped
+// moveFolder action knows whose `thread_folder` to write (invariant 17).
+// Evaluated in mail/rules.ts, ordered by `priority` asc.
+export const rule = sqliteTable(
+  "rule",
+  {
+    id: text("id").primaryKey(),
+    mailboxId: text("mailbox_id")
+      .notNull()
+      .references(() => mailbox.id, { onDelete: "cascade" }),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    conditions: text("conditions", { mode: "json" })
+      .$type<RuleCondition[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    conditionMode: text("condition_mode", { enum: RULE_CONDITION_MODES }).notNull().default("all"),
+    actions: text("actions", { mode: "json" }).$type<RuleAction[]>().notNull().default(sql`'[]'`),
+    // Evaluation order; lower runs first, ties broken by createdAt.
+    priority: integer("priority").notNull().default(0),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    ...timestamps(),
+  },
+  (t) => [
+    uniqueIndex("rule_mailbox_name_uq").on(t.mailboxId, t.name),
+    index("rule_mailbox_priority_idx").on(t.mailboxId, t.priority),
   ],
 );
 

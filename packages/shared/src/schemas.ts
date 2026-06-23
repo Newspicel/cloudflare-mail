@@ -6,6 +6,9 @@ import {
   MESSAGE_DIRECTIONS,
   PGP_MODES,
   QUOTE_KINDS,
+  RULE_CONDITION_MODES,
+  RULE_FIELDS,
+  RULE_OPS,
   SERVICE_MODES,
   SPAM_FILTER_LEVELS,
   USER_ROLES,
@@ -197,6 +200,66 @@ export const updateFolder = z.object({
 
 export const fileThreads = z.object({
   threadIds: z.array(z.string().min(1)).min(1).max(200),
+});
+
+// ─── Inbound rules / filters ────────────────────────────────────────────────
+
+export type {
+  RuleActionType,
+  RuleConditionMode,
+  RuleField,
+  RuleOp,
+} from "@cfmail/db/enums";
+// Re-export the rule enum tuples + types so the web UI can build pickers without
+// importing @cfmail/db directly.
+export {
+  RULE_ACTION_TYPES,
+  RULE_CONDITION_MODES,
+  RULE_FIELDS,
+  RULE_OPS,
+} from "@cfmail/db/enums";
+
+const ruleCondition = z.object({
+  field: z.enum(RULE_FIELDS),
+  op: z.enum(RULE_OPS),
+  // Capped to keep regex/wildcard compilation on the inbound hot path bounded.
+  value: z.string().min(1).max(512),
+});
+
+// Actions are a discriminated union on `type`; only applyLabel/moveFolder carry
+// a target id. Order is preserved (hardBlock/stopProcessing short-circuit eval).
+const ruleAction = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("applyLabel"), labelId: z.string().min(1) }),
+  z.object({ type: z.literal("moveFolder"), folderId: z.string().min(1) }),
+  z.object({ type: z.literal("markRead") }),
+  z.object({ type: z.literal("markSpam") }),
+  z.object({ type: z.literal("hardBlock") }),
+  z.object({ type: z.literal("stopProcessing") }),
+]);
+
+export const createRule = z.object({
+  mailboxId: z.string().min(1),
+  name: z.string().min(1).max(100),
+  conditions: z.array(ruleCondition).min(1).max(20),
+  conditionMode: z.enum(RULE_CONDITION_MODES).default("all"),
+  actions: z.array(ruleAction).min(1).max(10),
+  priority: z.number().int().min(0).max(100_000).optional(),
+  enabled: z.boolean().optional(),
+});
+
+export const updateRule = z.object({
+  name: z.string().min(1).max(100).optional(),
+  conditions: z.array(ruleCondition).min(1).max(20).optional(),
+  conditionMode: z.enum(RULE_CONDITION_MODES).optional(),
+  actions: z.array(ruleAction).min(1).max(10).optional(),
+  priority: z.number().int().min(0).max(100_000).optional(),
+  enabled: z.boolean().optional(),
+});
+
+export const cloneRule = z.object({
+  // Target mailbox for the copy; defaults to the source mailbox when omitted.
+  mailboxId: z.string().min(1).optional(),
+  name: z.string().min(1).max(100).optional(),
 });
 
 export const inviteMember = z.object({

@@ -17,7 +17,19 @@ import type {
   SpamFilterLevel,
   UserRole,
 } from "@cfmail/db/enums";
-import type { draft, folder, label, message, thread } from "@cfmail/db/schema";
+import type {
+  draft,
+  folder,
+  label,
+  message,
+  RuleAction,
+  RuleCondition,
+  rule,
+  thread,
+} from "@cfmail/db/schema";
+
+// Re-exported so the web app gets the rule JSON shapes without importing @cfmail/db.
+export type { RuleAction, RuleCondition };
 
 /** Map Drizzle `Date` columns to the `string` form `c.json()` actually sends. */
 export type Serialized<T> = {
@@ -30,6 +42,9 @@ export type ThreadDto = Serialized<typeof thread.$inferSelect>;
 export type MessageDto = Serialized<typeof message.$inferSelect>;
 export type DraftDto = Serialized<typeof draft.$inferSelect>;
 export type LabelDto = typeof label.$inferSelect; // no date columns
+
+/** An inbound rule; `conditions`/`actions` keep their typed JSON shape. */
+export type RuleDto = Serialized<typeof rule.$inferSelect>;
 
 /** A custom folder plus its live thread counts (total + unread). */
 export type FolderDto = Serialized<typeof folder.$inferSelect> & {
@@ -209,6 +224,15 @@ export interface LabelListDto {
 }
 export interface FolderListDto {
   folders: FolderDto[];
+}
+export interface RuleListDto {
+  rules: RuleDto[];
+}
+/** Result of cloning a rule; `strippedLabels` names applyLabel targets that had
+ * no counterpart in the destination mailbox and were dropped (cross-mailbox). */
+export interface RuleCloneResultDto {
+  id: string;
+  strippedLabels: string[];
 }
 export interface MessageLabelsDto {
   labels: Record<string, MessageLabelDto[]>;

@@ -30,6 +30,9 @@ export interface IngestOptions {
   sentAt: Date | null;
   // Spam evaluation result, or null to skip spam fields and auto-filing (import).
   spam: SpamEvaluation | null;
+  // A matched markSpam rule files the thread to Spam regardless of the spam
+  // verdict or new/existing-thread heuristic (explicit user intent).
+  forceSpam?: boolean;
   // Gateway PGP (invariant 17). When `raw` is ciphertext we keep it at rawR2Key
   // as evidence and store the decrypted .eml (`pgp.plainRaw`) at plainR2Key, which
   // the body endpoint serves. `parsed` should already reflect the plaintext body.
@@ -106,7 +109,8 @@ export async function ingestRaw(env: Env, db: DB, opts: IngestOptions): Promise<
   // exception is a header-based join of unauthenticated mail: those splices are
   // attacker-influenced. Import passes spam=null, so nothing is ever filed.
   const fileSpam =
-    !!spam?.folderSpam && (isNewThread || (joinedByHeader && !isAuthenticated(spam.auth)));
+    !!opts.forceSpam ||
+    (!!spam?.folderSpam && (isNewThread || (joinedByHeader && !isAuthenticated(spam.auth))));
 
   const bodyIndex = bodyForIndex(parsed.text, parsed.html);
   const unsub = extractUnsubscribe(parsed);

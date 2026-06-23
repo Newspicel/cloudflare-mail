@@ -148,6 +148,13 @@
       "when": 1782247667022,
       "tag": "0020_pale_rictor",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1782248953984,
+      "tag": "0021_loving_stryfe",
+      "breakpoints": true
     }
   ]
 }
