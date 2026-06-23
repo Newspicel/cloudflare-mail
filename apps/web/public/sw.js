@@ -33,7 +33,10 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(req)
         .then((res) => {
-          caches.open(CACHE).then((c) => c.put(SHELL, res.clone()));
+          // Clone *before* returning `res` — once it's streamed to the page the
+          // body is consumed and a later clone throws.
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(SHELL, copy));
           return res;
         })
         .catch(() => caches.match(SHELL).then((r) => r || Response.error())),
@@ -46,7 +49,11 @@ self.addEventListener("fetch", (event) => {
     caches.match(req).then((cached) => {
       const network = fetch(req)
         .then((res) => {
-          if (res.ok) caches.open(CACHE).then((c) => c.put(req, res.clone()));
+          // Clone synchronously, before the body is consumed downstream.
+          if (res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE).then((c) => c.put(req, copy));
+          }
           return res;
         })
         .catch(() => cached);
