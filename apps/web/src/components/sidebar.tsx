@@ -5,6 +5,7 @@ import {
   Inbox,
   Lock,
   Mailbox,
+  Mails,
   PenSquare,
   ShieldCheck,
   SlidersHorizontal,
@@ -16,7 +17,7 @@ import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
-import { type MailboxSummary, mailboxesQuery } from "@/lib/queries.ts";
+import { ALL_MAILBOXES, type MailboxSummary, mailboxesQuery } from "@/lib/queries.ts";
 import { formatRemaining, useNow } from "@/lib/time.ts";
 import { openCompose } from "./compose-dock.tsx";
 import { NewTempMailbox } from "./new-temp-mailbox.tsx";
@@ -99,6 +100,8 @@ function SidebarBody({ onClose }: { onClose?: () => void }) {
   };
   for (const m of mailboxes) grouped[m.type].push(m);
 
+  const totalUnread = mailboxes.reduce((sum, m) => sum + m.unread, 0);
+
   return (
     <>
       <div className="flex flex-col gap-2 border-sidebar-border border-b px-3 py-3">
@@ -116,6 +119,38 @@ function SidebarBody({ onClose }: { onClose?: () => void }) {
       </div>
 
       <nav className="flex flex-1 flex-col gap-4 overflow-y-auto px-2 py-3">
+        {mailboxes.length > 0 && (
+          <ul className="flex flex-col gap-0.5">
+            <li>
+              <Link
+                to="/app/m/$mailboxId"
+                params={{ mailboxId: ALL_MAILBOXES }}
+                search={{ view: "inbox" }}
+                onClick={() => onClose?.()}
+                className={cn(
+                  "flex items-center justify-between rounded-md px-2 py-1.5 text-[13px] transition-colors",
+                  activeId === ALL_MAILBOXES
+                    ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                    : "text-sidebar-foreground hover:bg-sidebar-accent/60",
+                )}
+              >
+                <span className={cn("flex items-center gap-2", totalUnread > 0 && "font-medium")}>
+                  <Mails className="h-3.5 w-3.5 text-muted-foreground" /> All Mail
+                </span>
+                {totalUnread > 0 && (
+                  <span
+                    className="ml-2 flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-primary px-1 font-semibold text-[10px] text-primary-foreground tabular-nums leading-none"
+                    role="img"
+                    aria-label={`${totalUnread} unread`}
+                  >
+                    {totalUnread > 99 ? "99+" : totalUnread}
+                  </span>
+                )}
+              </Link>
+            </li>
+          </ul>
+        )}
+
         {(Object.keys(grouped) as MailboxSummary["type"][]).map((type) => {
           const items = grouped[type];
           if (!items.length) return null;
