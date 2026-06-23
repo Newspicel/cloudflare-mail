@@ -1095,6 +1095,12 @@ function KindBadge({ kind }: { kind: string }) {
   );
 }
 
+type Entry =
+  | { kind: "mailbox"; address: string; mb: AdminMailbox }
+  | { kind: "redirect"; address: string; rd: RedirectRow };
+
+const kindOf = (e: Entry) => (e.kind === "redirect" ? "redirect" : e.mb.type);
+
 function MailboxesSection() {
   const me = useQuery(meQuery);
   const isAdmin = me.data?.user?.role === "admin";
@@ -1192,16 +1198,12 @@ function AdminMailboxes({ meId }: { meId: string }) {
   >("all");
   const [sort, setSort] = useState<"address" | "address-desc" | "type">("address");
 
-  type Entry =
-    | { kind: "mailbox"; address: string; mb: AdminMailbox }
-    | { kind: "redirect"; address: string; rd: RedirectRow };
   const allEntries: Entry[] = [
     ...mailboxes.map((mb): Entry => ({ kind: "mailbox", address: mb.address, mb })),
     ...redirects.map((rd): Entry => ({ kind: "redirect", address: rd.address, rd })),
   ];
   const total = allEntries.length;
 
-  const kindOf = (e: Entry) => (e.kind === "redirect" ? "redirect" : e.mb.type);
   const q = query.trim().toLowerCase();
   const entries = allEntries
     .filter((e) => kindFilter === "all" || kindOf(e) === kindFilter)
