@@ -20,6 +20,7 @@
     "drizzle-orm": "0.45.2",
     "hono": "4.12.26",
     "mimetext": "3.0.28",
+    "openpgp": "^6.3.1",
     "postal-mime": "2.7.4",
     "zod": "4.4.3"
   },
