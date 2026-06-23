@@ -9,7 +9,9 @@ import type {
   MessageDto,
   MessageLabelDto,
   MeUserDto,
+  SearchFilters,
   SearchResultDto,
+  SearchResultsDto,
   ThreadDto,
 } from "@cfmail/shared";
 import { queryOptions } from "@tanstack/react-query";
@@ -29,6 +31,7 @@ export type {
   MessageDto as MessageRow,
   MessageLabelDto as MessageLabel,
   MeUserDto as MeUser,
+  SearchFilters,
   SearchResultDto as SearchResult,
   ThreadDto as ThreadRow,
 };
@@ -114,13 +117,56 @@ export const messageBodyQuery = (messageId: string) =>
     staleTime: Number.POSITIVE_INFINITY,
   });
 
-export const searchQuery = (q: string) =>
-  queryOptions({
-    queryKey: keys.search(q),
-    queryFn: () => api<{ results: SearchResultDto[] }>(`/api/search?q=${encodeURIComponent(q)}`),
-    enabled: q.trim().length > 0,
+export type SearchFilterInput = Partial<SearchFilters>;
+
+// Serialize a filter set into a stable query string (omitting defaults), shared
+// by the cache key and the request URL so identical filters hit the cache.
+export function buildSearchParams(f: SearchFilterInput): string {
+  const p = new URLSearchParams();
+  if (f.q?.trim()) p.set("q", f.q.trim());
+  if (f.searchIn && f.searchIn !== "all") p.set("searchIn", f.searchIn);
+  if (f.from?.trim()) p.set("from", f.from.trim());
+  if (f.to?.trim()) p.set("to", f.to.trim());
+  if (f.subject?.trim()) p.set("subject", f.subject.trim());
+  if (f.exclude?.trim()) p.set("exclude", f.exclude.trim());
+  if (f.after) p.set("after", f.after);
+  if (f.before) p.set("before", f.before);
+  if (f.direction) p.set("direction", f.direction);
+  if (f.hasAttachment) p.set("hasAttachment", "true");
+  if (f.folder && f.folder !== "any") p.set("folder", f.folder);
+  if (f.mailboxId && f.mailboxId !== "all") p.set("mailboxId", f.mailboxId);
+  if (f.page) p.set("page", String(f.page));
+  if (f.limit) p.set("limit", String(f.limit));
+  return p.toString();
+}
+
+// True when the filter set carries at least one real search criterion (so a
+// blank page doesn't fire a request, but a metadata-only search like
+// "folder=spam" does).
+export function hasSearchCriteria(f: SearchFilterInput): boolean {
+  return Boolean(
+    f.q?.trim() ||
+      f.from?.trim() ||
+      f.to?.trim() ||
+      f.subject?.trim() ||
+      f.exclude?.trim() ||
+      f.after ||
+      f.before ||
+      f.direction ||
+      f.hasAttachment ||
+      (f.folder && f.folder !== "any"),
+  );
+}
+
+export const searchQuery = (filters: SearchFilterInput) => {
+  const qs = buildSearchParams(filters);
+  return queryOptions({
+    queryKey: keys.search(qs),
+    queryFn: () => api<SearchResultsDto>(`/api/search?${qs}`),
+    enabled: hasSearchCriteria(filters),
     staleTime: 15_000,
   });
+};
 
 export const labelsQuery = (mailboxId: string) =>
   queryOptions({

@@ -307,6 +307,11 @@ export const message = sqliteTable(
     bccAddrs: text("bcc_addrs", { mode: "json" }).$type<{ name?: string; address: string }[]>(),
     subject: text("subject").notNull().default(""),
     snippet: text("snippet").notNull().default(""),
+    // Full plaintext body (HTML normalized to text), capped, for FTS body search.
+    // Null on pre-migration rows; the raw message always lives in R2.
+    bodyText: text("body_text"),
+    // Recipient names+addresses concatenated, so search matches To/Cc too.
+    toText: text("to_text"),
     flags: integer("flags").notNull().default(0),
     receivedAt: integer("received_at", { mode: "timestamp" }),
     sentAt: integer("sent_at", { mode: "timestamp" }),

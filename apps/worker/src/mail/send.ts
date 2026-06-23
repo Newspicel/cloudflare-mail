@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import type { Env } from "../env.ts";
 import { broadcastToUsers } from "../hub.ts";
-import { buildMime, snippet, type ThreadingHeaders } from "./mime.ts";
+import { addrsToText, bodyForIndex, buildMime, snippet, type ThreadingHeaders } from "./mime.ts";
 import { bumpThread, resolveThreadId } from "./threads.ts";
 
 export async function sendFromMailbox(
@@ -137,6 +137,7 @@ export async function sendFromMailbox(
   });
 
   const rawKey = `raw/${mb.id}/sent/${messageId}.eml`;
+  const bodyIndex = bodyForIndex(text, html);
 
   await Promise.all([
     env.BLOBS.put(rawKey, raw, { httpMetadata: { contentType: "message/rfc822" } }),
@@ -154,7 +155,9 @@ export async function sendFromMailbox(
       ccAddrs: input.cc ?? null,
       bccAddrs: input.bcc ?? null,
       subject: input.subject,
-      snippet: snippet(text ?? stripHtml(html ?? "")),
+      snippet: snippet(bodyIndex),
+      bodyText: bodyIndex,
+      toText: addrsToText([...input.to, ...(input.cc ?? []), ...(input.bcc ?? [])]),
       flags: Flag.SENT | Flag.SEEN,
       receivedAt: null,
       sentAt,
@@ -176,10 +179,6 @@ export async function sendFromMailbox(
   ]);
 
   return { messageId, threadId };
-}
-
-function stripHtml(html: string): string {
-  return html.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ");
 }
 
 function appendSignatureText(

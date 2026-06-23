@@ -85,6 +85,20 @@
       "when": 1782237382013,
       "tag": "0011_opposite_pete_wisdom",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1782238695363,
+      "tag": "0012_cuddly_pete_wisdom",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1782238695364,
+      "tag": "0013_message_fts_body",
+      "breakpoints": true
     }
   ]
 }

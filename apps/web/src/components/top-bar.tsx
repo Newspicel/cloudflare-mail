@@ -1,6 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Check, LogOut, Menu, Monitor, Moon, Search, Settings, Sun } from "lucide-react";
+import {
+  ArrowRight,
+  Check,
+  LogOut,
+  Menu,
+  Monitor,
+  Moon,
+  Search,
+  Settings,
+  SlidersHorizontal,
+  Sun,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { authClient } from "@/lib/auth-client.ts";
 import { cn } from "@/lib/cn.ts";
@@ -131,7 +142,7 @@ function SearchBox() {
     return () => document.removeEventListener("mousedown", onClick);
   }, [open]);
 
-  const query = useQuery(searchQuery(debounced));
+  const query = useQuery(searchQuery({ q: debounced }));
   const results = useMemo(() => query.data?.results ?? [], [query.data]);
 
   function go(result: SearchResult) {
@@ -145,13 +156,19 @@ function SearchBox() {
     });
   }
 
+  function goToSearch() {
+    const q = raw.trim();
+    setOpen(false);
+    inputRef.current?.blur();
+    nav({ to: "/app/search", search: q ? { q } : {} });
+  }
+
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Escape") {
       setOpen(false);
       inputRef.current?.blur();
       return;
     }
-    if (!results.length) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
       setActiveIdx((i) => Math.min(i + 1, results.length - 1));
@@ -162,6 +179,7 @@ function SearchBox() {
       e.preventDefault();
       const hit = results[activeIdx];
       if (hit) go(hit);
+      else goToSearch();
     }
   }
 
@@ -188,6 +206,15 @@ function SearchBox() {
           aria-controls="search-results"
           role="combobox"
         />
+        <button
+          type="button"
+          onClick={goToSearch}
+          className="shrink-0 rounded-full p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+          aria-label="Advanced search"
+          title="Advanced search"
+        >
+          <SlidersHorizontal className="h-3.5 w-3.5" />
+        </button>
         <kbd className="hidden shrink-0 items-center gap-0.5 rounded border bg-card px-1.5 py-0.5 font-medium text-[10px] text-muted-foreground sm:inline-flex">
           /
         </kbd>
@@ -239,6 +266,18 @@ function SearchBox() {
               ))}
             </ul>
           )}
+          <button
+            type="button"
+            onClick={goToSearch}
+            className="flex w-full items-center gap-2 border-t px-3 py-2 text-left text-[12px] text-muted-foreground transition hover:bg-muted/60 hover:text-foreground"
+          >
+            <Search className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">
+              Search all mail for “<span className="font-medium text-foreground">{raw.trim()}</span>
+              ”
+            </span>
+            <ArrowRight className="ml-auto h-3.5 w-3.5 shrink-0" />
+          </button>
         </div>
       )}
     </div>

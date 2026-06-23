@@ -109,3 +109,48 @@ export function normalizeSubject(subject: string): string {
 export function snippet(body: string, len = 180): string {
   return body.replace(/\s+/g, " ").trim().slice(0, len);
 }
+
+// Upper bound on the plaintext body we store/index per message. Search relevance
+// past this is negligible and it keeps D1 row sizes bounded.
+export const BODY_CAP = 64_000;
+
+const HTML_ENTITIES: Record<string, string> = {
+  "&nbsp;": " ",
+  "&amp;": "&",
+  "&lt;": "<",
+  "&gt;": ">",
+  "&quot;": '"',
+  "&#39;": "'",
+  "&apos;": "'",
+};
+
+// Convert HTML to readable plaintext for indexing: drop script/style blocks
+// entirely (otherwise CSS/JS pollutes the index), turn block-level tags into
+// newlines, strip remaining tags, decode common entities, collapse whitespace.
+export function htmlToText(html: string): string {
+  return html
+    .replace(/<(script|style|head|noscript)[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<\/?(p|div|br|li|tr|h[1-6]|table|ul|ol|blockquote|section|article)[^>]*>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
+    .replace(/&[a-z#0-9]+;/gi, (m) => HTML_ENTITIES[m.toLowerCase()] ?? " ")
+    .replace(/[^\S\n]+/g, " ")
+    .replace(/\s*\n\s*/g, "\n")
+    .trim();
+}
+
+// Best plaintext body for indexing: prefer the text part, fall back to HTML.
+export function bodyForIndex(text?: string | null, html?: string | null): string {
+  const body = text?.trim() || htmlToText(html ?? "");
+  return body.slice(0, BODY_CAP);
+}
+
+// Flatten recipient lists into searchable "Name address Name address" text.
+export function addrsToText(addrs: { name?: string; address: string }[]): string {
+  return addrs
+    .flatMap((a) => [a.name, a.address])
+    .filter(Boolean)
+    .join(" ")
+    .slice(0, BODY_CAP);
+}

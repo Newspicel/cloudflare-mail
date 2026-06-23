@@ -292,3 +292,43 @@ export const createShareToken = z.object({
     .max(60 * 60 * 24 * 30)
     .default(60 * 60 * 24 * 7),
 });
+
+// ─── Advanced search ────────────────────────────────────────────────────────
+
+export const SearchIn = z.enum(["all", "subject", "from", "body"]);
+export type SearchIn = z.infer<typeof SearchIn>;
+
+// "any" excludes Trash + Spam (Gmail-like); the rest map to folder state.
+export const SearchFolder = z.enum(["any", "inbox", "sent", "marked", "spam", "trash"]);
+export type SearchFolder = z.infer<typeof SearchFolder>;
+
+// Query params arrive as strings; coerce/normalize them here so the worker and
+// the web client agree on the exact filter contract.
+const boolParam = z.preprocess(
+  (v) => (v === undefined || v === "" ? undefined : v === "true" || v === "1"),
+  z.boolean().optional(),
+);
+const dateParam = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "expected YYYY-MM-DD")
+  .optional();
+const textParam = z.string().trim().max(200).optional();
+
+export const searchFilters = z.object({
+  q: z.string().trim().max(500).optional().default(""),
+  searchIn: SearchIn.optional().default("all"),
+  from: textParam,
+  to: textParam,
+  subject: textParam,
+  exclude: textParam,
+  after: dateParam,
+  before: dateParam,
+  direction: MessageDirection.optional(),
+  hasAttachment: boolParam,
+  folder: SearchFolder.optional().default("any"),
+  // Blank / "all" → every readable mailbox; a real id → just that one.
+  mailboxId: z.string().trim().max(64).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(25),
+  page: z.coerce.number().int().min(0).max(1000).optional().default(0),
+});
+export type SearchFilters = z.infer<typeof searchFilters>;

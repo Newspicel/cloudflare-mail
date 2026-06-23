@@ -37,8 +37,10 @@ export function NewTempMailbox() {
   const [created, setCreated] = useState<CreatedTemp | null>(null);
   const domainsQ = useQuery(tempDomainsQueryOptions);
 
-  // Hide entirely when the user can't create a temp mailbox on any domain.
-  if ((domainsQ.data?.domains.length ?? 0) === 0) return null;
+  // Hide entirely when the user can't create a temp mailbox on any domain, but
+  // keep its slot so the sidebar header height stays the same with or without it.
+  if ((domainsQ.data?.domains.length ?? 0) === 0)
+    return <div className="h-8 shrink-0" aria-hidden />;
 
   return (
     <Popover
@@ -50,7 +52,7 @@ export function NewTempMailbox() {
     >
       <PopoverTrigger
         className={cn(
-          "flex w-full items-center gap-2 rounded-lg border border-sidebar-border bg-card px-2.5 py-1.5 text-[13px] text-sidebar-foreground outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring/40 data-[popup-open]:bg-sidebar-accent",
+          "flex h-8 w-full items-center gap-2 rounded-lg border border-sidebar-border bg-card px-2.5 text-[13px] text-sidebar-foreground outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring/40 data-[popup-open]:bg-sidebar-accent",
         )}
       >
         <Timer className="h-3.5 w-3.5" />
