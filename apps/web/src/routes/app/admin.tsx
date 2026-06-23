@@ -579,7 +579,7 @@ function UsersSection() {
 
       <Section
         title="Send invite"
-        description="The user sets their own password via a one-time link. Requires the transactional sender address to be configured."
+        description="User sets their own password via a one-time link."
       >
         <div className="flex flex-wrap gap-2">
           <Input
@@ -593,8 +593,8 @@ function UsersSection() {
             value={inviteRole}
             onChange={(e) => setInviteRole(e.target.value as typeof inviteRole)}
           >
-            <option value="user">user</option>
-            <option value="admin">admin</option>
+            <option value="user">User</option>
+            <option value="admin">Admin</option>
           </Select>
           <PrimaryBtn
             onClick={() => sendInvite.mutate()}
@@ -641,8 +641,8 @@ function UsersSection() {
             value={createRole}
             onChange={(e) => setCreateRole(e.target.value as typeof createRole)}
           >
-            <option value="user">user</option>
-            <option value="admin">admin</option>
+            <option value="user">User</option>
+            <option value="admin">Admin</option>
           </Select>
         </div>
         <div className="mt-3 flex justify-end">
@@ -705,10 +705,10 @@ function UserRow({ user }: { user: AdminUser }) {
             value={user.role}
             onChange={(e) => setRole.mutate(e.target.value as "admin" | "user")}
             disabled={isMe || setRole.isPending}
-            className="py-1 text-[11px]"
+            className="h-7 text-[11px]"
           >
-            <option value="user">user</option>
-            <option value="admin">admin</option>
+            <option value="user">User</option>
+            <option value="admin">Admin</option>
           </Select>
           <GhostBtn onClick={() => setOpen((v) => !v)}>{open ? "Hide" : "Grants"}</GhostBtn>
           {!isMe && (
@@ -1011,7 +1011,7 @@ function ServiceRow({
             value={s.mode}
             onChange={(e) => setMode.mutate(e.target.value as "duplex" | "send")}
             disabled={setMode.isPending}
-            className="py-1 text-[11px]"
+            className="h-7 text-[11px]"
             title="Direction"
           >
             <option value="duplex">send + receive</option>
