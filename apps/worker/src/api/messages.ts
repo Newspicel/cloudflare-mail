@@ -1,10 +1,10 @@
-import { message } from "@cfmail/db/schema";
+import { blocklist, blockRequest, message } from "@cfmail/db/schema";
 import { Flag, setFlag } from "@cfmail/shared/flags";
 import { Perm } from "@cfmail/shared/permissions";
 import type { MessageBodyDto } from "@cfmail/shared/responses";
-import { sendMessage } from "@cfmail/shared/schemas";
+import { createBlockRequest, sendMessage } from "@cfmail/shared/schemas";
 import { zValidator } from "@hono/zod-validator";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -99,6 +99,52 @@ export function messagesRoutes() {
     return c.json(await performUnsubscribe(c.env, db, msg));
   });
 
+  // Submit a request to block this message's sender. The deployment-wide
+  // blocklist is admin-managed (invariant: hard blocks reject inbound at intake),
+  // so a reader can only *request* a block; an admin approves it. READ is enough
+  // — requesting is harmless until reviewed.
+  r.post("/:id/block-request", zValidator("json", createBlockRequest), async (c) => {
+    const db = dbFromCtx(c);
+    const user = c.get("user")!;
+    const id = c.req.param("id");
+    const body = c.req.valid("json");
+    const msg = await requireEntityAccess(db, user.id, message, id, Perm.READ);
+    if (msg.direction !== "in") throw new HTTPException(400, { message: "not an inbound message" });
+
+    const value = msg.fromAddr.trim().toLowerCase();
+    if (!value.includes("@")) throw new HTTPException(400, { message: "no sender address" });
+
+    // No-op if the sender is already blocked, or this reader already has a
+    // pending request for them — keep the queue free of duplicates.
+    const already = await db.query.blocklist.findFirst({
+      where: and(eq(blocklist.type, "email"), eq(blocklist.value, value)),
+      columns: { id: true },
+    });
+    if (already) return c.json({ status: "already-blocked" });
+    const pending = await db.query.blockRequest.findFirst({
+      where: and(
+        eq(blockRequest.requestedByUserId, user.id),
+        eq(blockRequest.value, value),
+        eq(blockRequest.status, "pending"),
+      ),
+      columns: { id: true },
+    });
+    if (pending) return c.json({ status: "pending" });
+
+    await db.insert(blockRequest).values({
+      id: crypto.randomUUID(),
+      type: "email",
+      value,
+      fromName: msg.fromName ?? null,
+      subject: msg.subject || null,
+      note: body.note?.trim() || null,
+      messageId: msg.id,
+      mailboxId: msg.mailboxId,
+      requestedByUserId: user.id,
+    });
+    return c.json({ status: "submitted" }, 201);
+  });
+
   // Full body, parsed on demand from the raw `.eml`. Listing endpoints only
   // carry the snippet; this is fetched lazily when a message is opened.
   r.get("/:id/body", async (c) => {
@@ -106,8 +152,11 @@ export function messagesRoutes() {
     const user = c.get("user")!;
     const id = c.req.param("id");
     const msg = await requireEntityAccess(db, user.id, message, id, Perm.READ);
-    if (!msg.rawR2Key) throw new HTTPException(404, { message: "not found" });
-    const obj = await c.env.BLOBS.get(msg.rawR2Key);
+    // For decrypted inbound mail the plaintext lives at plainR2Key; the original
+    // ciphertext stays at rawR2Key (served by /:id/raw). Prefer plaintext here.
+    const bodyKey = msg.plainR2Key ?? msg.rawR2Key;
+    if (!bodyKey) throw new HTTPException(404, { message: "not found" });
+    const obj = await c.env.BLOBS.get(bodyKey);
     if (!obj) throw new HTTPException(404, { message: "blob missing" });
     const parsed = await parseMime(await obj.arrayBuffer());
     // Remote images are routed through `/proxy-image` so opening a message

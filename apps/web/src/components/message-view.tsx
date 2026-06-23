@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge.tsx";
 import { api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
 import {
@@ -356,6 +357,28 @@ function ActionIcon({
   );
 }
 
+// PGP status chips. Inbound shows the signature verification outcome; outbound
+// just confirms what we did (signed / encrypted).
+function PgpBadges({ msg }: { msg: MessageRow }) {
+  if (!msg.pgpEncrypted && !msg.pgpSigned) return null;
+  const inbound = msg.direction === "in";
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+      {msg.pgpEncrypted && <Badge variant="primary">Encrypted</Badge>}
+      {msg.pgpSigned && !inbound && <Badge variant="success">Signed</Badge>}
+      {msg.pgpSigned && inbound && msg.pgpVerify === "good" && (
+        <Badge variant="success">Signature verified</Badge>
+      )}
+      {msg.pgpSigned && inbound && msg.pgpVerify === "bad" && (
+        <Badge variant="destructive">Bad signature</Badge>
+      )}
+      {msg.pgpSigned && inbound && msg.pgpVerify !== "good" && msg.pgpVerify !== "bad" && (
+        <Badge variant="warning">Signed · unverified</Badge>
+      )}
+    </div>
+  );
+}
+
 function MessageCard({
   msg,
   readOnly,
@@ -399,6 +422,7 @@ function MessageCard({
             )}
           </div>
           <LabelChips messageId={msg.id} className="mt-1.5" />
+          <PgpBadges msg={msg} />
         </div>
         <div className="flex shrink-0 flex-col items-end gap-2">
           <div className="flex items-center gap-1.5">

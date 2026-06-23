@@ -1,4 +1,6 @@
+import type { DB } from "@cfmail/db";
 import {
+  contactKey,
   domain,
   mailbox,
   mailboxInvite,
@@ -12,21 +14,38 @@ import {
 import { Flag } from "@cfmail/shared/flags";
 import { grant, Perm } from "@cfmail/shared/permissions";
 import type {
+  ContactKeysDto,
   MailboxInvitesDto,
   MailboxListDto,
   MailboxMembersDto,
   MailboxSettingsDto,
+  PgpKeyResultDto,
 } from "@cfmail/shared/responses";
-import { createMailbox, grantMember, updateMailboxSettings } from "@cfmail/shared/schemas";
+import {
+  addContactKey,
+  createMailbox,
+  grantMember,
+  importPgpKey,
+  type PgpMode,
+  updateMailboxSettings,
+} from "@cfmail/shared/schemas";
 import { zValidator } from "@hono/zod-validator";
 import { and, count, eq, gt, inArray, ne, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
+import { getOrCreatePgpMasterKey } from "../config.ts";
 import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
 import { collectMailboxBlobKeys, deleteBlobs } from "../mail/blobs.ts";
 import { ingestRaw, MAX_EMAIL_BYTES } from "../mail/ingest.ts";
 import { parseMime } from "../mail/mime.ts";
+import {
+  generateKeypair,
+  importPrivateKey,
+  type MailboxKeyMaterial,
+  readPublicKeyInfo,
+  wrapSecret,
+} from "../mail/pgp.ts";
 import { authorizeMailboxCreate } from "../mailbox-access.ts";
 import { requireUser } from "../middleware.ts";
 import { requirePerm } from "../permissions.ts";
@@ -48,6 +67,7 @@ export function mailboxesRoutes() {
         type: mailbox.type,
         expiresAt: mailbox.expiresAt,
         domainName: domain.name,
+        pgpMode: mailbox.pgpMode,
         access: mailbox.ownerUserId,
       })
       .from(mailbox)
@@ -63,6 +83,7 @@ export function mailboxesRoutes() {
         type: mailbox.type,
         expiresAt: mailbox.expiresAt,
         domainName: domain.name,
+        pgpMode: mailbox.pgpMode,
         perms: mailboxMember.perms,
       })
       .from(mailboxMember)
@@ -76,6 +97,7 @@ export function mailboxesRoutes() {
       displayName: m.displayName,
       type: m.type,
       expiresAt: m.expiresAt,
+      pgpMode: m.pgpMode,
       role: "owner" as const,
       perms: 7,
     }));
@@ -88,6 +110,7 @@ export function mailboxesRoutes() {
         displayName: m.displayName,
         type: m.type,
         expiresAt: m.expiresAt,
+        pgpMode: m.pgpMode,
         role: "member" as const,
         perms: m.perms,
       }));
@@ -166,6 +189,9 @@ export function mailboxesRoutes() {
         type: true,
         spamFilter: true,
         spamAiTokenCap: true,
+        pgpMode: true,
+        pgpFingerprint: true,
+        pgpPublicKey: true,
       },
     });
     if (!mb) throw new HTTPException(404, { message: "not found" });
@@ -188,6 +214,10 @@ export function mailboxesRoutes() {
             tokens: usage.tokensIn + usage.tokensOut,
           }
         : null,
+      pgpMode: mb.pgpMode,
+      pgpFingerprint: mb.pgpFingerprint,
+      pgpPublicKey: mb.pgpPublicKey,
+      pgpConfigured: Boolean(mb.pgpPublicKey),
     } satisfies MailboxSettingsDto);
   });
 
@@ -200,7 +230,7 @@ export function mailboxesRoutes() {
 
     const mb = await db.query.mailbox.findFirst({
       where: eq(mailbox.id, id),
-      columns: { type: true },
+      columns: { type: true, pgpPublicKey: true },
     });
     if (!mb) throw new HTTPException(404, { message: "not found" });
     if (mb.type === "temp") {
@@ -213,6 +243,7 @@ export function mailboxesRoutes() {
       displayName: string | null;
       signature: string | null;
       replyTo: string | null;
+      pgpMode: PgpMode;
     }> = {};
     if (body.displayName !== undefined) {
       patch.displayName = body.displayName?.trim() ? body.displayName.trim() : null;
@@ -223,9 +254,144 @@ export function mailboxesRoutes() {
     if (body.replyTo !== undefined) {
       patch.replyTo = body.replyTo ? body.replyTo : null;
     }
+    if (body.pgpMode !== undefined) {
+      // Can't sign/encrypt without a keypair — make the owner add one first.
+      if (body.pgpMode !== "off" && !mb.pgpPublicKey) {
+        throw new HTTPException(400, { message: "generate or import a PGP key first" });
+      }
+      patch.pgpMode = body.pgpMode;
+    }
     if (Object.keys(patch).length === 0) return c.json({ ok: true });
 
     await db.update(mailbox).set(patch).where(eq(mailbox.id, id));
+    return c.json({ ok: true });
+  });
+
+  // ─── Gateway PGP key management (owner, Perm.MANAGE) ──────────────────────
+
+  // Generate a fresh keypair for the mailbox. Returns the fingerprint + public
+  // key once; the private key never leaves the server (wrapped at rest).
+  r.post("/:id/pgp/generate", async (c) => {
+    const db = dbFromCtx(c);
+    const u = c.get("user")!;
+    const id = c.req.param("id");
+    await requirePerm(db, u.id, id, Perm.MANAGE);
+    const mb = await loadPgpTarget(db, id);
+    const addr = `${mb.localPart}@${mb.domainName}`;
+    const km = await generateKeypair(mb.displayName ?? addr, addr);
+    await storeKeypair(db, id, km);
+    return c.json({
+      fingerprint: km.fingerprint,
+      publicKey: km.publicArmored,
+    } satisfies PgpKeyResultDto);
+  });
+
+  // Import an existing armored private key. Re-wrapped under our own passphrase.
+  r.post("/:id/pgp/import", zValidator("json", importPgpKey), async (c) => {
+    const db = dbFromCtx(c);
+    const u = c.get("user")!;
+    const id = c.req.param("id");
+    const body = c.req.valid("json");
+    await requirePerm(db, u.id, id, Perm.MANAGE);
+    await loadPgpTarget(db, id);
+    let km: Awaited<ReturnType<typeof importPrivateKey>>;
+    try {
+      km = await importPrivateKey(body.privateKey, body.passphrase);
+    } catch (err) {
+      throw new HTTPException(400, {
+        message: err instanceof Error ? err.message : "invalid private key",
+      });
+    }
+    await storeKeypair(db, id, km);
+    return c.json({
+      fingerprint: km.fingerprint,
+      publicKey: km.publicArmored,
+    } satisfies PgpKeyResultDto);
+  });
+
+  // Remove the keypair and disable PGP.
+  r.delete("/:id/pgp", async (c) => {
+    const db = dbFromCtx(c);
+    const u = c.get("user")!;
+    const id = c.req.param("id");
+    await requirePerm(db, u.id, id, Perm.MANAGE);
+    await db
+      .update(mailbox)
+      .set({
+        pgpMode: "off",
+        pgpPublicKey: null,
+        pgpPrivateKeyWrapped: null,
+        pgpPassphraseWrapped: null,
+        pgpFingerprint: null,
+      })
+      .where(eq(mailbox.id, id));
+    return c.json({ ok: true });
+  });
+
+  // ─── Contact (correspondent) public keys ──────────────────────────────────
+
+  r.get("/:id/contacts", async (c) => {
+    const db = dbFromCtx(c);
+    const u = c.get("user")!;
+    const id = c.req.param("id");
+    await requirePerm(db, u.id, id, Perm.READ);
+    const rows = await db.query.contactKey.findMany({
+      where: eq(contactKey.mailboxId, id),
+      columns: { id: true, email: true, fingerprint: true, source: true, createdAt: true },
+    });
+    return c.json({
+      keys: rows.map((row) => ({
+        id: row.id,
+        email: row.email,
+        fingerprint: row.fingerprint,
+        source: row.source,
+        createdAt: row.createdAt.toISOString(),
+      })),
+    } satisfies ContactKeysDto);
+  });
+
+  r.post("/:id/contacts", zValidator("json", addContactKey), async (c) => {
+    const db = dbFromCtx(c);
+    const u = c.get("user")!;
+    const id = c.req.param("id");
+    const body = c.req.valid("json");
+    await requirePerm(db, u.id, id, Perm.MANAGE);
+    let info: Awaited<ReturnType<typeof readPublicKeyInfo>>;
+    try {
+      info = await readPublicKeyInfo(body.publicKey);
+    } catch (err) {
+      throw new HTTPException(400, {
+        message: err instanceof Error ? err.message : "invalid public key",
+      });
+    }
+    const email = (body.email ?? info.emails[0])?.toLowerCase();
+    if (!email) throw new HTTPException(400, { message: "no email in key; provide one" });
+    await db
+      .insert(contactKey)
+      .values({
+        id: crypto.randomUUID(),
+        mailboxId: id,
+        email,
+        publicKey: info.publicArmored,
+        fingerprint: info.fingerprint,
+        source: "import",
+      })
+      .onConflictDoUpdate({
+        target: [contactKey.mailboxId, contactKey.email],
+        set: { publicKey: info.publicArmored, fingerprint: info.fingerprint, source: "import" },
+      });
+    return c.json({ ok: true }, 201);
+  });
+
+  r.delete("/:id/contacts/:contactId", async (c) => {
+    const db = dbFromCtx(c);
+    const u = c.get("user")!;
+    const id = c.req.param("id");
+    const contactId = c.req.param("contactId");
+    await requirePerm(db, u.id, id, Perm.MANAGE);
+    await db
+      .delete(contactKey)
+      .where(and(eq(contactKey.id, contactId), eq(contactKey.mailboxId, id)));
     return c.json({ ok: true });
   });
 
@@ -398,4 +564,40 @@ export function mailboxesRoutes() {
   // Suppress unused-import warning from tree-shaking of `or`.
   void or;
   return r;
+}
+
+// Load a mailbox for PGP key ops and resolve its full address. Rejects temp
+// mailboxes (no durable identity to bind a key to).
+async function loadPgpTarget(db: DB, id: string) {
+  const mb = await db.query.mailbox.findFirst({
+    where: eq(mailbox.id, id),
+    columns: { id: true, localPart: true, domainId: true, displayName: true, type: true },
+  });
+  if (!mb) throw new HTTPException(404, { message: "not found" });
+  if (mb.type === "temp") throw new HTTPException(400, { message: "temp mailboxes can't use PGP" });
+  const dom = await db.query.domain.findFirst({
+    where: eq(domain.id, mb.domainId),
+    columns: { name: true },
+  });
+  if (!dom) throw new HTTPException(500, { message: "domain missing" });
+  return { ...mb, domainName: dom.name };
+}
+
+// Wrap the private key + passphrase under the master key and persist. The public
+// key + fingerprint are stored in the clear (they're public).
+async function storeKeypair(db: DB, id: string, km: MailboxKeyMaterial): Promise<void> {
+  const masterKey = await getOrCreatePgpMasterKey(db);
+  const [privateKeyWrapped, passphraseWrapped] = await Promise.all([
+    wrapSecret(masterKey, km.privateArmored),
+    wrapSecret(masterKey, km.passphrase),
+  ]);
+  await db
+    .update(mailbox)
+    .set({
+      pgpPublicKey: km.publicArmored,
+      pgpPrivateKeyWrapped: privateKeyWrapped,
+      pgpPassphraseWrapped: passphraseWrapped,
+      pgpFingerprint: km.fingerprint,
+    })
+    .where(eq(mailbox.id, id));
 }

@@ -1,7 +1,15 @@
 import { Dialog } from "@base-ui/react/dialog";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import DOMPurify from "dompurify";
-import { ExternalLink, Maximize2, Minimize2, Paperclip, Trash2, X } from "lucide-react";
+import {
+  AlertTriangle,
+  ExternalLink,
+  Maximize2,
+  Minimize2,
+  Paperclip,
+  Trash2,
+  X,
+} from "lucide-react";
 import { marked } from "marked";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -234,6 +242,8 @@ export function ComposeForm({
     return opts;
   }, [sendable, rep]);
   const currentFrom = fromAddress ?? baseAddr(mailboxId);
+  // PGP policy of the selected sending mailbox — drives the compose indicator.
+  const pgpMode = sendable.find((m) => m.id === mailboxId)?.pgpMode ?? "off";
   const [to, setTo] = useState<RecipientsValue>(() => {
     if (d) return { items: d.toAddrs ?? [], input: "" };
     if (rep) {
@@ -451,32 +461,36 @@ export function ComposeForm({
       }
       const ccList = collectRecipients(cc);
       const bccList = collectRecipients(bcc);
-      return api<{ messageId: string; threadId: string }>("/api/messages/send", {
-        method: "POST",
-        body: JSON.stringify({
-          mailboxId,
-          fromAddress: fromAddress ?? undefined,
-          to: collectRecipients(to),
-          cc: ccList.length ? ccList : undefined,
-          bcc: bccList.length ? bccList : undefined,
-          subject,
-          text: textBody,
-          html: htmlBody,
-          inReplyTo,
-          references,
-          quote: quoteRef ?? undefined,
-          attachments: attachments.length
-            ? attachments.map((a) => ({
-                r2Key: a.r2Key,
-                filename: a.filename,
-                contentType: a.contentType,
-              }))
-            : undefined,
-        }),
-      });
+      return api<{ messageId: string; threadId: string; pgpWarning?: string }>(
+        "/api/messages/send",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            mailboxId,
+            fromAddress: fromAddress ?? undefined,
+            to: collectRecipients(to),
+            cc: ccList.length ? ccList : undefined,
+            bcc: bccList.length ? bccList : undefined,
+            subject,
+            text: textBody,
+            html: htmlBody,
+            inReplyTo,
+            references,
+            quote: quoteRef ?? undefined,
+            attachments: attachments.length
+              ? attachments.map((a) => ({
+                  r2Key: a.r2Key,
+                  filename: a.filename,
+                  contentType: a.contentType,
+                }))
+              : undefined,
+          }),
+        },
+      );
     },
-    onSuccess: async () => {
-      toast.success("Message sent");
+    onSuccess: async (res) => {
+      if (res?.pgpWarning) toast.warning(res.pgpWarning);
+      else toast.success("Message sent");
       if (mailboxId) qc.invalidateQueries({ queryKey: keys.threadsRoot(mailboxId) });
       // Keep the combined "All" view's lists/counts in sync with the send.
       qc.invalidateQueries({ queryKey: keys.threadsRoot("all") });
@@ -487,6 +501,26 @@ export function ComposeForm({
       toast.error(err instanceof Error ? err.message : "Send failed");
     },
   });
+
+  // Warn when a committed recipient is on the deployment blocklist — they can't
+  // reach this server, so a reply would bounce. Only committed chips are checked
+  // (not the in-progress input), and the query is keyed by the address set so
+  // identical sets are served from cache rather than refetched on every keystroke.
+  const recipientAddrs = useMemo(() => {
+    const all = [...to.items, ...cc.items, ...bcc.items].map((a) => a.address.trim().toLowerCase());
+    return [...new Set(all)].filter((a) => a.includes("@"));
+  }, [to, cc, bcc]);
+  const blockedQ = useQuery({
+    queryKey: ["blocklist-check", recipientAddrs],
+    queryFn: () =>
+      api<{ blocked: string[] }>("/api/blocklist/check", {
+        method: "POST",
+        body: JSON.stringify({ addresses: recipientAddrs }),
+      }),
+    enabled: recipientAddrs.length > 0,
+    staleTime: 30_000,
+  });
+  const blockedRecipients = recipientAddrs.length ? (blockedQ.data?.blocked ?? []) : [];
 
   // Close the dock, or close the OS window when running as a pop-out.
   function finish() {
@@ -531,6 +565,12 @@ export function ComposeForm({
     if (attachments.length === 0 && uploading === 0 && mentionsAttachment(composed)) {
       const ok = window.confirm(
         "It looks like you mentioned an attachment, but nothing is attached.\n\nSend anyway?",
+      );
+      if (!ok) return;
+    }
+    if (blockedRecipients.length > 0) {
+      const ok = window.confirm(
+        `You've blocked ${blockedRecipients.join(", ")}. They can't reach this server, so you won't receive any reply.\n\nSend anyway?`,
       );
       if (!ok) return;
     }
@@ -762,6 +802,17 @@ export function ComposeForm({
             />
           </>
         )}
+        {blockedRecipients.length > 0 && (
+          <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-700 dark:text-amber-400">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>
+              {blockedRecipients.length === 1
+                ? `${blockedRecipients[0]} is on your blocklist`
+                : `${blockedRecipients.join(", ")} are on your blocklist`}{" "}
+              — they can't reach this server, so you won't receive any reply.
+            </span>
+          </div>
+        )}
         <label className={FIELD_ROW}>
           <span className={FIELD_LABEL}>Subject</span>
           <input
@@ -889,6 +940,11 @@ export function ComposeForm({
           />
         </div>
         <div className="flex items-center gap-2">
+          {pgpMode !== "off" && (
+            <span className="text-[11px] font-medium text-primary">
+              {pgpMode === "sign_encrypt" ? "Will encrypt + sign" : "Will sign"}
+            </span>
+          )}
           <span className="text-[11px] text-muted-foreground">
             {uploading > 0
               ? `Uploading ${uploading}…`

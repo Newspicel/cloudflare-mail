@@ -1,8 +1,10 @@
 import type { DB } from "@cfmail/db";
 import { systemConfig } from "@cfmail/db/schema";
 import { eq } from "drizzle-orm";
+import { importMasterKey } from "./mail/pgp.ts";
 
 const SECRET_KEY = "auth_secret";
+const PGP_MASTER_KEY = "pgp_master_key";
 
 export async function getConfig(db: DB, key: string): Promise<string | null> {
   const row = await db.query.systemConfig.findFirst({
@@ -33,6 +35,22 @@ export async function getOrCreateAuthSecret(db: DB): Promise<string> {
   const final = await getConfig(db, SECRET_KEY);
   if (!final) throw new Error("failed to persist auth secret");
   return final;
+}
+
+// Returns the gateway-PGP master key (CryptoKey) used to wrap mailbox private
+// keys at rest, generating + persisting a 32-byte secret on first call. Same
+// lazy-init/race pattern as the auth secret (invariant 7).
+export async function getOrCreatePgpMasterKey(db: DB): Promise<CryptoKey> {
+  let secret = await getConfig(db, PGP_MASTER_KEY);
+  if (!secret) {
+    await db
+      .insert(systemConfig)
+      .values({ key: PGP_MASTER_KEY, value: randomBase64(32), updatedAt: new Date() })
+      .onConflictDoNothing();
+    secret = await getConfig(db, PGP_MASTER_KEY);
+    if (!secret) throw new Error("failed to persist pgp master key");
+  }
+  return importMasterKey(secret);
 }
 
 function randomBase64(byteLen: number): string {

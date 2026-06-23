@@ -9,6 +9,7 @@ import { type ImportProgress, runImport } from "@/lib/import.ts";
 import { keys } from "@/lib/query-keys.ts";
 
 export type SpamLevel = "off" | "auth" | "standard" | "ai";
+export type PgpMode = "off" | "sign" | "sign_encrypt";
 
 interface MailboxSettings {
   id: string;
@@ -19,7 +20,29 @@ interface MailboxSettings {
   spamFilter: SpamLevel;
   spamAiTokenCap: number | null;
   spamUsage: { period: string; calls: number; tokens: number } | null;
+  pgpMode: PgpMode;
+  pgpFingerprint: string | null;
+  pgpPublicKey: string | null;
+  pgpConfigured: boolean;
 }
+
+interface ContactKey {
+  id: string;
+  email: string;
+  fingerprint: string;
+  source: "import" | "tofu";
+  createdAt: string;
+}
+
+const PGP_MODES: { value: PgpMode; label: string; hint: string }[] = [
+  { value: "off", label: "Off", hint: "No signing or encryption." },
+  { value: "sign", label: "Sign", hint: "Sign outgoing mail so recipients can verify it." },
+  {
+    value: "sign_encrypt",
+    label: "Sign + encrypt",
+    hint: "Encrypt to recipients with a known key; sign-only (and warn) when a key is missing.",
+  },
+];
 
 export const SPAM_LEVELS: { value: SpamLevel; label: string; hint: string }[] = [
   { value: "off", label: "Off", hint: "No spam filtering." },
@@ -199,9 +222,283 @@ export function MailboxSettingsForm({
           </Button>
         </div>
       </form>
+      {!admin && type !== "service" && type !== "temp" && (
+        <MailboxPgpCard mailboxId={mailboxId} settingsKey={queryKey} />
+      )}
       {!admin && type !== "service" && <MailboxImportCard mailboxId={mailboxId} />}
     </div>
   );
+}
+
+/**
+ * Per-mailbox gateway PGP: enable signing/encryption, generate or import the
+ * mailbox keypair, and manage correspondent public keys. The private key is held
+ * server-side (wrapped at rest) — this is not end-to-end. All routes are owner
+ * (Perm.MANAGE) endpoints under /api/mailboxes/:id.
+ */
+function MailboxPgpCard({ mailboxId, settingsKey }: { mailboxId: string; settingsKey: unknown[] }) {
+  const qc = useQueryClient();
+  const base = `/api/mailboxes/${mailboxId}`;
+  const settingsQ = useQuery({
+    queryKey: settingsKey,
+    queryFn: () => api<MailboxSettings>(`${base}/settings`),
+  });
+  const contactsKey = ["mailbox-contacts", mailboxId];
+  const contactsQ = useQuery({
+    queryKey: contactsKey,
+    queryFn: () => api<{ keys: ContactKey[] }>(`${base}/contacts`),
+  });
+
+  const [importKey, setImportKey] = useState("");
+  const [importPass, setImportPass] = useState("");
+  const [showImport, setShowImport] = useState(false);
+  const [contactEmail, setContactEmail] = useState("");
+  const [contactKey, setContactKey] = useState("");
+
+  const s = settingsQ.data;
+  const configured = !!s?.pgpConfigured;
+
+  const refreshSettings = () => {
+    qc.invalidateQueries({ queryKey: settingsKey });
+    qc.invalidateQueries({ queryKey: keys.mailboxes() });
+  };
+
+  const setMode = useMutation({
+    mutationFn: (mode: PgpMode) =>
+      api(`${base}/settings`, { method: "PATCH", body: JSON.stringify({ pgpMode: mode }) }),
+    onSuccess: refreshSettings,
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
+  const generate = useMutation({
+    mutationFn: () => api<{ fingerprint: string }>(`${base}/pgp/generate`, { method: "POST" }),
+    onSuccess: (r) => {
+      refreshSettings();
+      toast.success(`Keypair generated (${shortFp(r.fingerprint)})`);
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Generate failed"),
+  });
+
+  const doImport = useMutation({
+    mutationFn: () =>
+      api<{ fingerprint: string }>(`${base}/pgp/import`, {
+        method: "POST",
+        body: JSON.stringify({ privateKey: importKey, passphrase: importPass || undefined }),
+      }),
+    onSuccess: (r) => {
+      refreshSettings();
+      setImportKey("");
+      setImportPass("");
+      setShowImport(false);
+      toast.success(`Key imported (${shortFp(r.fingerprint)})`);
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Import failed"),
+  });
+
+  const removeKey = useMutation({
+    mutationFn: () => api(`${base}/pgp`, { method: "DELETE" }),
+    onSuccess: () => {
+      refreshSettings();
+      toast.success("PGP key removed");
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
+  const addContact = useMutation({
+    mutationFn: () =>
+      api(`${base}/contacts`, {
+        method: "POST",
+        body: JSON.stringify({ publicKey: contactKey, email: contactEmail.trim() || undefined }),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: contactsKey });
+      setContactEmail("");
+      setContactKey("");
+      toast.success("Contact key added");
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
+  const removeContact = useMutation({
+    mutationFn: (id: string) => api(`${base}/contacts/${id}`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: contactsKey }),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
+  const contacts = contactsQ.data?.keys ?? [];
+
+  return (
+    <div className="rounded-md border bg-card">
+      <header className="border-b px-5 py-3">
+        <div className="font-medium">Encryption (PGP)</div>
+        <div className="text-[11px] text-muted-foreground">
+          Sign and encrypt mail for this mailbox. Keys are held on the server — this protects mail
+          in transit, not from the server itself.
+        </div>
+      </header>
+      <div className="grid gap-4 px-5 py-4 text-[13px]">
+        {/* Mode */}
+        <label className="grid gap-1.5">
+          <span className="text-[11px] font-medium text-foreground">Mode</span>
+          <select
+            value={s?.pgpMode ?? "off"}
+            disabled={!configured || setMode.isPending || settingsQ.isLoading}
+            onChange={(e) => setMode.mutate(e.target.value as PgpMode)}
+            className={cn(inputClass, "cursor-pointer appearance-none disabled:opacity-60")}
+          >
+            {PGP_MODES.map((m) => (
+              <option key={m.value} value={m.value}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+          <span className="text-[11px] text-muted-foreground">
+            {configured
+              ? PGP_MODES.find((m) => m.value === (s?.pgpMode ?? "off"))?.hint
+              : "Generate or import a keypair below to enable signing or encryption."}
+          </span>
+        </label>
+
+        {/* Keypair */}
+        {configured ? (
+          <div className="grid gap-1.5">
+            <span className="text-[11px] font-medium text-foreground">Mailbox key</span>
+            <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/40 px-2.5 py-1.5">
+              <code className="truncate text-[12px]">{s?.pgpFingerprint}</code>
+              <button
+                type="button"
+                onClick={() => removeKey.mutate()}
+                disabled={removeKey.isPending}
+                className="shrink-0 rounded-md border px-2 py-1 text-[11px] font-medium text-destructive transition hover:bg-destructive/10 disabled:opacity-50"
+              >
+                Remove
+              </button>
+            </div>
+            {s?.pgpPublicKey && (
+              <details className="text-[11px] text-muted-foreground">
+                <summary className="cursor-pointer select-none">Public key</summary>
+                <textarea
+                  readOnly
+                  value={s.pgpPublicKey}
+                  rows={6}
+                  onFocus={(e) => e.currentTarget.select()}
+                  className={cn(
+                    inputClass,
+                    "mt-1 h-auto resize-y font-mono text-[10px] leading-tight",
+                  )}
+                />
+              </details>
+            )}
+          </div>
+        ) : (
+          <div className="grid gap-2">
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="primary"
+                disabled={generate.isPending}
+                onClick={() => generate.mutate()}
+              >
+                {generate.isPending ? "Generating…" : "Generate keypair"}
+              </Button>
+              <Button type="button" variant="outline" onClick={() => setShowImport((v) => !v)}>
+                Import existing
+              </Button>
+            </div>
+            {showImport && (
+              <div className="grid gap-2 rounded-md border bg-muted/30 p-3">
+                <textarea
+                  value={importKey}
+                  onChange={(e) => setImportKey(e.target.value)}
+                  rows={5}
+                  placeholder="-----BEGIN PGP PRIVATE KEY BLOCK-----"
+                  className={cn(inputClass, "h-auto resize-y font-mono text-[10px] leading-tight")}
+                />
+                <input
+                  type="password"
+                  value={importPass}
+                  onChange={(e) => setImportPass(e.target.value)}
+                  placeholder="Passphrase (if the key is protected)"
+                  className={inputClass}
+                />
+                <div className="flex justify-end">
+                  <Button
+                    type="button"
+                    variant="primary"
+                    disabled={!importKey.trim() || doImport.isPending}
+                    onClick={() => doImport.mutate()}
+                  >
+                    {doImport.isPending ? "Importing…" : "Import key"}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Contact keys */}
+        <div className="grid gap-2 border-t pt-3">
+          <span className="text-[11px] font-medium text-foreground">Recipient keys</span>
+          <span className="text-[11px] text-muted-foreground">
+            Public keys of people you email. Needed to encrypt to them; captured automatically when
+            a signed message includes one.
+          </span>
+          {contacts.length > 0 && (
+            <ul className="divide-y rounded-md border">
+              {contacts.map((k) => (
+                <li key={k.id} className="flex items-center justify-between gap-2 px-2.5 py-1.5">
+                  <div className="min-w-0">
+                    <div className="truncate text-[12px]">{k.email}</div>
+                    <div className="truncate font-mono text-[10px] text-muted-foreground">
+                      {shortFp(k.fingerprint)} · {k.source}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => removeContact.mutate(k.id)}
+                    disabled={removeContact.isPending}
+                    className="shrink-0 rounded-md border px-2 py-1 text-[11px] font-medium text-muted-foreground transition hover:bg-muted disabled:opacity-50"
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="grid gap-2 rounded-md border bg-muted/30 p-3">
+            <input
+              type="email"
+              value={contactEmail}
+              onChange={(e) => setContactEmail(e.target.value)}
+              placeholder="Email (optional — taken from the key if blank)"
+              className={inputClass}
+            />
+            <textarea
+              value={contactKey}
+              onChange={(e) => setContactKey(e.target.value)}
+              rows={4}
+              placeholder="-----BEGIN PGP PUBLIC KEY BLOCK-----"
+              className={cn(inputClass, "h-auto resize-y font-mono text-[10px] leading-tight")}
+            />
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                variant="primary"
+                disabled={!contactKey.trim() || addContact.isPending}
+                onClick={() => addContact.mutate()}
+              >
+                {addContact.isPending ? "Adding…" : "Add recipient key"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function shortFp(fp: string): string {
+  return fp.length > 16 ? `${fp.slice(0, 4)}…${fp.slice(-8)}`.toUpperCase() : fp.toUpperCase();
 }
 
 /**

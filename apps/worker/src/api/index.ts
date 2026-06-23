@@ -6,7 +6,9 @@ import { authFromCtx } from "../auth-ctx.ts";
 import type { AppBindings } from "../env.ts";
 import { sessionMiddleware } from "../middleware.ts";
 import { adminRoutes } from "./admin.ts";
+import { adminBlockRoutes } from "./admin-block.ts";
 import { attachmentsRoutes } from "./attachments.ts";
+import { blocklistRoutes } from "./blocklist.ts";
 import { bootstrapRoutes } from "./bootstrap.ts";
 import { contactsRoutes } from "./contacts.ts";
 import { domainsRoutes } from "./domains.ts";
@@ -71,6 +73,8 @@ export function buildApi() {
   app.route("/api/domains", domainsRoutes());
   app.route("/api/users", usersRoutes());
   app.route("/api/admin", adminRoutes());
+  app.route("/api/admin/block", adminBlockRoutes());
+  app.route("/api/blocklist", blocklistRoutes());
   app.route("/api/mailboxes", mailboxesRoutes());
   app.route("/api/contacts", contactsRoutes());
   app.route("/api/threads", threadsRoutes());

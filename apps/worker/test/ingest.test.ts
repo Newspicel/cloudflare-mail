@@ -40,7 +40,9 @@ async function seed(): Promise<void> {
   });
 }
 
-function eml(opts: { from?: string; to?: string; subject?: string; messageId?: string; body?: string } = {}): ArrayBuffer {
+function eml(
+  opts: { from?: string; to?: string; subject?: string; messageId?: string; body?: string } = {},
+): ArrayBuffer {
   const lines = [
     `From: ${opts.from ?? `Sender <sender@elsewhere.com>`}`,
     `To: ${opts.to ?? `Me <${ADDRESS}>`}`,
@@ -187,7 +189,11 @@ describe("ingestRaw — attachments", () => {
   ].join("\r\n");
 
   it("stores attachments to R2 with a sanitized filename in the key", async () => {
-    await ingestRaw(e, db, importOpts({ raw: new TextEncoder().encode(RAW).buffer as ArrayBuffer }));
+    await ingestRaw(
+      e,
+      db,
+      importOpts({ raw: new TextEncoder().encode(RAW).buffer as ArrayBuffer }),
+    );
     const row = (await db.query.message.findMany({ where: eq(message.mailboxId, MAILBOX_ID) }))[0]!;
     const atts = await db.query.attachment.findMany({ where: eq(attachment.messageId, row.id) });
     expect(atts).toHaveLength(1);

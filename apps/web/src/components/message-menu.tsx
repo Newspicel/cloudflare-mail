@@ -1,7 +1,18 @@
 import type { MessageBodyDto } from "@cfmail/shared/responses";
-import { Code2, Copy, Download, EllipsisVertical, FileText, Mail, Printer } from "lucide-react";
+import { useMutation } from "@tanstack/react-query";
+import {
+  Ban,
+  Code2,
+  Copy,
+  Download,
+  EllipsisVertical,
+  FileText,
+  Mail,
+  Printer,
+} from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { api } from "@/lib/api.ts";
 import type { MessageRow } from "@/lib/queries.ts";
 import { sanitizeEmailHtml } from "@/lib/sanitize-email.ts";
 import { Button } from "./ui/button.tsx";
@@ -74,6 +85,24 @@ export function MessageMenu({ msg, body }: { msg: MessageRow; body: MessageBodyD
   const [source, setSource] = useState<Source | null>(null);
   const [loadingRaw, setLoadingRaw] = useState(false);
 
+  const requestBlock = useMutation({
+    mutationFn: () =>
+      api<{ status: string }>(`/api/messages/${msg.id}/block-request`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      }),
+    onSuccess: (res) => {
+      toast.success(
+        res.status === "already-blocked"
+          ? "Sender is already blocked"
+          : res.status === "pending"
+            ? "You already requested this block"
+            : "Block request sent to an admin",
+      );
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
   async function showRaw() {
     setLoadingRaw(true);
     try {
@@ -127,6 +156,18 @@ export function MessageMenu({ msg, body }: { msg: MessageRow; body: MessageBodyD
           <DropdownMenuItem onClick={exportEml}>
             <Download /> Export (.eml)
           </DropdownMenuItem>
+          {msg.direction === "in" && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                variant="destructive"
+                disabled={requestBlock.isPending}
+                onClick={() => requestBlock.mutate()}
+              >
+                <Ban /> Request block
+              </DropdownMenuItem>
+            </>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
 

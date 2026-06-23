@@ -1,8 +1,10 @@
 import {
+  BLOCK_ENTRY_TYPES,
   DOMAIN_KINDS,
   EDITOR_FORMATS,
   MAILBOX_TYPES,
   MESSAGE_DIRECTIONS,
+  PGP_MODES,
   QUOTE_KINDS,
   SERVICE_MODES,
   SPAM_FILTER_LEVELS,
@@ -272,8 +274,51 @@ export const updateRedirect = z.object({
   targetMailboxId: z.string().min(1),
 });
 
+// ─── Manual blocklist ───────────────────────────────────────────────────────
+
+export const BlockEntryType = z.enum(BLOCK_ENTRY_TYPES);
+export type BlockEntryType = z.infer<typeof BlockEntryType>;
+
+// Admin: add a blocklist entry. The value must parse as an email (type=email)
+// or a bare domain (type=domain); the server additionally refuses domain entries
+// for protected providers (gmail, outlook, …).
+export const createBlockEntry = z
+  .object({
+    type: BlockEntryType,
+    value: z.string().trim().min(1).max(320),
+    reason: z.string().max(500).optional(),
+  })
+  .refine(
+    (v) =>
+      v.type === "email"
+        ? emailAddress.safeParse(v.value).success
+        : domainName.safeParse(v.value).success,
+    { message: "value must be a valid email or domain", path: ["value"] },
+  );
+export type CreateBlockEntryInput = z.infer<typeof createBlockEntry>;
+
+// A reader requesting a sender be blocked. The sender identity comes from the
+// message (server-side); only an optional note is supplied.
+export const createBlockRequest = z.object({
+  note: z.string().max(500).optional(),
+});
+
+// Admin: replace the protected-domains whitelist.
+export const setProtectedDomains = z.object({
+  domains: z.array(domainName).max(500),
+});
+
+// Any reader: check which of a set of recipient addresses are blocked, to warn
+// before composing/sending. Loose strings so partial/odd input never 400s.
+export const checkBlockRecipients = z.object({
+  addresses: z.array(z.string().max(320)).max(200),
+});
+
 export const spamFilterLevel = z.enum(SPAM_FILTER_LEVELS);
 export type SpamFilterLevel = z.infer<typeof spamFilterLevel>;
+
+export const pgpMode = z.enum(PGP_MODES);
+export type PgpMode = z.infer<typeof pgpMode>;
 
 export const updateMailboxSettings = z.object({
   displayName: z.string().max(200).nullable().optional(),
@@ -284,7 +329,24 @@ export const updateMailboxSettings = z.object({
     .optional(),
   spamFilter: spamFilterLevel.optional(),
   spamAiTokenCap: z.number().int().positive().max(100_000_000).nullable().optional(),
+  pgpMode: pgpMode.optional(),
 });
+
+// Import an existing armored PGP private key for a mailbox. Bounded so a giant
+// blob can't bloat a request.
+export const importPgpKey = z.object({
+  privateKey: z.string().min(1).max(200_000),
+  passphrase: z.string().max(1000).optional(),
+});
+export type ImportPgpKeyInput = z.infer<typeof importPgpKey>;
+
+// Add a correspondent public key. `email` is optional — if omitted the first
+// address in the key's user IDs is used.
+export const addContactKey = z.object({
+  publicKey: z.string().min(1).max(200_000),
+  email: emailAddress.optional(),
+});
+export type AddContactKeyInput = z.infer<typeof addContactKey>;
 export type UpdateMailboxSettingsInput = z.infer<typeof updateMailboxSettings>;
 
 export const grantMember = z.object({
