@@ -5,6 +5,10 @@ import { and, count, desc, eq, gte, sql } from "drizzle-orm";
 import { normalizeSubject } from "./mime.ts";
 
 const SUBJECT_WINDOW_SECONDS = 60 * 60 * 24 * 7;
+// In-Reply-To/References are attacker-controlled, so a header match into an
+// existing thread is only honored when the thread is still recent. Beyond this
+// a leaked Message-ID can't be replayed to graft into a dormant conversation.
+const HEADER_MATCH_WINDOW_SECONDS = 60 * 60 * 24 * 180;
 
 export interface ResolveThreadInput {
   mailboxId: string;
@@ -12,29 +16,60 @@ export interface ResolveThreadInput {
   inReplyTo?: string | null;
   references?: string[] | null;
   participants: { name?: string; address: string }[];
+  // Sender of the message, used to corroborate a header-based join.
+  fromAddr: string;
+  // Skip the anti-spoofing corroboration check. Set for our own outbound mail,
+  // whose In-Reply-To/References we generate and therefore trust.
+  trustHeaders?: boolean;
 }
 
-export async function resolveThreadId(db: DB, input: ResolveThreadInput): Promise<string> {
+export interface ResolveThreadResult {
+  threadId: string;
+  // The message was spliced into a pre-existing thread on an In-Reply-To /
+  // References header match. These are attacker-influenced, so callers must not
+  // suppress spam filing for such joins.
+  joinedByHeader: boolean;
+}
+
+export async function resolveThreadId(
+  db: DB,
+  input: ResolveThreadInput,
+): Promise<ResolveThreadResult> {
   const headerIds = [
     ...(input.references ?? []),
     ...(input.inReplyTo ? [input.inReplyTo] : []),
   ].filter(Boolean);
 
-  const headerHits = await Promise.all(
-    headerIds.map((mid) =>
-      db.query.message.findFirst({
-        where: and(eq(message.mailboxId, input.mailboxId), eq(message.messageIdHdr, mid)),
-        columns: { threadId: true },
-      }),
-    ),
-  );
-  const firstHit = headerHits.find((h) => h);
-  if (firstHit) return firstHit.threadId;
+  if (headerIds.length) {
+    const headerHits = await Promise.all(
+      headerIds.map((mid) =>
+        db.query.message.findFirst({
+          where: and(eq(message.mailboxId, input.mailboxId), eq(message.messageIdHdr, mid)),
+          columns: { threadId: true },
+        }),
+      ),
+    );
+    // A header match alone is forgeable: anyone who learns a Message-ID (from a
+    // reply, NDR, or list archive) can send In-Reply-To: <that-id> to graft
+    // into the thread. Require a corroborating signal — the sender is already a
+    // participant of the matched thread and the thread is recent — before
+    // trusting the splice. Otherwise fall through and treat it as new mail.
+    const candidates = [...new Set(headerHits.filter((h) => h).map((h) => h!.threadId))];
+    if (candidates.length) {
+      // Our own outbound mail is trusted; inbound must be corroborated.
+      if (input.trustHeaders) return { threadId: candidates[0]!, joinedByHeader: true };
+      const ok = await Promise.all(candidates.map((tid) => corroboratesThread(db, tid, input)));
+      const idx = ok.findIndex(Boolean);
+      if (idx >= 0) return { threadId: candidates[idx]!, joinedByHeader: true };
+    }
+  }
 
   const norm = normalizeSubject(input.subject);
   // When we have a header chain, derive a deterministic thread id from the
   // chain root. Two concurrent inbounds with the same parent then collide on
-  // the same id instead of each inserting a fresh random-UUID thread.
+  // the same id instead of each inserting a fresh random-UUID thread. This only
+  // ever creates/joins a thread keyed by the (forgeable) root id — it never
+  // splices into a victim's pre-existing thread, so no corroboration is needed.
   const rootHeader = input.references?.[0] ?? input.inReplyTo ?? null;
   if (rootHeader) {
     const id = await deriveThreadId(input.mailboxId, rootHeader);
@@ -50,7 +85,7 @@ export async function resolveThreadId(db: DB, input: ResolveThreadInput): Promis
         unreadCount: 0,
       })
       .onConflictDoNothing();
-    return id;
+    return { threadId: id, joinedByHeader: false };
   }
 
   if (norm) {
@@ -64,7 +99,7 @@ export async function resolveThreadId(db: DB, input: ResolveThreadInput): Promis
       orderBy: desc(thread.lastMsgAt),
       columns: { id: true },
     });
-    if (hit) return hit.id;
+    if (hit) return { threadId: hit.id, joinedByHeader: false };
   }
 
   const id = crypto.randomUUID();
@@ -77,7 +112,26 @@ export async function resolveThreadId(db: DB, input: ResolveThreadInput): Promis
     participants: input.participants,
     unreadCount: 0,
   });
-  return id;
+  return { threadId: id, joinedByHeader: false };
+}
+
+// A header match is only trusted when the inbound sender is already a known
+// participant of the matched thread (participant signal) and the thread is
+// still recent (recency signal). Either missing → don't splice.
+async function corroboratesThread(
+  db: DB,
+  threadId: string,
+  input: ResolveThreadInput,
+): Promise<boolean> {
+  const t = await db.query.thread.findFirst({
+    where: eq(thread.id, threadId),
+    columns: { participants: true, lastMsgAt: true },
+  });
+  if (!t) return false;
+  if (t.lastMsgAt.getTime() < Date.now() - HEADER_MATCH_WINDOW_SECONDS * 1000) return false;
+  const from = input.fromAddr.trim().toLowerCase();
+  if (!from) return false;
+  return (t.participants ?? []).some((p) => p.address.trim().toLowerCase() === from);
 }
 
 async function deriveThreadId(mailboxId: string, rootHeader: string): Promise<string> {
