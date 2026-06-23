@@ -1,20 +1,34 @@
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { X } from "lucide-react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/cn.ts";
 import type { Contact } from "@/lib/queries.ts";
 
-const FIELD_LABEL = "w-12 shrink-0 text-[11px] text-muted-foreground uppercase tracking-wider";
-const FIELD_INPUT =
-  "flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted-foreground";
+const FIELD_LABEL = "w-12 shrink-0 pt-1 text-[11px] text-muted-foreground uppercase tracking-wider";
 
 const MAX_SUGGESTIONS = 8;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-// Splits the recipient string into the committed prefix (everything up to and
-// including the last comma/semicolon) and the address fragment being typed.
-function splitToken(value: string): { before: string; fragment: string } {
-  const idx = Math.max(value.lastIndexOf(","), value.lastIndexOf(";"));
-  return idx === -1
-    ? { before: "", fragment: value }
-    : { before: value.slice(0, idx + 1), fragment: value.slice(idx + 1) };
+export interface Recipient {
+  name?: string;
+  address: string;
+}
+
+export interface RecipientsValue {
+  items: Recipient[];
+  input: string;
+}
+
+export function collectRecipients(v: RecipientsValue): Recipient[] {
+  const out: Recipient[] = v.items.map((i) => ({ address: i.address, name: i.name }));
+  for (const tok of v.input.split(/[\s,;]+/)) {
+    const addr = tok.trim().toLowerCase();
+    if (addr && !out.some((i) => i.address.toLowerCase() === addr)) out.push({ address: addr });
+  }
+  return out;
+}
+
+export function hasRecipients(v: RecipientsValue): boolean {
+  return v.items.length > 0 || v.input.trim().length > 0;
 }
 
 export function AddressField({
@@ -26,28 +40,20 @@ export function AddressField({
   trailing,
 }: {
   label: string;
-  value: string;
-  onChange: (v: string) => void;
+  value: RecipientsValue;
+  onChange: (v: RecipientsValue) => void;
   placeholder?: string;
   contacts: Contact[];
   trailing?: ReactNode;
 }) {
+  const { items, input } = value;
   const [focused, setFocused] = useState(false);
   const [highlight, setHighlight] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  const { before, fragment } = splitToken(value);
-  const f = fragment.trim().toLowerCase();
+  const f = input.trim().toLowerCase();
 
-  const used = useMemo(
-    () =>
-      new Set(
-        value
-          .split(/[,;]/)
-          .map((s) => s.trim().toLowerCase())
-          .filter(Boolean),
-      ),
-    [value],
-  );
+  const used = useMemo(() => new Set(items.map((i) => i.address.toLowerCase())), [items]);
 
   const matches = useMemo(() => {
     if (!focused) return [];
@@ -68,56 +74,119 @@ export function AddressField({
   const open = focused && matches.length > 0;
   const hi = highlight < matches.length ? highlight : 0;
 
-  function accept(ct: Contact) {
-    const sep = before.trim() ? " " : "";
-    onChange(`${before}${sep}${ct.address}, `);
-    setHighlight(0);
+  function commit(rec: Recipient) {
+    const addr = rec.address.trim().toLowerCase();
+    if (!addr) return;
+    const next = used.has(addr) ? items : [...items, { ...rec, address: addr }];
+    onChange({ items: next, input: "" });
+  }
+
+  function commitInput() {
+    if (input.trim()) commit({ address: input });
+  }
+
+  // Splits pasted/typed separators into chips, keeping the last partial in the box.
+  function handleInput(raw: string) {
+    if (!/[\s,;]/.test(raw)) {
+      onChange({ ...value, input: raw });
+      return;
+    }
+    const parts = raw.split(/[\s,;]+/);
+    const last = parts.pop() ?? "";
+    const next = [...items];
+    for (const p of parts) {
+      const addr = p.trim().toLowerCase();
+      if (addr && !next.some((i) => i.address.toLowerCase() === addr)) next.push({ address: addr });
+    }
+    onChange({ items: next, input: last });
   }
 
   return (
     <div className="relative">
-      <label className="flex items-center gap-2 border-b py-1">
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: clicking the field focuses its input */}
+      <div
+        className="flex items-start gap-2 border-b py-1.5"
+        onMouseDown={(e) => {
+          if (e.target === e.currentTarget) inputRef.current?.focus();
+        }}
+      >
         <span className={FIELD_LABEL}>{label}</span>
-        <input
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-          onKeyDown={(e) => {
-            if (!open) return;
-            if (e.key === "ArrowDown") {
-              e.preventDefault();
-              setHighlight((h) => (h + 1) % matches.length);
-            } else if (e.key === "ArrowUp") {
-              e.preventDefault();
-              setHighlight((h) => (h - 1 + matches.length) % matches.length);
-            } else if (e.key === "Enter" || e.key === "Tab") {
-              const ct = matches[hi];
-              if (ct) {
-                e.preventDefault();
-                accept(ct);
-              }
-            } else if (e.key === "Escape") {
-              e.preventDefault();
+        <div className="flex flex-1 flex-wrap items-center gap-1">
+          {items.map((it, idx) => {
+            const valid = EMAIL_RE.test(it.address);
+            return (
+              <span
+                key={it.address}
+                title={it.name ? `${it.name} <${it.address}>` : it.address}
+                className={cn(
+                  "group inline-flex max-w-full items-center gap-1 rounded-full py-0.5 pr-1 pl-2.5 text-[12px] leading-5 transition-colors",
+                  valid ? "bg-accent text-accent-foreground" : "bg-destructive/10 text-destructive",
+                )}
+              >
+                <span className="truncate">{it.name || it.address}</span>
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => onChange({ ...value, items: items.filter((_, i) => i !== idx) })}
+                  aria-label={`Remove ${it.address}`}
+                  className="grid size-4 shrink-0 place-items-center rounded-full text-current/60 opacity-60 transition hover:bg-black/10 hover:opacity-100 focus-visible:opacity-100 dark:hover:bg-white/15"
+                >
+                  <X className="size-3" />
+                </button>
+              </span>
+            );
+          })}
+          <input
+            ref={inputRef}
+            value={input}
+            onChange={(e) => handleInput(e.target.value)}
+            onFocus={() => setFocused(true)}
+            onBlur={() => {
               setFocused(false);
-            }
-          }}
-          placeholder={placeholder}
-          autoComplete="off"
-          spellCheck={false}
-          className={FIELD_INPUT}
-        />
+              commitInput();
+            }}
+            onKeyDown={(e) => {
+              if (open && (e.key === "Enter" || e.key === "Tab")) {
+                const ct = matches[hi];
+                if (ct) {
+                  e.preventDefault();
+                  commit(ct);
+                  return;
+                }
+              }
+              if (e.key === "Enter") {
+                e.preventDefault();
+                commitInput();
+              } else if (e.key === "ArrowDown" && open) {
+                e.preventDefault();
+                setHighlight((h) => (h + 1) % matches.length);
+              } else if (e.key === "ArrowUp" && open) {
+                e.preventDefault();
+                setHighlight((h) => (h - 1 + matches.length) % matches.length);
+              } else if (e.key === "Escape" && open) {
+                e.preventDefault();
+                setFocused(false);
+              } else if (e.key === "Backspace" && input === "" && items.length) {
+                e.preventDefault();
+                onChange({ items: items.slice(0, -1), input: "" });
+              }
+            }}
+            placeholder={items.length === 0 ? placeholder : ""}
+            autoComplete="off"
+            spellCheck={false}
+            className="min-w-[10ch] flex-1 bg-transparent py-0.5 text-[13px] outline-none placeholder:text-muted-foreground"
+          />
+        </div>
         {trailing}
-      </label>
+      </div>
       {open && (
-        <ul className="absolute top-full right-0 left-0 z-50 mt-1 max-h-60 overflow-y-auto rounded-lg border bg-popover p-1 text-popover-foreground shadow-black/10 shadow-lg">
+        <ul className="absolute top-full right-0 left-12 z-50 mt-1 max-h-60 overflow-y-auto rounded-lg border bg-popover p-1 text-popover-foreground shadow-black/10 shadow-lg">
           {matches.map((ct, i) => (
             <li key={ct.address}>
               <button
                 type="button"
-                // Keep focus on the input so the field's blur doesn't fire first.
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => accept(ct)}
+                onClick={() => commit(ct)}
                 onMouseEnter={() => setHighlight(i)}
                 className={cn(
                   "flex w-full flex-col items-start gap-0 rounded-md px-2 py-1 text-left transition-colors",

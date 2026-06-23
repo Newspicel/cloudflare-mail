@@ -8,7 +8,12 @@ import { toast } from "sonner";
 import { ApiError, api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
 import { contactsQuery, type DraftRow, type MessageRow, mailboxesQuery } from "@/lib/queries.ts";
-import { AddressField } from "./address-field.tsx";
+import {
+  AddressField,
+  collectRecipients,
+  hasRecipients,
+  type RecipientsValue,
+} from "./address-field.tsx";
 import { Button } from "./ui/button.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select.tsx";
 import { Textarea } from "./ui/textarea.tsx";
@@ -35,9 +40,9 @@ interface ComposeState {
 }
 
 interface DraftSnapshot {
-  to: { address: string }[];
-  cc: { address: string }[];
-  bcc: { address: string }[];
+  to: { name?: string; address: string }[];
+  cc: { name?: string; address: string }[];
+  bcc: { name?: string; address: string }[];
   subject: string;
   body: string;
   markdown: boolean;
@@ -81,10 +86,6 @@ export function ComposeDock() {
   );
 }
 
-function addrsToString(addrs: { name?: string; address: string }[] | null | undefined): string {
-  return (addrs ?? []).map((a) => a.address).join(", ");
-}
-
 const FIELD_LABEL = "w-12 shrink-0 text-[11px] text-muted-foreground uppercase tracking-wider";
 const FIELD_INPUT =
   "flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted-foreground";
@@ -101,12 +102,23 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
   const [mailboxId, setMailboxId] = useState(
     d?.mailboxId ?? s.replyToMessage?.mailboxId ?? fwd?.mailboxId ?? sendable[0]?.id ?? "",
   );
-  const [to, setTo] = useState(
-    d ? addrsToString(d.toAddrs) : (s.replyToMessage?.fromAddr ?? s.initialTo ?? ""),
+  const [to, setTo] = useState<RecipientsValue>(() => {
+    if (d) return { items: d.toAddrs ?? [], input: "" };
+    if (s.replyToMessage)
+      return {
+        items: [
+          { address: s.replyToMessage.fromAddr, name: s.replyToMessage.fromName ?? undefined },
+        ],
+        input: "",
+      };
+    if (s.initialTo) return { items: [{ address: s.initialTo }], input: "" };
+    return { items: [], input: "" };
+  });
+  const [cc, setCc] = useState<RecipientsValue>(() => ({ items: d?.ccAddrs ?? [], input: "" }));
+  const [bcc, setBcc] = useState<RecipientsValue>(() => ({ items: d?.bccAddrs ?? [], input: "" }));
+  const [showCc, setShowCc] = useState(
+    Boolean((d?.ccAddrs?.length ?? 0) || (d?.bccAddrs?.length ?? 0)),
   );
-  const [cc, setCc] = useState(d ? addrsToString(d.ccAddrs) : "");
-  const [bcc, setBcc] = useState(d ? addrsToString(d.bccAddrs) : "");
-  const [showCc, setShowCc] = useState(Boolean(cc || bcc));
   const [subject, setSubject] = useState(
     d
       ? d.subject
@@ -198,16 +210,25 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
   // Debounced autosave. Skips while the form is untouched (so merely opening a
   // reply/forward doesn't spawn a draft) and serializes writes via `flush`.
   useEffect(() => {
+    const toList = collectRecipients(to);
+    const ccList = collectRecipients(cc);
+    const bccList = collectRecipients(bcc);
     const snap: DraftSnapshot = {
-      to: parseAddrs(to),
-      cc: parseAddrs(cc),
-      bcc: parseAddrs(bcc),
+      to: toList,
+      cc: ccList,
+      bcc: bccList,
       subject,
       body: text,
       markdown,
       attachments,
     };
-    const isEmpty = !to && !cc && !bcc && !subject && !text && attachments.length === 0;
+    const isEmpty =
+      !toList.length &&
+      !ccList.length &&
+      !bccList.length &&
+      !subject &&
+      !text &&
+      attachments.length === 0;
     const key = JSON.stringify(snap);
     if (initialKeyRef.current === null) initialKeyRef.current = key;
     if (key === initialKeyRef.current) return;
@@ -224,13 +245,13 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
   const send = useMutation({
     mutationFn: async () => {
       const html = markdown && text.trim() ? previewHtml : undefined;
-      const ccList = parseAddrs(cc);
-      const bccList = parseAddrs(bcc);
+      const ccList = collectRecipients(cc);
+      const bccList = collectRecipients(bcc);
       return api<{ messageId: string; threadId: string }>("/api/messages/send", {
         method: "POST",
         body: JSON.stringify({
           mailboxId,
-          to: parseAddrs(to),
+          to: collectRecipients(to),
           cc: ccList.length ? ccList : undefined,
           bcc: bccList.length ? bccList : undefined,
           subject,
@@ -320,14 +341,14 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
       <Dialog.Portal>
         <Dialog.Popup
           className={cn(
-            "fixed inset-0 z-40 flex flex-col overflow-hidden border bg-card text-card-foreground shadow-black/15 shadow-xl outline-none transition-all duration-200 data-ending-style:translate-y-3 data-ending-style:opacity-0 data-starting-style:translate-y-3 data-starting-style:opacity-0",
+            "fixed inset-0 z-40 flex flex-col overflow-hidden border bg-card text-card-foreground shadow-black/20 shadow-2xl outline-none transition-all duration-200 data-ending-style:translate-y-3 data-ending-style:opacity-0 data-starting-style:translate-y-3 data-starting-style:opacity-0 sm:inset-auto sm:right-6 sm:bottom-0 sm:rounded-t-xl sm:border-b-0",
             expanded
-              ? "sm:inset-auto sm:top-1/2 sm:left-1/2 sm:h-[85vh] sm:max-h-[800px] sm:w-[800px] sm:max-w-[92vw] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-xl"
-              : "sm:inset-auto sm:right-6 sm:bottom-0 sm:h-[540px] sm:w-[520px] sm:rounded-t-xl sm:border-b-0",
+              ? "sm:h-[88vh] sm:max-h-[860px] sm:w-[760px] sm:max-w-[calc(100vw-3rem)]"
+              : "sm:h-[560px] sm:w-[516px]",
           )}
         >
-          <div className="flex items-center justify-between border-b bg-muted px-3 py-2">
-            <Dialog.Title className="font-semibold text-[12px] tracking-tight">
+          <div className="flex items-center justify-between border-b bg-muted/60 px-4 py-2.5">
+            <Dialog.Title className="font-semibold text-[13px] text-foreground tracking-tight">
               {s.replyToMessage ? "Reply" : s.forwardMessage ? "Forward" : "New message"}
             </Dialog.Title>
             <div className="flex items-center gap-0.5">
@@ -353,8 +374,8 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
             </div>
           </div>
 
-          <div className="flex flex-1 flex-col gap-1 overflow-y-auto px-3 py-2">
-            <div className="flex items-center gap-2 border-b py-1">
+          <div className="flex flex-1 flex-col overflow-y-auto px-4 py-1">
+            <div className="flex items-center gap-2 border-b py-1.5">
               <span className={FIELD_LABEL}>From</span>
               <Select value={mailboxId} onValueChange={(v) => setMailboxId(v as string)}>
                 <SelectTrigger
@@ -385,7 +406,7 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
                   <button
                     type="button"
                     onClick={() => setShowCc(true)}
-                    className="shrink-0 font-medium text-[11px] text-muted-foreground hover:text-foreground"
+                    className="mt-0.5 shrink-0 rounded px-1.5 py-0.5 font-medium text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                   >
                     Cc/Bcc
                   </button>
@@ -410,7 +431,7 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
                 />
               </>
             )}
-            <label className="flex items-center gap-2 border-b py-1">
+            <label className="flex items-center gap-2 border-b py-1.5">
               <span className={FIELD_LABEL}>Subject</span>
               <input
                 value={subject}
@@ -468,7 +489,7 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
               <Button
                 variant="primary"
                 onClick={() => send.mutate()}
-                disabled={send.isPending || uploading > 0 || !mailboxId || !to}
+                disabled={send.isPending || uploading > 0 || !mailboxId || !hasRecipients(to)}
               >
                 {send.isPending ? "Sending…" : "Send"}
               </Button>
@@ -535,13 +556,6 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
       </Dialog.Portal>
     </Dialog.Root>
   );
-}
-
-function parseAddrs(value: string): { address: string }[] {
-  return value
-    .split(/[,;]\s*/)
-    .filter(Boolean)
-    .map((address) => ({ address }));
 }
 
 function formatBytes(n: number): string {
