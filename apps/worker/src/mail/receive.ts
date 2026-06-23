@@ -50,11 +50,18 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
     },
   });
   if (!mb) {
-    // No direct mailbox — fall back to an inbound-only redirect/alias.
-    const red = await db.query.redirect.findFirst({
-      where: and(eq(redirect.domainId, dom.id), eq(redirect.localPart, localPart.toLowerCase())),
-      columns: { targetMailboxId: true },
-    });
+    // No direct mailbox — fall back to an inbound-only redirect/alias. An exact
+    // local part wins over the domain catch-all ("*"), which only fires when no
+    // mailbox and no specific redirect match.
+    const red =
+      (await db.query.redirect.findFirst({
+        where: and(eq(redirect.domainId, dom.id), eq(redirect.localPart, localPart.toLowerCase())),
+        columns: { targetMailboxId: true },
+      })) ??
+      (await db.query.redirect.findFirst({
+        where: and(eq(redirect.domainId, dom.id), eq(redirect.localPart, "*")),
+        columns: { targetMailboxId: true },
+      }));
     if (red) {
       mb = await db.query.mailbox.findFirst({
         where: eq(mailbox.id, red.targetMailboxId),
