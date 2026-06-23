@@ -9,7 +9,12 @@ import {
   user,
 } from "@cfmail/db/schema";
 import { grant, Perm } from "@cfmail/shared/permissions";
-import type { MailboxListDto } from "@cfmail/shared/responses";
+import type {
+  MailboxInvitesDto,
+  MailboxListDto,
+  MailboxMembersDto,
+  MailboxSettingsDto,
+} from "@cfmail/shared/responses";
 import { createMailbox, grantMember, updateMailboxSettings } from "@cfmail/shared/schemas";
 import { zValidator } from "@hono/zod-validator";
 import { and, count, eq, gt, inArray, ne, or, sql } from "drizzle-orm";
@@ -179,7 +184,7 @@ export function mailboxesRoutes() {
             tokens: usage.tokensIn + usage.tokensOut,
           }
         : null,
-    });
+    } satisfies MailboxSettingsDto);
   });
 
   r.patch("/:id/settings", zValidator("json", updateMailboxSettings), async (c) => {
@@ -251,7 +256,7 @@ export function mailboxesRoutes() {
       .from(mailboxMember)
       .innerJoin(user, eq(user.id, mailboxMember.userId))
       .where(eq(mailboxMember.mailboxId, id));
-    return c.json({ members: rows });
+    return c.json({ members: rows } satisfies MailboxMembersDto);
   });
 
   r.post("/:id/members", zValidator("json", grantMember), async (c) => {
@@ -296,7 +301,9 @@ export function mailboxesRoutes() {
       })
       .from(mailboxInvite)
       .where(eq(mailboxInvite.mailboxId, id));
-    return c.json({ invites: rows });
+    return c.json({
+      invites: rows.map((inv) => ({ ...inv, createdAt: inv.createdAt.toISOString() })),
+    } satisfies MailboxInvitesDto);
   });
 
   r.delete("/:id/invites/:inviteId", async (c) => {

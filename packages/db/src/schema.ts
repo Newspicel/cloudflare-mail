@@ -7,15 +7,34 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
+import {
+  DOMAIN_KINDS,
+  EDITOR_FORMATS,
+  MAILBOX_TYPES,
+  MESSAGE_DIRECTIONS,
+  QUOTE_KINDS,
+  SERVICE_MODES,
+  SPAM_FILTER_LEVELS,
+  SPAM_VERDICTS,
+  USER_ROLES,
+} from "./enums.ts";
 
 const now = sql`(unixepoch())`;
+
+// Timestamp column helpers. Drizzle column builders are stateful, so these are
+// factory functions (fresh builder per call) rather than shared instances —
+// the createdAt/updatedAt pattern repeats across nearly every table.
+const createdAt = () => integer("created_at", { mode: "timestamp" }).notNull().default(now);
+const updatedAt = () => integer("updated_at", { mode: "timestamp" }).notNull().default(now);
+/** createdAt + updatedAt as a spreadable pair: `{ ...timestamps() }`. */
+const timestamps = () => ({ createdAt: createdAt(), updatedAt: updatedAt() });
 
 // ─── System config (lazy-init: auth secret, from-address, etc.) ─────────────
 
 export const systemConfig = sqliteTable("system_config", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().default(now),
+  updatedAt: updatedAt(),
 });
 
 // ─── Better Auth (with admin + twoFactor plugin fields) ─────────────────────
@@ -33,8 +52,7 @@ export const user = sqliteTable("user", {
   banExpires: integer("ban_expires", { mode: "timestamp" }),
   // twoFactor plugin
   twoFactorEnabled: integer("two_factor_enabled", { mode: "boolean" }).notNull().default(false),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(now),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().default(now),
+  ...timestamps(),
 });
 
 export const session = sqliteTable(
@@ -50,8 +68,7 @@ export const session = sqliteTable(
     userAgent: text("user_agent"),
     // admin plugin (impersonation)
     impersonatedBy: text("impersonated_by"),
-    createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(now),
-    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().default(now),
+    ...timestamps(),
   },
   (t) => [index("session_user_idx").on(t.userId)],
 );
@@ -72,8 +89,7 @@ export const account = sqliteTable(
     refreshTokenExpiresAt: integer("refresh_token_expires_at", { mode: "timestamp" }),
     scope: text("scope"),
     password: text("password"),
-    createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(now),
-    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().default(now),
+    ...timestamps(),
   },
   (t) => [index("account_user_idx").on(t.userId)],
 );
@@ -83,8 +99,7 @@ export const verification = sqliteTable("verification", {
   identifier: text("identifier").notNull(),
   value: text("value").notNull(),
   expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(now),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().default(now),
+  ...timestamps(),
 });
 
 export const twoFactor = sqliteTable(
@@ -108,16 +123,14 @@ export const userInvite = sqliteTable(
   {
     id: text("id").primaryKey(),
     email: text("email").notNull(),
-    role: text("role", { enum: ["admin", "user"] })
-      .notNull()
-      .default("user"),
+    role: text("role", { enum: USER_ROLES }).notNull().default("user"),
     token: text("token").notNull().unique(),
     invitedByUserId: text("invited_by_user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
     usedAt: integer("used_at", { mode: "timestamp" }),
-    createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(now),
+    createdAt: createdAt(),
   },
   (t) => [
     uniqueIndex("user_invite_email_uq").on(t.email),
@@ -132,7 +145,7 @@ export const domain = sqliteTable(
   {
     id: text("id").primaryKey(),
     name: text("name").notNull().unique(),
-    kind: text("kind", { enum: ["primary", "sub"] }).notNull(),
+    kind: text("kind", { enum: DOMAIN_KINDS }).notNull(),
     // Bitfield of MailboxKind (PERSONAL|GROUP|SERVICE|TEMP) — which mailbox
     // types may be hosted on this domain. 0 means none allowed.
     allowedKinds: integer("allowed_kinds").notNull().default(0),
@@ -140,7 +153,7 @@ export const domain = sqliteTable(
     dkimOk: integer("dkim_ok", { mode: "boolean" }).notNull().default(false),
     dmarcOk: integer("dmarc_ok", { mode: "boolean" }).notNull().default(false),
     lastCheckedAt: integer("last_checked_at", { mode: "timestamp" }),
-    createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(now),
+    createdAt: createdAt(),
   },
   (t) => [index("domain_kind_idx").on(t.kind)],
 );
@@ -157,7 +170,7 @@ export const domainGrant = sqliteTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     allowedKinds: integer("allowed_kinds").notNull().default(0),
-    createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(now),
+    createdAt: createdAt(),
   },
   (t) => [
     primaryKey({ columns: [t.domainId, t.userId] }),
@@ -174,7 +187,7 @@ export const mailbox = sqliteTable(
       .references(() => domain.id, { onDelete: "cascade" }),
     localPart: text("local_part").notNull(),
     displayName: text("display_name"),
-    type: text("type", { enum: ["personal", "group", "service", "temp"] }).notNull(),
+    type: text("type", { enum: MAILBOX_TYPES }).notNull(),
     ownerUserId: text("owner_user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
@@ -182,9 +195,7 @@ export const mailbox = sqliteTable(
     replyTo: text("reply_to"),
     // Spam filtering level: off | auth (SPF/DKIM/DMARC only) | standard (auth +
     // heuristics + DNSBL) | ai (standard + Workers AI on the gray zone).
-    spamFilter: text("spam_filter", { enum: ["off", "auth", "standard", "ai"] })
-      .notNull()
-      .default("standard"),
+    spamFilter: text("spam_filter", { enum: SPAM_FILTER_LEVELS }).notNull().default("standard"),
     // Monthly Workers AI token budget for spam classification; null = unlimited.
     // When exceeded, the ai level silently falls back to standard.
     spamAiTokenCap: integer("spam_ai_token_cap"),
@@ -193,11 +204,9 @@ export const mailbox = sqliteTable(
     serviceKeyHash: text("service_key_hash"),
     // service mailboxes only — "duplex" accepts inbound (poll via API);
     // "send" rejects inbound with a hard bounce. Ignored for other types.
-    serviceMode: text("service_mode", { enum: ["duplex", "send"] })
-      .notNull()
-      .default("duplex"),
+    serviceMode: text("service_mode", { enum: SERVICE_MODES }).notNull().default("duplex"),
     expiresAt: integer("expires_at", { mode: "timestamp" }),
-    createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(now),
+    createdAt: createdAt(),
   },
   (t) => [
     uniqueIndex("mailbox_domain_local_uq").on(t.domainId, t.localPart),
@@ -223,7 +232,7 @@ export const redirect = sqliteTable(
     targetMailboxId: text("target_mailbox_id")
       .notNull()
       .references(() => mailbox.id, { onDelete: "cascade" }),
-    createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(now),
+    createdAt: createdAt(),
   },
   (t) => [
     uniqueIndex("redirect_domain_local_uq").on(t.domainId, t.localPart),
@@ -290,7 +299,7 @@ export const message = sqliteTable(
     threadId: text("thread_id")
       .notNull()
       .references(() => thread.id, { onDelete: "cascade" }),
-    direction: text("direction", { enum: ["in", "out"] }).notNull(),
+    direction: text("direction", { enum: MESSAGE_DIRECTIONS }).notNull(),
     messageIdHdr: text("message_id_hdr"),
     inReplyTo: text("in_reply_to"),
     references: text("references", { mode: "json" }).$type<string[]>(),
@@ -318,7 +327,7 @@ export const message = sqliteTable(
     rawR2Key: text("raw_r2_key"),
     sizeBytes: integer("size_bytes").notNull().default(0),
     // Spam evaluation result (inbound only; null when filtering is off).
-    spamVerdict: text("spam_verdict", { enum: ["clean", "suspicious", "spam"] }),
+    spamVerdict: text("spam_verdict", { enum: SPAM_VERDICTS }),
     spamScore: integer("spam_score"),
     // Human-readable reasons that drive the warning banner.
     spamReasons: text("spam_reasons", { mode: "json" }).$type<string[]>(),
@@ -335,7 +344,7 @@ export const message = sqliteTable(
     // the sender as supporting one-click POST unsubscribe.
     listUnsubscribe: text("list_unsubscribe"),
     listUnsubscribePost: text("list_unsubscribe_post"),
-    createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(now),
+    createdAt: createdAt(),
   },
   (t) => [
     index("message_mailbox_created_idx").on(t.mailboxId, t.createdAt),
@@ -371,7 +380,7 @@ export const mailboxSpamUsage = sqliteTable("mailbox_spam_usage", {
   calls: integer("calls").notNull().default(0),
   tokensIn: integer("tokens_in").notNull().default(0),
   tokensOut: integer("tokens_out").notNull().default(0),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().default(now),
+  updatedAt: updatedAt(),
 });
 
 export const label = sqliteTable(
@@ -415,7 +424,7 @@ export const folder = sqliteTable(
     color: text("color").notNull().default("#64748b"),
     // Manual sidebar ordering; ties broken by createdAt.
     position: integer("position").notNull().default(0),
-    createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(now),
+    createdAt: createdAt(),
   },
   (t) => [
     uniqueIndex("folder_user_name_uq").on(t.userId, t.name),
@@ -462,7 +471,7 @@ export const mailboxInvite = sqliteTable(
     invitedByUserId: text("invited_by_user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(now),
+    createdAt: createdAt(),
   },
   (t) => [
     uniqueIndex("mailbox_invite_mailbox_email_uq").on(t.mailboxId, t.email),
@@ -489,7 +498,7 @@ export const draft = sqliteTable(
     // `.eml` at send time (mail/quote.ts); persisting the ref lets a reopened
     // draft restore the quote it would otherwise lose.
     quoteMessageId: text("quote_message_id"),
-    quoteKind: text("quote_kind", { enum: ["reply", "forward"] }),
+    quoteKind: text("quote_kind", { enum: QUOTE_KINDS }),
     toAddrs: text("to_addrs", { mode: "json" })
       .$type<{ name?: string; address: string }[]>()
       .notNull()
@@ -501,15 +510,12 @@ export const draft = sqliteTable(
     markdown: integer("markdown", { mode: "boolean" }).notNull().default(false),
     // Body editor format. `markdown` is kept in sync (= format === "markdown")
     // for back-compat; new code reads `format`.
-    format: text("format", { enum: ["text", "markdown", "html"] })
-      .notNull()
-      .default("text"),
+    format: text("format", { enum: EDITOR_FORMATS }).notNull().default("text"),
     attachments: text("attachments", { mode: "json" })
       .$type<{ r2Key: string; filename: string; contentType: string; sizeBytes: number }[]>()
       .notNull()
       .default(sql`'[]'`),
-    createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(now),
-    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().default(now),
+    ...timestamps(),
   },
   (t) => [
     index("draft_mailbox_idx").on(t.mailboxId, t.updatedAt),
@@ -533,7 +539,7 @@ export const pushSubscription = sqliteTable(
     p256dh: text("p256dh").notNull(),
     auth: text("auth").notNull(),
     userAgent: text("user_agent"),
-    createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(now),
+    createdAt: createdAt(),
   },
   (t) => [index("push_subscription_user_idx").on(t.userId)],
 );
@@ -549,7 +555,7 @@ export const mailboxNotify = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(now),
+    createdAt: createdAt(),
   },
   (t) => [
     primaryKey({ columns: [t.mailboxId, t.userId] }),
@@ -569,7 +575,7 @@ export const shareToken = sqliteTable(
       .references(() => user.id, { onDelete: "cascade" }),
     perms: integer("perms").notNull().default(1),
     expiresAt: integer("expires_at", { mode: "timestamp" }),
-    createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(now),
+    createdAt: createdAt(),
   },
   (t) => [index("share_token_mailbox_idx").on(t.mailboxId)],
 );

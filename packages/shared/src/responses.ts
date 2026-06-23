@@ -9,6 +9,7 @@
 // typed to return these, so a schema change that breaks the shape is a compile
 // error on both sides.
 
+import type { MailboxType, MessageDirection, SpamFilterLevel, UserRole } from "@cfmail/db/enums";
 import type { draft, folder, label, message, thread } from "@cfmail/db/schema";
 
 /** Map Drizzle `Date` columns to the `string` form `c.json()` actually sends. */
@@ -35,7 +36,7 @@ export interface MailboxSummaryDto {
   id: string;
   address: string;
   displayName: string | null;
-  type: "personal" | "group" | "service" | "temp";
+  type: MailboxType;
   expiresAt: string | null;
   role: "owner" | "member";
   perms: number;
@@ -51,7 +52,7 @@ export interface SearchResultDto {
   snippet: string;
   fromName: string | null;
   fromAddr: string;
-  direction: "in" | "out";
+  direction: MessageDirection;
   flags: number;
   hasAttachments: boolean;
   receivedAt: string | null;
@@ -67,7 +68,7 @@ export interface MeUserDto {
   id: string;
   name: string;
   email: string;
-  role: "admin" | "user";
+  role: UserRole;
   twoFactorEnabled?: boolean;
 }
 
@@ -111,6 +112,34 @@ export interface FolderCountsResponseDto {
 }
 export interface MailboxListDto {
   mailboxes: MailboxSummaryDto[];
+}
+export interface MailboxSettingsDto {
+  id: string;
+  type: MailboxType;
+  displayName: string | null;
+  signature: string | null;
+  replyTo: string | null;
+  spamFilter: SpamFilterLevel;
+  spamAiTokenCap: number | null;
+  spamUsage: { period: string; calls: number; tokens: number } | null;
+}
+export interface MailboxMemberDto {
+  userId: string;
+  perms: number;
+  email: string;
+  name: string;
+}
+export interface MailboxMembersDto {
+  members: MailboxMemberDto[];
+}
+export interface MailboxInviteDto {
+  id: string;
+  email: string;
+  perms: number;
+  createdAt: string;
+}
+export interface MailboxInvitesDto {
+  invites: MailboxInviteDto[];
 }
 export interface DraftListDto {
   drafts: DraftDto[];
