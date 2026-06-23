@@ -1,11 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Check, LogOut, Mail, Menu, Monitor, Moon, Search, Settings, Sun } from "lucide-react";
+import { Check, LogOut, Menu, Monitor, Moon, Search, Settings, Sun } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { authClient } from "@/lib/auth-client.ts";
 import { cn } from "@/lib/cn.ts";
 import { meQuery, type SearchResult, searchQuery } from "@/lib/queries.ts";
 import { type Theme, useTheme } from "@/lib/theme.ts";
+import { Logo } from "./logo.tsx";
 import { Button } from "./ui/button.tsx";
 import {
   DropdownMenu,
@@ -34,9 +35,7 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
         <Menu />
       </Button>
       <div className="flex items-center gap-2">
-        <div className="grid h-7 w-7 place-items-center rounded-md bg-primary text-primary-foreground shadow-primary/20 shadow-sm">
-          <Mail className="h-3.5 w-3.5" strokeWidth={2.5} />
-        </div>
+        <Logo className="h-7 w-7 rounded-md shadow-black/[0.06] shadow-sm" />
         <span className="hidden font-semibold text-[13px] tracking-tight sm:inline">cfmail</span>
         <span className="ml-2 hidden h-5 w-px bg-border sm:block" />
         <span className="hidden text-[12px] text-muted-foreground sm:block">Mail</span>
