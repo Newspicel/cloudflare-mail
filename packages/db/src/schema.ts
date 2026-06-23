@@ -423,6 +423,11 @@ export const draft = sqliteTable(
     // Reply/forward threading context (the thread id is resolved at send time).
     inReplyTo: text("in_reply_to"),
     references: text("references", { mode: "json" }).$type<string[]>(),
+    // Reply/forward quote source. The original message is re-quoted from its raw
+    // `.eml` at send time (mail/quote.ts); persisting the ref lets a reopened
+    // draft restore the quote it would otherwise lose.
+    quoteMessageId: text("quote_message_id"),
+    quoteKind: text("quote_kind", { enum: ["reply", "forward"] }),
     toAddrs: text("to_addrs", { mode: "json" })
       .$type<{ name?: string; address: string }[]>()
       .notNull()
