@@ -18,6 +18,7 @@ import { publicShareRoutes } from "./publicShare.ts";
 import { pushRoutes } from "./push.ts";
 import { searchRoutes } from "./search.ts";
 import { streamRoute } from "./stream.ts";
+import { svcRoutes } from "./svc.ts";
 import { tempRoutes } from "./temp.ts";
 import { threadsRoutes } from "./threads.ts";
 import { usersRoutes } from "./users.ts";
@@ -39,6 +40,10 @@ export function buildApi() {
   // Bootstrap endpoints sit outside session middleware — they're how the
   // first admin is created when the DB has zero users.
   app.route("/api/bootstrap", bootstrapRoutes());
+
+  // Service-mailbox API is bearer-key authed, not session authed — mount it
+  // before the session middleware so it never touches cookies.
+  app.route("/api/svc", svcRoutes());
 
   // Public HTTP sign-up is closed via `disableSignUp: true` in auth.ts.
   // All account creation flows through /api/bootstrap (first admin) or

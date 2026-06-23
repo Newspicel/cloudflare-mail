@@ -71,6 +71,13 @@
       "when": 1782213904447,
       "tag": "0009_friendly_toad",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1782214215778,
+      "tag": "0010_true_sersi",
+      "breakpoints": true
     }
   ]
 }

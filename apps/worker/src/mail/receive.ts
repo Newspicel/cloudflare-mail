@@ -42,6 +42,7 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
     columns: {
       id: true,
       type: true,
+      serviceMode: true,
       ownerUserId: true,
       expiresAt: true,
       spamFilter: true,
@@ -60,6 +61,7 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
         columns: {
           id: true,
           type: true,
+          serviceMode: true,
           ownerUserId: true,
           expiresAt: true,
           spamFilter: true,
@@ -76,7 +78,9 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
     msg.setReject("Mailbox expired");
     return;
   }
-  if (mb.type === "service") {
+  // Send-only service mailboxes hard-bounce inbound; duplex ones fall through
+  // and store the message for API polling.
+  if (mb.type === "service" && mb.serviceMode === "send") {
     msg.setReject("Send-only address");
     return;
   }

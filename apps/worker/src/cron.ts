@@ -11,6 +11,10 @@ const DNS_BATCH_LIMIT = 10;
 // Threads trashed longer than this are permanently purged by the cron.
 const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const TRASH_PURGE_LIMIT = 500;
+// Service mailboxes keep mail for a fixed window, then the cron purges it —
+// there is no user inbox, so retention is automatic rather than user-driven.
+const SERVICE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const SERVICE_PURGE_LIMIT = 500;
 
 export async function runCron(env: Env, now: Date): Promise<void> {
   const db = makeDB(env.DB);
@@ -45,6 +49,23 @@ export async function runCron(env: Env, now: Date): Promise<void> {
 
   if (staleTrash.length) {
     const ids = staleTrash.map((t) => t.id);
+    const keys = await collectThreadBlobKeys(db, ids);
+    await deleteBlobs(env, keys);
+    await db.delete(thread).where(inArray(thread.id, ids));
+  }
+
+  // Purge service-mailbox threads older than the retention window. Threads
+  // whose newest message predates the cutoff are fully aged out.
+  const svcCutoff = new Date(now.getTime() - SERVICE_RETENTION_MS);
+  const staleSvc = await db
+    .select({ id: thread.id })
+    .from(thread)
+    .innerJoin(mailbox, eq(thread.mailboxId, mailbox.id))
+    .where(and(eq(mailbox.type, "service"), lte(thread.lastMsgAt, svcCutoff)))
+    .limit(SERVICE_PURGE_LIMIT);
+
+  if (staleSvc.length) {
+    const ids = staleSvc.map((t) => t.id);
     const keys = await collectThreadBlobKeys(db, ids);
     await deleteBlobs(env, keys);
     await db.delete(thread).where(inArray(thread.id, ids));

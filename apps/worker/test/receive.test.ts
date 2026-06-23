@@ -239,6 +239,41 @@ describe("handleInbound — full pipeline", () => {
   });
 });
 
+describe("handleInbound — service mailboxes", () => {
+  async function seedService(mode: "duplex" | "send"): Promise<void> {
+    await db.insert(mailbox).values({
+      id: "mailbox-svc",
+      domainId: DOMAIN_ID,
+      localPart: "svc",
+      type: "service",
+      ownerUserId: OWNER_ID,
+      serviceMode: mode,
+      spamFilter: "off",
+    });
+  }
+
+  it("hard-bounces inbound to a send-only service mailbox", async () => {
+    await seedService("send");
+    const msg = stubInbound({ from: "someone@elsewhere.com", to: "svc@example.com" });
+    await handleInbound(msg, e);
+    expect(msg.rejected).toBe("Send-only address");
+
+    const rows = await db.query.message.findMany({ where: eq(message.mailboxId, "mailbox-svc") });
+    expect(rows).toHaveLength(0);
+  });
+
+  it("stores inbound to a duplex service mailbox for polling", async () => {
+    await seedService("duplex");
+    const msg = stubInbound({ from: "someone@elsewhere.com", to: "svc@example.com" });
+    await handleInbound(msg, e);
+    expect(msg.rejected).toBeUndefined();
+
+    const rows = await db.query.message.findMany({ where: eq(message.mailboxId, "mailbox-svc") });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.direction).toBe("in");
+  });
+});
+
 describe("handleInbound — spam filtering (default standard level)", () => {
   const SENDER = "stranger@elsewhere.com";
 

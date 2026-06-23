@@ -12,7 +12,8 @@ import { bumpThread, resolveThreadId } from "./threads.ts";
 export async function sendFromMailbox(
   env: Env,
   db: DB,
-  userId: string,
+  // null for key-authed service sends — there is no user to broadcast to.
+  userId: string | null,
   input: SendMessageInput,
 ): Promise<{ messageId: string; threadId: string }> {
   const mb = await db.query.mailbox.findFirst({
@@ -152,12 +153,14 @@ export async function sendFromMailbox(
 
   await Promise.all([
     bumpThread(db, threadId, sentAt, [{ name: fromName, address: fromAddr }, ...allRecipients], 0),
-    broadcastToUsers(env, [userId], {
-      type: "message_sent",
-      mailboxId: mb.id,
-      messageId,
-      threadId,
-    }),
+    userId
+      ? broadcastToUsers(env, [userId], {
+          type: "message_sent",
+          mailboxId: mb.id,
+          messageId,
+          threadId,
+        })
+      : Promise.resolve(),
   ]);
 
   return { messageId, threadId };

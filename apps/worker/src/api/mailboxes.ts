@@ -16,7 +16,7 @@ import {
   updateMailboxSettings,
 } from "@cfmail/shared/schemas";
 import { zValidator } from "@hono/zod-validator";
-import { and, count, desc, eq, gt, inArray, or } from "drizzle-orm";
+import { and, count, desc, eq, gt, inArray, ne, or } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { dbFromCtx } from "../db.ts";
@@ -47,7 +47,8 @@ export function mailboxesRoutes() {
       })
       .from(mailbox)
       .innerJoin(domain, eq(mailbox.domainId, domain.id))
-      .where(eq(mailbox.ownerUserId, u.id));
+      // service mailboxes are key-driven, never user-facing — keep them out.
+      .where(and(eq(mailbox.ownerUserId, u.id), ne(mailbox.type, "service")));
 
     const memberRows = await db
       .select({
@@ -62,7 +63,7 @@ export function mailboxesRoutes() {
       .from(mailboxMember)
       .innerJoin(mailbox, eq(mailboxMember.mailboxId, mailbox.id))
       .innerJoin(domain, eq(mailbox.domainId, domain.id))
-      .where(eq(mailboxMember.userId, u.id));
+      .where(and(eq(mailboxMember.userId, u.id), ne(mailbox.type, "service")));
 
     const owned = ownerRows.map((m) => ({
       id: m.id,
@@ -116,6 +117,9 @@ export function mailboxesRoutes() {
     const u = c.get("user")!;
     const body = c.req.valid("json");
 
+    if (body.type === "service") {
+      throw new HTTPException(400, { message: "service mailboxes are created from Admin" });
+    }
     await authorizeMailboxCreate(db, u, body.domainId, body.type);
 
     const id = crypto.randomUUID();

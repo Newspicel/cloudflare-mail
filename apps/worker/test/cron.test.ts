@@ -267,3 +267,66 @@ describe("runCron — trash retention purge", () => {
     expect(await e.BLOBS.head(PERSONAL_RAW)).not.toBeNull();
   });
 });
+
+describe("runCron — service mailbox retention", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const SVC_ID = "mailbox-svc";
+  const OLD_RAW = `raw/${SVC_ID}/old.eml`;
+  const NEW_RAW = `raw/${SVC_ID}/new.eml`;
+
+  async function seedService(now: Date): Promise<void> {
+    await db.insert(user).values({ id: OWNER_ID, name: "Owner", email: "owner@example.com" });
+    await db.insert(domain).values({ id: DOMAIN_ID, name: "example.com", kind: "primary" });
+    await db.insert(mailbox).values({
+      id: SVC_ID,
+      domainId: DOMAIN_ID,
+      localPart: "svc",
+      type: "service",
+      ownerUserId: OWNER_ID,
+    });
+    await db.insert(thread).values([
+      { id: "svc-old", mailboxId: SVC_ID, lastMsgAt: new Date(now.getTime() - 31 * DAY) },
+      { id: "svc-new", mailboxId: SVC_ID, lastMsgAt: new Date(now.getTime() - DAY) },
+    ]);
+    await db.insert(message).values([
+      {
+        id: "svc-msg-old",
+        mailboxId: SVC_ID,
+        threadId: "svc-old",
+        direction: "in",
+        fromAddr: "s@example.com",
+        rawR2Key: OLD_RAW,
+      },
+      {
+        id: "svc-msg-new",
+        mailboxId: SVC_ID,
+        threadId: "svc-new",
+        direction: "in",
+        fromAddr: "s@example.com",
+        rawR2Key: NEW_RAW,
+      },
+    ]);
+    await e.BLOBS.put(OLD_RAW, "raw-old");
+    await e.BLOBS.put(NEW_RAW, "raw-new");
+  }
+
+  afterEach(async () => {
+    await Promise.all([OLD_RAW, NEW_RAW].map((key) => e.BLOBS.delete(key)));
+  });
+
+  it("purges service threads older than the retention window, with their blobs", async () => {
+    const now = new Date();
+    await seedService(now);
+
+    await runCron(e, now);
+
+    expect(await db.query.thread.findFirst({ where: eq(thread.id, "svc-old") })).toBeUndefined();
+    expect(
+      await db.query.message.findFirst({ where: eq(message.id, "svc-msg-old") }),
+    ).toBeUndefined();
+    expect(await e.BLOBS.head(OLD_RAW)).toBeNull();
+
+    expect(await db.query.thread.findFirst({ where: eq(thread.id, "svc-new") })).toBeDefined();
+    expect(await e.BLOBS.head(NEW_RAW)).not.toBeNull();
+  });
+});
