@@ -24,7 +24,7 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
   const { data } = useQuery(meQuery);
 
   return (
-    <header className="flex h-12 shrink-0 items-center gap-3 border-b bg-card px-3 sm:px-4">
+    <header className="flex h-[calc(3rem+env(safe-area-inset-top))] shrink-0 items-center gap-3 border-b bg-card px-3 pt-[env(safe-area-inset-top)] pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] sm:pl-[max(1rem,env(safe-area-inset-left))] sm:pr-[max(1rem,env(safe-area-inset-right))]">
       <Button
         variant="ghost"
         size="icon"
