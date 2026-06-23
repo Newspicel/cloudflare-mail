@@ -23,6 +23,14 @@ import {
   type RecipientsValue,
 } from "./address-field.tsx";
 import { EmailFrame } from "./email-frame.tsx";
+import {
+  FormatToolbar,
+  htmlToText,
+  type PendingCmd,
+  RichEditor,
+  type RichEditorHandle,
+  textToHtml,
+} from "./rich-editor.tsx";
 import { Button } from "./ui/button.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select.tsx";
 import { Textarea } from "./ui/textarea.tsx";
@@ -50,13 +58,16 @@ interface ComposeState {
   draft?: DraftRow | null;
 }
 
+type BodyFormat = "text" | "markdown" | "html";
+
 interface DraftSnapshot {
   to: { name?: string; address: string }[];
   cc: { name?: string; address: string }[];
   bcc: { name?: string; address: string }[];
   subject: string;
+  // For html mode this is the rich HTML; otherwise the plain/markdown source.
   body: string;
-  markdown: boolean;
+  format: BodyFormat;
   attachments: UploadedAttachment[];
 }
 
@@ -98,9 +109,13 @@ export function ComposeDock() {
   );
 }
 
-const FIELD_LABEL = "w-12 shrink-0 text-[11px] text-muted-foreground uppercase tracking-wider";
+// Shared row metrics so From/To/Subject share one default line height and the
+// value text starts on the same baseline as the label, growing only on wrap.
+const FIELD_ROW = "flex items-start gap-2 border-b py-1.5";
+const FIELD_LABEL =
+  "w-12 shrink-0 pt-1 text-[11px] text-muted-foreground uppercase tracking-wider leading-5";
 const FIELD_INPUT =
-  "flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted-foreground";
+  "flex-1 bg-transparent py-0.5 text-[13px] leading-5 outline-none placeholder:text-muted-foreground";
 
 function ComposePanel({ state: s }: { state: ComposeState }) {
   const qc = useQueryClient();
@@ -174,7 +189,17 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
           ? prefixSubject(fwd.subject, "Fwd")
           : "",
   );
-  const [text, setText] = useState(d ? d.body : "");
+  // Body editor format. Default is a plain-text email; it only becomes an HTML
+  // mail once rich formatting is actually used (or markdown is rendered).
+  const initialFormat: BodyFormat = d?.format ?? (d?.markdown ? "markdown" : "text");
+  const [mode, setMode] = useState<BodyFormat>(initialFormat);
+  // `text` holds the plain/markdown source; `html` holds the rich-mode body.
+  const [text, setText] = useState(d && initialFormat !== "html" ? d.body : "");
+  const [html, setHtml] = useState(d && initialFormat === "html" ? d.body : "");
+  const editorRef = useRef<RichEditorHandle>(null);
+  // A format command queued while still in plain text — applied once the editor
+  // mounts after promotion to HTML.
+  const pendingCmdRef = useRef<PendingCmd | null>(null);
 
   // The original body, fetched for the quoted-message preview. The server
   // re-quotes from the raw `.eml` at send time (mail/quote.ts); this is only so
@@ -187,7 +212,6 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
     () => (origBody.data?.html ? sanitizeEmailHtml(origBody.data.html) : null),
     [origBody.data?.html],
   );
-  const [markdown, setMarkdown] = useState(d?.markdown ?? false);
   const [preview, setPreview] = useState(false);
   const [attachments, setAttachments] = useState<UploadedAttachment[]>(d?.attachments ?? []);
   const [uploading, setUploading] = useState(0);
@@ -276,38 +300,54 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
     const toList = collectRecipients(to);
     const ccList = collectRecipients(cc);
     const bccList = collectRecipients(bcc);
+    const body = mode === "html" ? html : text;
     const snap: DraftSnapshot = {
       to: toList,
       cc: ccList,
       bcc: bccList,
       subject,
-      body: text,
-      markdown,
+      body,
+      format: mode,
       attachments,
     };
+    const bodyText = mode === "html" ? htmlToText(html) : text;
     const isEmpty =
       !toList.length &&
       !ccList.length &&
       !bccList.length &&
       !subject &&
-      !text &&
+      !bodyText.trim() &&
       attachments.length === 0;
     const key = JSON.stringify(snap);
     if (initialKeyRef.current === null) initialKeyRef.current = key;
     if (key === initialKeyRef.current) return;
     const handle = setTimeout(() => void flush({ snap, isEmpty }), 700);
     return () => clearTimeout(handle);
-  }, [to, cc, bcc, subject, text, markdown, attachments, flush]);
+  }, [to, cc, bcc, subject, text, html, mode, attachments, flush]);
 
   const previewHtml = useMemo(() => {
-    if (!markdown || !text.trim()) return "";
+    if (mode !== "markdown" || !text.trim()) return "";
     const rendered = marked.parse(text, { async: false }) as string;
     return DOMPurify.sanitize(rendered, { USE_PROFILES: { html: true } });
-  }, [markdown, text]);
+  }, [mode, text]);
 
   const send = useMutation({
     mutationFn: async () => {
-      const html = markdown && text.trim() ? previewHtml : undefined;
+      // Plain text → text only. Markdown → text source + rendered html. Rich →
+      // sanitized html + a derived text alternative for non-HTML clients.
+      let textBody: string | undefined;
+      let htmlBody: string | undefined;
+      if (mode === "html") {
+        htmlBody = html.trim()
+          ? DOMPurify.sanitize(html, { USE_PROFILES: { html: true } })
+          : undefined;
+        textBody = htmlBody ? htmlToText(html) || undefined : undefined;
+      } else if (mode === "markdown") {
+        textBody = text;
+        htmlBody = text.trim() ? previewHtml : undefined;
+      } else {
+        textBody = text;
+      }
       const ccList = collectRecipients(cc);
       const bccList = collectRecipients(bcc);
       return api<{ messageId: string; threadId: string }>("/api/messages/send", {
@@ -318,8 +358,8 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
           cc: ccList.length ? ccList : undefined,
           bcc: bccList.length ? bccList : undefined,
           subject,
-          text,
-          html,
+          text: textBody,
+          html: htmlBody,
           inReplyTo,
           references,
           quote: quoteRef ?? undefined,
@@ -349,6 +389,50 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
   function discard() {
     void deleteDraft().catch(() => {});
     closeCompose();
+  }
+
+  // Guard against the classic "forgot the attachment". Only the body the user
+  // actually composed is scanned — the quoted reply/forward original lives
+  // server-side and never reaches here, so it can't trip a false warning.
+  function attemptSend() {
+    const composed = mode === "html" ? htmlToText(html) : text;
+    if (attachments.length === 0 && uploading === 0 && mentionsAttachment(composed)) {
+      const ok = window.confirm(
+        "It looks like you mentioned an attachment, but nothing is attached.\n\nSend anyway?",
+      );
+      if (!ok) return;
+    }
+    send.mutate();
+  }
+
+  // A formatting tool was used. In HTML mode run it directly; otherwise promote
+  // the plain-text body to HTML and queue the command for the mounting editor.
+  function runFormat(cmd: string, value?: string) {
+    if (mode === "html") {
+      editorRef.current?.exec(cmd, value);
+      return;
+    }
+    setHtml(textToHtml(text));
+    pendingCmdRef.current = { cmd, value };
+    setMode("html");
+  }
+
+  // Drop rich formatting back to a plain-text body.
+  function exitRich() {
+    setText(htmlToText(html));
+    pendingCmdRef.current = null;
+    setMode("text");
+  }
+
+  function toggleMarkdown() {
+    if (mode === "markdown") {
+      setPreview(false);
+      setMode("text");
+      return;
+    }
+    if (mode === "html") setText(htmlToText(html));
+    pendingCmdRef.current = null;
+    setMode("markdown");
   }
 
   async function uploadFile(file: File): Promise<void> {
@@ -453,12 +537,12 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
           </div>
 
           <div className="flex flex-1 flex-col overflow-y-auto px-4 py-1">
-            <div className="flex items-center gap-2 border-b py-1.5">
+            <div className={FIELD_ROW}>
               <span className={FIELD_LABEL}>From</span>
               <Select value={mailboxId} onValueChange={(v) => setMailboxId(v as string)}>
                 <SelectTrigger
                   aria-label="From mailbox"
-                  className="h-7 border-0 bg-transparent px-0 shadow-none hover:bg-transparent"
+                  className="h-auto w-auto flex-1 justify-between gap-1 border-0 bg-transparent px-0 py-0.5 text-left text-[13px] leading-5 shadow-none hover:bg-transparent focus-visible:ring-0"
                 >
                   <SelectValue>
                     {(value) => sendable.find((m) => m.id === value)?.address ?? ""}
@@ -509,7 +593,7 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
                 />
               </>
             )}
-            <label className="flex items-center gap-2 border-b py-1.5">
+            <label className={FIELD_ROW}>
               <span className={FIELD_LABEL}>Subject</span>
               <input
                 value={subject}
@@ -517,7 +601,21 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
                 className={FIELD_INPUT}
               />
             </label>
-            {markdown && preview ? (
+            {mode !== "markdown" && (
+              <FormatToolbar
+                onExec={runFormat}
+                onExitRich={mode === "html" ? exitRich : undefined}
+              />
+            )}
+            {mode === "html" ? (
+              <RichEditor
+                ref={editorRef}
+                initialHtml={html}
+                pendingCmd={pendingCmdRef.current}
+                onChange={setHtml}
+                placeholder="Write your message…"
+              />
+            ) : mode === "markdown" && preview ? (
               <div
                 // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized via DOMPurify
                 dangerouslySetInnerHTML={{ __html: previewHtml }}
@@ -529,9 +627,11 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
                 onChange={(e) => setText(e.target.value)}
                 className={cn(
                   "min-h-40 flex-1 resize-none border-0 bg-transparent px-0 py-2 shadow-none focus-visible:ring-0",
-                  markdown && "font-mono",
+                  mode === "markdown" && "font-mono",
                 )}
-                placeholder={markdown ? "Write your message in markdown…" : "Write your message…"}
+                placeholder={
+                  mode === "markdown" ? "Write your message in markdown…" : "Write your message…"
+                }
               />
             )}
             {attachments.length > 0 && (
@@ -594,7 +694,7 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
             <div className="flex items-center gap-1.5">
               <Button
                 variant="primary"
-                onClick={() => send.mutate()}
+                onClick={attemptSend}
                 disabled={send.isPending || uploading > 0 || !mailboxId || !hasRecipients(to)}
               >
                 {send.isPending ? "Sending…" : "Send"}
@@ -619,25 +719,31 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
                 }}
               />
               <Button
-                variant={markdown ? "outline" : "ghost"}
+                variant={mode === "markdown" ? "outline" : "ghost"}
                 size="sm"
-                onClick={() => {
-                  setMarkdown((v) => {
-                    if (v) setPreview(false);
-                    return !v;
-                  });
-                }}
-                className={cn(markdown && "border-primary text-primary")}
-                aria-pressed={markdown}
+                onClick={toggleMarkdown}
+                className={cn(mode === "markdown" && "border-primary text-primary")}
+                aria-pressed={mode === "markdown"}
                 title="Toggle markdown"
               >
                 MD
               </Button>
-              {markdown && (
+              {mode === "markdown" && (
                 <Button variant="ghost" size="sm" onClick={() => setPreview((v) => !v)}>
                   {preview ? "Edit" : "Preview"}
                 </Button>
               )}
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-muted-foreground">
+                {uploading > 0
+                  ? `Uploading ${uploading}…`
+                  : sendable.length === 0
+                    ? "No sendable mailboxes"
+                    : savedHint
+                      ? "Draft saved"
+                      : null}
+              </span>
               <Button
                 variant="ghost"
                 size="icon"
@@ -648,20 +754,69 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
                 <Trash2 />
               </Button>
             </div>
-            <span className="text-[11px] text-muted-foreground">
-              {uploading > 0
-                ? `Uploading ${uploading}…`
-                : sendable.length === 0
-                  ? "No sendable mailboxes"
-                  : savedHint
-                    ? "Draft saved"
-                    : null}
-            </span>
           </div>
         </Dialog.Popup>
       </Dialog.Portal>
     </Dialog.Root>
   );
+}
+
+// Words that usually imply a file is coming, across the languages most likely
+// to show up in this inbox. Stems are matched whole (letter boundaries), so
+// "attach" won't fire inside an unrelated longer word.
+const ATTACHMENT_WORDS = [
+  // English
+  "attach",
+  "attached",
+  "attachment",
+  "attachments",
+  "attaching",
+  "enclosed",
+  "enclosure",
+  "enclosures",
+  // German
+  "anbei",
+  "anhang",
+  "anhänge",
+  "angehängt",
+  "angehaengt",
+  "beigefügt",
+  "beigefuegt",
+  "beiliegend",
+  // French
+  "ci-joint",
+  "ci-jointe",
+  "pièce jointe",
+  "pièces jointes",
+  "piece jointe",
+  // Spanish
+  "adjunto",
+  "adjunta",
+  "adjuntos",
+  "adjuntas",
+  // Italian
+  "allegato",
+  "allegata",
+  "allegati",
+  "allegate",
+  // Dutch
+  "bijlage",
+  "bijgevoegd",
+  // Portuguese
+  "anexo",
+  "anexado",
+  "anexada",
+  "anexados",
+];
+
+// Letter-boundary match (Unicode-aware, so umlauts/accents bound correctly).
+const ATTACHMENT_MENTION_RE = new RegExp(
+  `(?<!\\p{L})(?:${ATTACHMENT_WORDS.join("|")})(?!\\p{L})`,
+  "iu",
+);
+
+function mentionsAttachment(body: string): boolean {
+  return body.trim().length > 0 && ATTACHMENT_MENTION_RE.test(body);
 }
 
 function formatBytes(n: number): string {

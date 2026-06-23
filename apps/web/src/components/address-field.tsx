@@ -3,7 +3,8 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/cn.ts";
 import type { Contact } from "@/lib/queries.ts";
 
-const FIELD_LABEL = "w-12 shrink-0 pt-1 text-[11px] text-muted-foreground uppercase tracking-wider";
+const FIELD_LABEL =
+  "w-12 shrink-0 pt-1 text-[11px] text-muted-foreground uppercase tracking-wider leading-5";
 
 const MAX_SUGGESTIONS = 8;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -174,7 +175,7 @@ export function AddressField({
             placeholder={items.length === 0 ? placeholder : ""}
             autoComplete="off"
             spellCheck={false}
-            className="min-w-[10ch] flex-1 bg-transparent py-0.5 text-[13px] outline-none placeholder:text-muted-foreground"
+            className="min-w-[10ch] flex-1 bg-transparent py-0.5 text-[13px] leading-5 outline-none placeholder:text-muted-foreground"
           />
         </div>
         {trailing}
