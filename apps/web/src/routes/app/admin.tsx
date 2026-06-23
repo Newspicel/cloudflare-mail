@@ -66,6 +66,12 @@ interface Member {
   perms: number;
 }
 
+interface DirectoryUser {
+  id: string;
+  email: string;
+  name: string;
+}
+
 interface AdminMailbox {
   id: string;
   address: string;
@@ -1794,7 +1800,12 @@ function MembersPanel({ mailboxId }: { mailboxId: string }) {
     queryFn: () => api<{ invites: Invite[] }>(`/api/mailboxes/${mailboxId}/invites`),
   });
 
-  const [email, setEmail] = useState("");
+  const directoryQ = useQuery({
+    queryKey: ["user-directory"],
+    queryFn: () => api<{ users: DirectoryUser[] }>("/api/users/directory"),
+  });
+
+  const [selectedUserId, setSelectedUserId] = useState("");
   const [read, setRead] = useState(true);
   const [write, setWrite] = useState(false);
   const [manage, setManage] = useState(false);
@@ -1804,19 +1815,22 @@ function MembersPanel({ mailboxId }: { mailboxId: string }) {
     qc.invalidateQueries({ queryKey: ["mailbox-invites", mailboxId] });
   };
 
+  const memberIds = new Set((membersQ.data?.members ?? []).map((m) => m.userId));
+  const candidates = (directoryQ.data?.users ?? []).filter((u) => !memberIds.has(u.id));
+
   const addMember = useMutation({
     mutationFn: () =>
-      api<{ ok: boolean; invited?: boolean }>(`/api/mailboxes/${mailboxId}/members`, {
+      api<{ ok: boolean }>(`/api/mailboxes/${mailboxId}/members`, {
         method: "POST",
-        body: JSON.stringify({ mailboxId, email, read, write, manage }),
+        body: JSON.stringify({ mailboxId, userId: selectedUserId, read, write, manage }),
       }),
-    onSuccess: (res) => {
-      setEmail("");
+    onSuccess: () => {
+      setSelectedUserId("");
       setRead(true);
       setWrite(false);
       setManage(false);
       invalidate();
-      toast.success(res.invited ? "Invite sent" : "Member added");
+      toast.success("Member added");
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
@@ -1922,19 +1936,30 @@ function MembersPanel({ mailboxId }: { mailboxId: string }) {
       </ul>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Input
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="user@example.com"
+        <Select
+          value={selectedUserId}
+          onChange={(e) => setSelectedUserId(e.target.value)}
           className="min-w-[200px] flex-1"
-        />
+          disabled={directoryQ.isLoading}
+        >
+          <option value="">
+            {candidates.length === 0 ? "No users available" : "Select a user…"}
+          </option>
+          {candidates.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.name ? `${u.name} (${u.email})` : u.email}
+            </option>
+          ))}
+        </Select>
         <div className="flex items-center gap-2 text-[11px]">
           <PermToggle label="read" checked={read} onChange={() => setRead((v) => !v)} />
           <PermToggle label="write" checked={write} onChange={() => setWrite((v) => !v)} />
           <PermToggle label="manage" checked={manage} onChange={() => setManage((v) => !v)} />
         </div>
-        <PrimaryBtn onClick={() => addMember.mutate()} disabled={!email || addMember.isPending}>
+        <PrimaryBtn
+          onClick={() => addMember.mutate()}
+          disabled={!selectedUserId || addMember.isPending}
+        >
           Add
         </PrimaryBtn>
       </div>

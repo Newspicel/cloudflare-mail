@@ -64,6 +64,18 @@ export function usersRoutes() {
     });
   });
 
+  // Minimal user directory for member selection — any signed-in user, no admin.
+  // Used by the group-mailbox members panel to pick existing accounts.
+  r.get("/directory", requireUser, async (c) => {
+    const db = dbFromCtx(c);
+    const rows = await db
+      .select({ id: user.id, email: user.email, name: user.name })
+      .from(user)
+      .where(eq(user.banned, false))
+      .orderBy(asc(user.email));
+    return c.json({ users: rows });
+  });
+
   // Everything below requires admin.
   r.use("*", requireUser, requireAdmin);
 
