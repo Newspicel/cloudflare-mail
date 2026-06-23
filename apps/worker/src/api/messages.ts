@@ -11,6 +11,7 @@ import { z } from "zod";
 import { getOrCreateAuthSecret } from "../config.ts";
 import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
+import { assertOwnedAttachmentKeys } from "../mail/attachment-keys.ts";
 import { isBlockedHost, MAX_IMAGE_BYTES, proxyImages, verifyProxyUrl } from "../mail/img-proxy.ts";
 import { parseMime } from "../mail/mime.ts";
 import { sendFromMailbox } from "../mail/send.ts";
@@ -33,6 +34,7 @@ export function messagesRoutes() {
     const user = c.get("user")!;
     const body = c.req.valid("json");
     await requirePerm(db, user.id, body.mailboxId, Perm.WRITE);
+    assertOwnedAttachmentKeys(user.id, body.attachments);
     const result = await sendFromMailbox(c.env, db, user.id, body);
     return c.json(result, 201);
   });
