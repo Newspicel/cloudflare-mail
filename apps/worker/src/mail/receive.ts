@@ -27,6 +27,10 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
     msg.setReject("Address invalid");
     return;
   }
+  // Plus/sub-addressing: match the base local part ("hi+tag" -> "hi") while the
+  // full envelope recipient is preserved in deliveredTo. A leading "+" has no
+  // base, so fall back to the full local part.
+  const baseLocal = (localPart.split("+")[0] || localPart).toLowerCase();
 
   const dom = await db.query.domain.findFirst({
     where: eq(domain.name, domainName.toLowerCase()),
@@ -38,7 +42,7 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
   }
 
   let mb = await db.query.mailbox.findFirst({
-    where: and(eq(mailbox.domainId, dom.id), eq(mailbox.localPart, localPart.toLowerCase())),
+    where: and(eq(mailbox.domainId, dom.id), eq(mailbox.localPart, baseLocal)),
     columns: {
       id: true,
       type: true,
@@ -55,7 +59,7 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
     // mailbox and no specific redirect match.
     const red =
       (await db.query.redirect.findFirst({
-        where: and(eq(redirect.domainId, dom.id), eq(redirect.localPart, localPart.toLowerCase())),
+        where: and(eq(redirect.domainId, dom.id), eq(redirect.localPart, baseLocal)),
         columns: { targetMailboxId: true },
       })) ??
       (await db.query.redirect.findFirst({

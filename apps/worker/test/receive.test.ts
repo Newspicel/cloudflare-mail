@@ -126,6 +126,33 @@ describe("handleInbound — bounce-loop protection", () => {
   });
 });
 
+describe("handleInbound — plus/sub-addressing", () => {
+  it("routes hi+tag@ to the hi@ mailbox and stores the full envelope recipient", async () => {
+    const msg = stubInbound({ from: "someone@elsewhere.com", to: "me+newsletter@example.com" });
+    await handleInbound(msg, e);
+    expect(msg.rejected).toBeUndefined();
+
+    const rows = await db.query.message.findMany({ where: eq(message.mailboxId, MAILBOX_ID) });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.deliveredTo).toBe("me+newsletter@example.com");
+  });
+
+  it("matches the base local part case-insensitively", async () => {
+    const msg = stubInbound({ from: "someone@elsewhere.com", to: "ME+Tag@example.com" });
+    await handleInbound(msg, e);
+    expect(msg.rejected).toBeUndefined();
+
+    const rows = await db.query.message.findMany({ where: eq(message.mailboxId, MAILBOX_ID) });
+    expect(rows).toHaveLength(1);
+  });
+
+  it("rejects when the base local part has no mailbox", async () => {
+    const msg = stubInbound({ from: "someone@elsewhere.com", to: "nobody+tag@example.com" });
+    await handleInbound(msg, e);
+    expect(msg.rejected).toBe("Address not found");
+  });
+});
+
 describe("handleInbound — full pipeline", () => {
   const MEMBER_ID = "user-member";
   const SENDER_ADDR = "sender@elsewhere.com";
