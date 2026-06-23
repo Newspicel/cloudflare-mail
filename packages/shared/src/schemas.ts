@@ -130,6 +130,7 @@ export const createDraft = z.object({
   subject: z.string().max(998).default(""),
   body: z.string().max(5_000_000).default(""),
   markdown: z.boolean().default(false),
+  format: z.enum(["text", "markdown", "html"]).default("text"),
   inReplyTo: messageId.optional(),
   references: z.array(messageId).max(100).optional(),
   quote: messageQuoteRef.nullish(),
@@ -144,6 +145,7 @@ export const updateDraft = z.object({
   subject: z.string().max(998).optional(),
   body: z.string().max(5_000_000).optional(),
   markdown: z.boolean().optional(),
+  format: z.enum(["text", "markdown", "html"]).optional(),
   inReplyTo: messageId.optional(),
   references: z.array(messageId).max(100).optional(),
   quote: messageQuoteRef.nullish(),
@@ -302,15 +304,6 @@ export const createTempMailbox = z.object({
     .min(60)
     .max(60 * 60 * 24 * 7)
     .default(3600),
-});
-
-export const createShareToken = z.object({
-  ttlSeconds: z
-    .number()
-    .int()
-    .min(60)
-    .max(60 * 60 * 24 * 30)
-    .default(60 * 60 * 24 * 7),
 });
 
 // ─── Advanced search ────────────────────────────────────────────────────────
