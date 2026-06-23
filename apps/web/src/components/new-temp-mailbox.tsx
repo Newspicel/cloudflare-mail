@@ -1,4 +1,3 @@
-import { MailboxKind } from "@cfmail/shared/permissions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, Timer } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -9,11 +8,9 @@ import { Button } from "./ui/button.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select.tsx";
 
-interface Domain {
+interface TempDomain {
   id: string;
   name: string;
-  kind: "primary" | "sub";
-  allowedKinds: number;
 }
 
 interface CreatedTemp {
@@ -21,6 +18,11 @@ interface CreatedTemp {
   address: string;
   expiresAt: string;
 }
+
+const tempDomainsQueryOptions = {
+  queryKey: ["temp-domains"],
+  queryFn: () => api<{ domains: TempDomain[] }>("/api/temp/domains"),
+};
 
 const TTL_PRESETS: { label: string; seconds: number }[] = [
   { label: "1h", seconds: 3600 },
@@ -32,6 +34,10 @@ const TTL_PRESETS: { label: string; seconds: number }[] = [
 export function NewTempMailbox() {
   const [open, setOpen] = useState(false);
   const [created, setCreated] = useState<CreatedTemp | null>(null);
+  const domainsQ = useQuery(tempDomainsQueryOptions);
+
+  // Hide entirely when the user can't create a temp mailbox on any domain.
+  if ((domainsQ.data?.domains.length ?? 0) === 0) return null;
 
   return (
     <Popover
@@ -65,20 +71,16 @@ export function NewTempMailbox() {
 
 function TempForm({ onCreated }: { onCreated: (t: CreatedTemp) => void }) {
   const qc = useQueryClient();
-  const domainsQ = useQuery({
-    queryKey: ["domains"],
-    queryFn: () => api<{ domains: Domain[] }>("/api/domains"),
-  });
-  const tempDomains = (domainsQ.data?.domains ?? []).filter(
-    (d) => (d.allowedKinds & MailboxKind.TEMP) !== 0,
-  );
+  const domainsQ = useQuery(tempDomainsQueryOptions);
+  const tempDomains = domainsQ.data?.domains ?? [];
+  const firstDomainId = tempDomains[0]?.id;
 
   const [domainId, setDomainId] = useState("");
   const [ttlSeconds, setTtlSeconds] = useState(TTL_PRESETS[0]!.seconds);
 
   useEffect(() => {
-    if (!domainId && tempDomains[0]) setDomainId(tempDomains[0].id);
-  }, [domainId, tempDomains]);
+    if (!domainId && firstDomainId) setDomainId(firstDomainId);
+  }, [domainId, firstDomainId]);
 
   const create = useMutation({
     mutationFn: () =>
