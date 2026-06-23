@@ -9,7 +9,7 @@
 // typed to return these, so a schema change that breaks the shape is a compile
 // error on both sides.
 
-import type { draft, label, message, thread } from "@cfmail/db/schema";
+import type { draft, folder, label, message, thread } from "@cfmail/db/schema";
 
 /** Map Drizzle `Date` columns to the `string` form `c.json()` actually sends. */
 export type Serialized<T> = {
@@ -22,6 +22,12 @@ export type ThreadDto = Serialized<typeof thread.$inferSelect>;
 export type MessageDto = Serialized<typeof message.$inferSelect>;
 export type DraftDto = Serialized<typeof draft.$inferSelect>;
 export type LabelDto = typeof label.$inferSelect; // no date columns
+
+/** A custom folder plus its live thread counts (total + unread). */
+export type FolderDto = Serialized<typeof folder.$inferSelect> & {
+  total: number;
+  unread: number;
+};
 
 // ─── Computed / mapped DTOs ─────────────────────────────────────────────────
 
@@ -114,6 +120,9 @@ export interface DraftDetailDto {
 }
 export interface LabelListDto {
   labels: LabelDto[];
+}
+export interface FolderListDto {
+  folders: FolderDto[];
 }
 export interface MessageLabelsDto {
   labels: Record<string, MessageLabelDto[]>;

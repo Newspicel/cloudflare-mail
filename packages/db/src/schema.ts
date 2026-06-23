@@ -400,6 +400,56 @@ export const messageLabel = sqliteTable(
   (t) => [primaryKey({ columns: [t.messageId, t.labelId] })],
 );
 
+// ─── Custom folders ─────────────────────────────────────────────────────────
+
+// User-level folders, not tied to any mailbox. A thread can be filed into one
+// from any mailbox the user can read; the assignment lives in `thread_folder`.
+export const folder = sqliteTable(
+  "folder",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    color: text("color").notNull().default("#64748b"),
+    // Manual sidebar ordering; ties broken by createdAt.
+    position: integer("position").notNull().default(0),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(now),
+  },
+  (t) => [
+    uniqueIndex("folder_user_name_uq").on(t.userId, t.name),
+    index("folder_user_idx").on(t.userId),
+  ],
+);
+
+// Per-user filing of a thread into a custom folder. Folders are user-scoped but
+// threads live in (possibly shared) mailboxes, so the assignment is keyed by
+// user: one person's filing never affects another's views. A thread sits in at
+// most one folder per user (true "move", single location) — hence the
+// (userId, threadId) primary key. Filed threads are hidden from that user's
+// active mailbox views (inbox/sent/marked).
+export const threadFolder = sqliteTable(
+  "thread_folder",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => thread.id, { onDelete: "cascade" }),
+    folderId: text("folder_id")
+      .notNull()
+      .references(() => folder.id, { onDelete: "cascade" }),
+    filedAt: integer("filed_at", { mode: "timestamp" }).notNull().default(now),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.threadId] }),
+    index("thread_folder_folder_idx").on(t.folderId),
+    index("thread_folder_thread_idx").on(t.threadId),
+  ],
+);
+
 export const mailboxInvite = sqliteTable(
   "mailbox_invite",
   {

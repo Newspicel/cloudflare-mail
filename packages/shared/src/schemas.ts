@@ -166,6 +166,23 @@ export const updateLabel = z.object({
   color: labelColor.optional(),
 });
 
+// ─── Custom folders ─────────────────────────────────────────────────────────
+
+export const createFolder = z.object({
+  name: z.string().min(1).max(64),
+  color: labelColor.optional(),
+});
+
+export const updateFolder = z.object({
+  name: z.string().min(1).max(64).optional(),
+  color: labelColor.optional(),
+  position: z.number().int().min(0).max(100_000).optional(),
+});
+
+export const fileThreads = z.object({
+  threadIds: z.array(z.string().min(1)).min(1).max(200),
+});
+
 export const inviteMember = z.object({
   mailboxId: z.string().min(1),
   email: emailAddress,

@@ -2,6 +2,7 @@ import type {
   ContactDto,
   DraftDto,
   FolderCountsDto,
+  FolderDto,
   LabelDto,
   MailboxSummaryDto,
   MailView,
@@ -25,6 +26,7 @@ export type {
   ContactDto as Contact,
   DraftDto as DraftRow,
   FolderCountsDto as FolderCounts,
+  FolderDto as FolderRow,
   LabelDto as LabelRow,
   MailboxSummaryDto as MailboxSummary,
   MailView,
@@ -174,6 +176,18 @@ export const labelsQuery = (mailboxId: string) =>
     queryFn: () =>
       api<{ labels: LabelDto[] }>(`/api/labels?mailboxId=${encodeURIComponent(mailboxId)}`),
     enabled: Boolean(mailboxId),
+  });
+
+export const foldersQuery = queryOptions({
+  queryKey: keys.folders(),
+  queryFn: () => api<{ folders: FolderDto[] }>("/api/folders"),
+});
+
+export const folderThreadsQuery = (folderId: string) =>
+  queryOptions({
+    queryKey: keys.folderThreads(folderId),
+    queryFn: () => api<{ threads: ThreadDto[] }>(`/api/folders/${folderId}/threads`),
+    enabled: Boolean(folderId),
   });
 
 export const messageLabelsQuery = (messageIds: string[]) =>

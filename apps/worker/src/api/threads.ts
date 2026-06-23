@@ -1,4 +1,4 @@
-import { draft, message, thread } from "@cfmail/db/schema";
+import { draft, message, thread, threadFolder } from "@cfmail/db/schema";
 import { Flag } from "@cfmail/shared/flags";
 import { Perm } from "@cfmail/shared/permissions";
 import type { FolderCountsResponseDto } from "@cfmail/shared/responses";
@@ -39,8 +39,9 @@ export function threadsRoutes() {
     const limit = Math.min(Number(c.req.query("limit") ?? 50), 200);
     const view = c.req.query("view") ?? "inbox";
 
-    // Threads not in the trash/spam buckets — the basis for inbox/sent/marked.
-    const active = and(eq(thread.trashed, false), eq(thread.spam, false));
+    // Threads not in trash/spam and not filed into a custom folder by this user
+    // — the basis for the active inbox/sent/marked views (filed = "moved away").
+    const active = and(eq(thread.trashed, false), eq(thread.spam, false), notFiledBy(user.id));
 
     let filter: SQL | undefined;
     switch (view) {
@@ -95,7 +96,12 @@ export function threadsRoutes() {
       inMailbox = eq(thread.mailboxId, mailboxId);
     }
 
-    const active = and(inMailbox, eq(thread.trashed, false), eq(thread.spam, false));
+    const active = and(
+      inMailbox,
+      eq(thread.trashed, false),
+      eq(thread.spam, false),
+      notFiledBy(user.id),
+    );
     const inSpam = and(inMailbox, eq(thread.spam, true), eq(thread.trashed, false));
     const starred = sql`(${message.flags} & ${Flag.STARRED}) = ${Flag.STARRED}`;
 
@@ -226,4 +232,10 @@ function emptyCounts(): FolderCountsResponseDto["counts"] {
 // the thread) — lets the sent/marked folders filter by message-level state.
 function hasMessage(cond: SQL): SQL {
   return sql`exists (select 1 from ${message} where ${message.threadId} = ${thread.id} and ${cond})`;
+}
+
+// True when the user has NOT filed this thread into a custom folder — filed
+// threads are hidden from the active mailbox views (a true "move").
+function notFiledBy(userId: string): SQL {
+  return sql`not exists (select 1 from ${threadFolder} where ${threadFolder.threadId} = ${thread.id} and ${threadFolder.userId} = ${userId})`;
 }

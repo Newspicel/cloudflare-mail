@@ -5,6 +5,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
+import { setThreadDrag } from "@/lib/dnd.ts";
 import {
   invalidateThreadChange,
   patchThreadsInLists,
@@ -226,6 +227,8 @@ function ThreadRowItem({
 
   return (
     <li
+      draggable
+      onDragStart={(e) => setThreadDrag(e, { threadId: thread.id, mailboxId: thread.mailboxId })}
       className={cn(
         "group relative flex items-stretch border-b",
         active
@@ -256,6 +259,7 @@ function ThreadRowItem({
         to="/app/m/$mailboxId/t/$threadId"
         params={{ mailboxId, threadId: thread.id }}
         search={{ view }}
+        draggable={false}
         className="flex min-w-0 flex-1 flex-col gap-0.5 py-2.5 pr-4 text-[13px]"
       >
         <div className="flex items-center justify-between gap-2">

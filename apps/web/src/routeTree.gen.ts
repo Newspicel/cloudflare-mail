@@ -21,8 +21,11 @@ import { Route as AppSettingsRouteImport } from "./routes/app/settings"
 import { Route as AppSearchRouteImport } from "./routes/app/search"
 import { Route as AppAdminRouteImport } from "./routes/app/admin"
 import { Route as AppMMailboxIdRouteImport } from "./routes/app/m/$mailboxId"
+import { Route as AppFolderFolderIdRouteImport } from "./routes/app/folder/$folderId"
 import { Route as AppMMailboxIdIndexRouteImport } from "./routes/app/m/$mailboxId.index"
+import { Route as AppFolderFolderIdIndexRouteImport } from "./routes/app/folder/$folderId.index"
 import { Route as AppMMailboxIdTThreadIdRouteImport } from "./routes/app/m/$mailboxId.t.$threadId"
+import { Route as AppFolderFolderIdTThreadIdRouteImport } from "./routes/app/folder/$folderId.t.$threadId"
 
 const TwoFactorRoute = TwoFactorRouteImport.update({
   id: "/two-factor",
@@ -84,16 +87,32 @@ const AppMMailboxIdRoute = AppMMailboxIdRouteImport.update({
   path: "/m/$mailboxId",
   getParentRoute: () => AppRouteRoute,
 } as any)
+const AppFolderFolderIdRoute = AppFolderFolderIdRouteImport.update({
+  id: "/folder/$folderId",
+  path: "/folder/$folderId",
+  getParentRoute: () => AppRouteRoute,
+} as any)
 const AppMMailboxIdIndexRoute = AppMMailboxIdIndexRouteImport.update({
   id: "/",
   path: "/",
   getParentRoute: () => AppMMailboxIdRoute,
+} as any)
+const AppFolderFolderIdIndexRoute = AppFolderFolderIdIndexRouteImport.update({
+  id: "/",
+  path: "/",
+  getParentRoute: () => AppFolderFolderIdRoute,
 } as any)
 const AppMMailboxIdTThreadIdRoute = AppMMailboxIdTThreadIdRouteImport.update({
   id: "/t/$threadId",
   path: "/t/$threadId",
   getParentRoute: () => AppMMailboxIdRoute,
 } as any)
+const AppFolderFolderIdTThreadIdRoute =
+  AppFolderFolderIdTThreadIdRouteImport.update({
+    id: "/t/$threadId",
+    path: "/t/$threadId",
+    getParentRoute: () => AppFolderFolderIdRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
@@ -107,8 +126,11 @@ export interface FileRoutesByFullPath {
   "/app/search": typeof AppSearchRoute
   "/app/settings": typeof AppSettingsRoute
   "/app/": typeof AppIndexRoute
+  "/app/folder/$folderId": typeof AppFolderFolderIdRouteWithChildren
   "/app/m/$mailboxId": typeof AppMMailboxIdRouteWithChildren
+  "/app/folder/$folderId/": typeof AppFolderFolderIdIndexRoute
   "/app/m/$mailboxId/": typeof AppMMailboxIdIndexRoute
+  "/app/folder/$folderId/t/$threadId": typeof AppFolderFolderIdTThreadIdRoute
   "/app/m/$mailboxId/t/$threadId": typeof AppMMailboxIdTThreadIdRoute
 }
 export interface FileRoutesByTo {
@@ -122,7 +144,9 @@ export interface FileRoutesByTo {
   "/app/search": typeof AppSearchRoute
   "/app/settings": typeof AppSettingsRoute
   "/app": typeof AppIndexRoute
+  "/app/folder/$folderId": typeof AppFolderFolderIdIndexRoute
   "/app/m/$mailboxId": typeof AppMMailboxIdIndexRoute
+  "/app/folder/$folderId/t/$threadId": typeof AppFolderFolderIdTThreadIdRoute
   "/app/m/$mailboxId/t/$threadId": typeof AppMMailboxIdTThreadIdRoute
 }
 export interface FileRoutesById {
@@ -138,8 +162,11 @@ export interface FileRoutesById {
   "/app/search": typeof AppSearchRoute
   "/app/settings": typeof AppSettingsRoute
   "/app/": typeof AppIndexRoute
+  "/app/folder/$folderId": typeof AppFolderFolderIdRouteWithChildren
   "/app/m/$mailboxId": typeof AppMMailboxIdRouteWithChildren
+  "/app/folder/$folderId/": typeof AppFolderFolderIdIndexRoute
   "/app/m/$mailboxId/": typeof AppMMailboxIdIndexRoute
+  "/app/folder/$folderId/t/$threadId": typeof AppFolderFolderIdTThreadIdRoute
   "/app/m/$mailboxId/t/$threadId": typeof AppMMailboxIdTThreadIdRoute
 }
 export interface FileRouteTypes {
@@ -156,8 +183,11 @@ export interface FileRouteTypes {
     | "/app/search"
     | "/app/settings"
     | "/app/"
+    | "/app/folder/$folderId"
     | "/app/m/$mailboxId"
+    | "/app/folder/$folderId/"
     | "/app/m/$mailboxId/"
+    | "/app/folder/$folderId/t/$threadId"
     | "/app/m/$mailboxId/t/$threadId"
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -171,7 +201,9 @@ export interface FileRouteTypes {
     | "/app/search"
     | "/app/settings"
     | "/app"
+    | "/app/folder/$folderId"
     | "/app/m/$mailboxId"
+    | "/app/folder/$folderId/t/$threadId"
     | "/app/m/$mailboxId/t/$threadId"
   id:
     | "__root__"
@@ -186,8 +218,11 @@ export interface FileRouteTypes {
     | "/app/search"
     | "/app/settings"
     | "/app/"
+    | "/app/folder/$folderId"
     | "/app/m/$mailboxId"
+    | "/app/folder/$folderId/"
     | "/app/m/$mailboxId/"
+    | "/app/folder/$folderId/t/$threadId"
     | "/app/m/$mailboxId/t/$threadId"
   fileRoutesById: FileRoutesById
 }
@@ -287,12 +322,26 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AppMMailboxIdRouteImport
       parentRoute: typeof AppRouteRoute
     }
+    "/app/folder/$folderId": {
+      id: "/app/folder/$folderId"
+      path: "/folder/$folderId"
+      fullPath: "/app/folder/$folderId"
+      preLoaderRoute: typeof AppFolderFolderIdRouteImport
+      parentRoute: typeof AppRouteRoute
+    }
     "/app/m/$mailboxId/": {
       id: "/app/m/$mailboxId/"
       path: "/"
       fullPath: "/app/m/$mailboxId/"
       preLoaderRoute: typeof AppMMailboxIdIndexRouteImport
       parentRoute: typeof AppMMailboxIdRoute
+    }
+    "/app/folder/$folderId/": {
+      id: "/app/folder/$folderId/"
+      path: "/"
+      fullPath: "/app/folder/$folderId/"
+      preLoaderRoute: typeof AppFolderFolderIdIndexRouteImport
+      parentRoute: typeof AppFolderFolderIdRoute
     }
     "/app/m/$mailboxId/t/$threadId": {
       id: "/app/m/$mailboxId/t/$threadId"
@@ -301,8 +350,28 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AppMMailboxIdTThreadIdRouteImport
       parentRoute: typeof AppMMailboxIdRoute
     }
+    "/app/folder/$folderId/t/$threadId": {
+      id: "/app/folder/$folderId/t/$threadId"
+      path: "/t/$threadId"
+      fullPath: "/app/folder/$folderId/t/$threadId"
+      preLoaderRoute: typeof AppFolderFolderIdTThreadIdRouteImport
+      parentRoute: typeof AppFolderFolderIdRoute
+    }
   }
 }
+
+interface AppFolderFolderIdRouteChildren {
+  AppFolderFolderIdIndexRoute: typeof AppFolderFolderIdIndexRoute
+  AppFolderFolderIdTThreadIdRoute: typeof AppFolderFolderIdTThreadIdRoute
+}
+
+const AppFolderFolderIdRouteChildren: AppFolderFolderIdRouteChildren = {
+  AppFolderFolderIdIndexRoute: AppFolderFolderIdIndexRoute,
+  AppFolderFolderIdTThreadIdRoute: AppFolderFolderIdTThreadIdRoute,
+}
+
+const AppFolderFolderIdRouteWithChildren =
+  AppFolderFolderIdRoute._addFileChildren(AppFolderFolderIdRouteChildren)
 
 interface AppMMailboxIdRouteChildren {
   AppMMailboxIdIndexRoute: typeof AppMMailboxIdIndexRoute
@@ -323,6 +392,7 @@ interface AppRouteRouteChildren {
   AppSearchRoute: typeof AppSearchRoute
   AppSettingsRoute: typeof AppSettingsRoute
   AppIndexRoute: typeof AppIndexRoute
+  AppFolderFolderIdRoute: typeof AppFolderFolderIdRouteWithChildren
   AppMMailboxIdRoute: typeof AppMMailboxIdRouteWithChildren
 }
 
@@ -331,6 +401,7 @@ const AppRouteRouteChildren: AppRouteRouteChildren = {
   AppSearchRoute: AppSearchRoute,
   AppSettingsRoute: AppSettingsRoute,
   AppIndexRoute: AppIndexRoute,
+  AppFolderFolderIdRoute: AppFolderFolderIdRouteWithChildren,
   AppMMailboxIdRoute: AppMMailboxIdRouteWithChildren,
 }
 
