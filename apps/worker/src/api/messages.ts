@@ -50,7 +50,9 @@ export function messagesRoutes() {
       columns: { mailboxId: true, threadId: true, flags: true },
     });
     if (!msg) throw new HTTPException(404, { message: "not found" });
-    await requirePerm(db, user.id, msg.mailboxId, Perm.READ);
+    // Trashing hides mail thread-wide, so it needs WRITE (matches thread-level trash);
+    // seen/starred are per-reader state and only need READ.
+    await requirePerm(db, user.id, msg.mailboxId, patch.trash !== undefined ? Perm.WRITE : Perm.READ);
 
     let flags = msg.flags;
     if (patch.seen !== undefined) flags = setFlag(flags, Flag.SEEN, patch.seen);
