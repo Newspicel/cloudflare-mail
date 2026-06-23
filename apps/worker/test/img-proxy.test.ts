@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { b64urlToStr, isBlockedHost, proxyImages, verifyProxyUrl } from "../src/mail/img-proxy.ts";
+import {
+  b64urlToStr,
+  isBlockedHost,
+  proxyRemoteContent,
+  verifyProxyUrl,
+} from "../src/mail/img-proxy.ts";
 
 const SECRET = "test-secret";
 
@@ -10,9 +15,9 @@ function paramsOf(html: string): { u: string; s: string } {
   return { u: q.get("u") ?? "", s: q.get("s") ?? "" };
 }
 
-describe("proxyImages", () => {
+describe("proxyRemoteContent", () => {
   it("rewrites remote img src to a signed same-origin proxy URL", async () => {
-    const out = await proxyImages('<img src="https://tracker.example/pixel.gif">', SECRET);
+    const out = await proxyRemoteContent('<img src="https://tracker.example/pixel.gif">', SECRET);
     expect(out).toContain("/api/messages/proxy-image?u=");
     expect(out).not.toContain("tracker.example");
     const { u, s } = paramsOf(out);
@@ -24,11 +29,11 @@ describe("proxyImages", () => {
 
   it("leaves data: and cid: sources untouched", async () => {
     const html = '<img src="data:image/png;base64,AAAA"><img src="cid:logo@x">';
-    expect(await proxyImages(html, SECRET)).toBe(html);
+    expect(await proxyRemoteContent(html, SECRET)).toBe(html);
   });
 
   it("rewrites every candidate in a srcset", async () => {
-    const out = await proxyImages(
+    const out = await proxyRemoteContent(
       '<img srcset="https://a.example/1x.jpg 1x, https://a.example/2x.jpg 2x">',
       SECRET,
     );
@@ -36,17 +41,54 @@ describe("proxyImages", () => {
     expect(out).toContain("1x");
     expect(out).toContain("2x");
   });
+
+  it("proxies CSS url() in an inline style attribute", async () => {
+    const out = await proxyRemoteContent(
+      `<div style="background-image:url(https://tracker.example/bg.png)"></div>`,
+      SECRET,
+    );
+    expect(out).not.toContain("tracker.example");
+    expect(out).toContain("/api/messages/proxy-image?u=");
+  });
+
+  it("proxies CSS url() inside a <style> block", async () => {
+    const out = await proxyRemoteContent(
+      `<style>.x{background:url("https://tracker.example/p.gif")}</style>`,
+      SECRET,
+    );
+    expect(out).not.toContain("tracker.example");
+    expect(out).toContain("/api/messages/proxy-image?u=");
+  });
+
+  it("strips @import (a remote-stylesheet tracking vector)", async () => {
+    const out = await proxyRemoteContent(
+      `<style>@import url(https://tracker.example/x.css);.y{color:red}</style>`,
+      SECRET,
+    );
+    expect(out).not.toContain("tracker.example");
+    expect(out).not.toContain("@import");
+    expect(out).toContain("color:red");
+  });
+
+  it("proxies the legacy background attribute", async () => {
+    const out = await proxyRemoteContent(
+      `<table background="https://tracker.example/t.gif"></table>`,
+      SECRET,
+    );
+    expect(out).not.toContain("tracker.example");
+    expect(out).toContain("/api/messages/proxy-image?u=");
+  });
 });
 
 describe("verifyProxyUrl", () => {
   it("rejects a tampered signature", async () => {
-    const out = await proxyImages('<img src="https://x.example/a.png">', SECRET);
+    const out = await proxyRemoteContent('<img src="https://x.example/a.png">', SECRET);
     const { u } = paramsOf(out);
     expect(await verifyProxyUrl(SECRET, decodeURIComponent(u), "deadbeef")).toBeNull();
   });
 
   it("rejects a different secret", async () => {
-    const out = await proxyImages('<img src="https://x.example/a.png">', SECRET);
+    const out = await proxyRemoteContent('<img src="https://x.example/a.png">', SECRET);
     const { u, s } = paramsOf(out);
     expect(await verifyProxyUrl("other", decodeURIComponent(u), decodeURIComponent(s))).toBeNull();
   });

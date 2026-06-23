@@ -53,6 +53,8 @@ export function draftsRoutes() {
       userId: user.id,
       inReplyTo: body.inReplyTo ?? null,
       references: body.references ?? null,
+      quoteMessageId: body.quote?.messageId ?? null,
+      quoteKind: body.quote?.kind ?? null,
       toAddrs: body.to,
       ccAddrs: body.cc ?? null,
       bccAddrs: body.bcc ?? null,
@@ -83,6 +85,10 @@ export function draftsRoutes() {
     if (body.markdown !== undefined) patch.markdown = body.markdown;
     if (body.inReplyTo !== undefined) patch.inReplyTo = body.inReplyTo;
     if (body.references !== undefined) patch.references = body.references;
+    if (body.quote !== undefined) {
+      patch.quoteMessageId = body.quote?.messageId ?? null;
+      patch.quoteKind = body.quote?.kind ?? null;
+    }
     if (body.attachments !== undefined) patch.attachments = body.attachments;
 
     await db.update(draft).set(patch).where(eq(draft.id, id));

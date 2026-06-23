@@ -1,7 +1,6 @@
 import { Flag, hasFlag, setFlag } from "@cfmail/shared/flags";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import DOMPurify from "dompurify";
 import {
   ArchiveRestore,
   ArrowLeft,
@@ -9,6 +8,7 @@ import {
   Inbox,
   MailMinus,
   Reply,
+  ReplyAll,
   ShieldAlert,
   Star,
   Trash2,
@@ -27,6 +27,7 @@ import {
 import type { MailView, MessageRow, ThreadRow } from "@/lib/queries.ts";
 import { messageBodyQuery } from "@/lib/queries.ts";
 import { keys } from "@/lib/query-keys.ts";
+import { sanitizeEmailHtml } from "@/lib/sanitize-email.ts";
 import { openCompose } from "./compose-dock.tsx";
 import { LabelChips, LabelsMenu } from "./labels-menu.tsx";
 import { Badge } from "./ui/badge.tsx";
@@ -202,23 +203,6 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
             />
           ))}
         </div>
-
-        {!readOnly && (
-          <div className="flex items-center gap-2 border-t bg-card p-3">
-            <Button
-              variant="secondary"
-              onClick={() => openCompose({ replyToMessage: messages.at(-1) ?? null })}
-            >
-              <Reply /> Reply
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => openCompose({ forwardMessage: messages.at(-1) ?? null })}
-            >
-              <Forward /> Forward
-            </Button>
-          </div>
-        )}
       </div>
     </TooltipProvider>
   );
@@ -284,6 +268,55 @@ function SpamBanner({ msg }: { msg: MessageRow }) {
   );
 }
 
+function addrList(list: { name?: string; address: string }[]): string {
+  return list.map((a) => a.name ?? a.address).join(", ");
+}
+
+// Reply / reply-all / forward, grouped as a single segmented control.
+function MessageActions({ msg }: { msg: MessageRow }) {
+  return (
+    <div className="flex items-center overflow-hidden rounded-lg border bg-background shadow-black/[0.03] shadow-sm">
+      <ActionIcon label="Reply" onClick={() => openCompose({ replyToMessage: msg })}>
+        <Reply />
+      </ActionIcon>
+      <span className="h-5 w-px bg-border" />
+      <ActionIcon
+        label="Reply all"
+        onClick={() => openCompose({ replyToMessage: msg, replyAll: true })}
+      >
+        <ReplyAll />
+      </ActionIcon>
+      <span className="h-5 w-px bg-border" />
+      <ActionIcon label="Forward" onClick={() => openCompose({ forwardMessage: msg })}>
+        <Forward />
+      </ActionIcon>
+    </div>
+  );
+}
+
+function ActionIcon({
+  label,
+  onClick,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <Tooltip label={label}>
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label={label}
+        className="grid size-8 place-items-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground focus-visible:outline-none [&_svg]:size-4"
+      >
+        {children}
+      </button>
+    </Tooltip>
+  );
+}
+
 function MessageCard({
   msg,
   readOnly,
@@ -298,8 +331,7 @@ function MessageCard({
   const body = useQuery(messageBodyQuery(msg.id));
   const bodyHtml = useMemo(() => {
     const html = body.data?.html;
-    if (html) return DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
-    return null;
+    return html ? sanitizeEmailHtml(html) : null;
   }, [body.data?.html]);
   const starred = hasFlag(msg.flags, Flag.STARRED);
   const when = new Date(msg.sentAt ?? msg.receivedAt ?? msg.createdAt);
@@ -312,8 +344,20 @@ function MessageCard({
             {msg.fromName ?? msg.fromAddr}{" "}
             <span className="font-normal text-muted-foreground">&lt;{msg.fromAddr}&gt;</span>
           </div>
-          <div className="text-[11px] text-muted-foreground">
-            to {msg.toAddrs.map((a) => a.name ?? a.address).join(", ")}
+          <div className="space-y-0.5 text-[11px] text-muted-foreground">
+            <div>
+              <span className="text-muted-foreground/70">to</span> {addrList(msg.toAddrs)}
+            </div>
+            {msg.ccAddrs && msg.ccAddrs.length > 0 && (
+              <div>
+                <span className="text-muted-foreground/70">cc</span> {addrList(msg.ccAddrs)}
+              </div>
+            )}
+            {msg.bccAddrs && msg.bccAddrs.length > 0 && (
+              <div>
+                <span className="text-muted-foreground/70">bcc</span> {addrList(msg.bccAddrs)}
+              </div>
+            )}
           </div>
           {showsDeliveredTo(msg) && (
             <Badge variant="default" className="mt-1">
@@ -322,27 +366,30 @@ function MessageCard({
           )}
           <LabelChips messageId={msg.id} className="mt-1.5" />
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          <time className="text-[11px] text-muted-foreground" title={when.toLocaleString()}>
-            {when.toLocaleString([], {
-              month: "short",
-              day: "numeric",
-              hour: "numeric",
-              minute: "2-digit",
-            })}
-          </time>
-          {!readOnly && (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={onToggleStar}
-              className={cn(starred && "text-amber-500 hover:text-amber-500")}
-              aria-label={starred ? "Unstar" : "Star"}
-              aria-pressed={starred}
-            >
-              <Star className={cn(starred && "fill-current")} />
-            </Button>
-          )}
+        <div className="flex shrink-0 flex-col items-end gap-2">
+          <div className="flex items-center gap-1.5">
+            <time className="text-[11px] text-muted-foreground" title={when.toLocaleString()}>
+              {when.toLocaleString([], {
+                month: "short",
+                day: "numeric",
+                hour: "numeric",
+                minute: "2-digit",
+              })}
+            </time>
+            {!readOnly && (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={onToggleStar}
+                className={cn(starred && "text-amber-500 hover:text-amber-500")}
+                aria-label={starred ? "Unstar" : "Star"}
+                aria-pressed={starred}
+              >
+                <Star className={cn(starred && "fill-current")} />
+              </Button>
+            )}
+          </div>
+          {!readOnly && <MessageActions msg={msg} />}
         </div>
       </header>
       <SpamBanner msg={msg} />

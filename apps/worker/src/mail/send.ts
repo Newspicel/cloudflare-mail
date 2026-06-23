@@ -15,6 +15,8 @@ export async function sendFromMailbox(
   // null for key-authed service sends — there is no user to broadcast to.
   userId: string | null,
   input: SendMessageInput,
+  // Reply/forward quote, resolved server-side (see mail/quote.ts).
+  quote?: { html: string; text: string },
 ): Promise<{ messageId: string; threadId: string }> {
   const mb = await db.query.mailbox.findFirst({
     where: eq(mailbox.id, input.mailboxId),
@@ -42,8 +44,18 @@ export async function sendFromMailbox(
     : fromAddr;
   const replyToAddr = mb.replyTo ?? undefined;
   const signature = mb.signature ?? undefined;
-  const text = appendSignatureText(input.text, signature);
-  const html = appendSignatureHtml(input.html, signature);
+  let text = appendSignatureText(input.text, signature);
+  let html = appendSignatureHtml(input.html, signature);
+  if (quote) {
+    // A quote is HTML; synthesize an HTML part from the plain composed body when
+    // the user didn't write markdown, so the quoted original renders downstream.
+    let baseHtml = html;
+    if (!baseHtml) {
+      baseHtml = appendSignatureHtml(textToHtml(input.text ?? ""), signature) ?? "";
+    }
+    text = `${text ?? ""}${quote.text}`;
+    html = `${baseHtml}${quote.html}`;
+  }
 
   const attachmentBytes = await Promise.all(
     (input.attachments ?? []).map(async (att) => {
@@ -187,6 +199,10 @@ function appendSignatureHtml(
   if (!body) return undefined;
   const block = `<div class="signature" style="white-space:pre-wrap;color:#6b7280;margin-top:1em;">-- \n${escapeHtml(signature)}</div>`;
   return `${body}${block}`;
+}
+
+function textToHtml(s: string): string {
+  return escapeHtml(s).replace(/\r?\n/g, "<br>");
 }
 
 function escapeHtml(s: string): string {

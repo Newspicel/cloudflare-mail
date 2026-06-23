@@ -12,8 +12,14 @@ import { getOrCreateAuthSecret } from "../config.ts";
 import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
 import { assertOwnedAttachmentKeys } from "../mail/attachment-keys.ts";
-import { isBlockedHost, MAX_IMAGE_BYTES, proxyImages, verifyProxyUrl } from "../mail/img-proxy.ts";
+import {
+  isBlockedHost,
+  MAX_IMAGE_BYTES,
+  proxyRemoteContent,
+  verifyProxyUrl,
+} from "../mail/img-proxy.ts";
 import { parseMime } from "../mail/mime.ts";
+import { buildQuote } from "../mail/quote.ts";
 import { sendFromMailbox } from "../mail/send.ts";
 import { recomputeThreadUnread } from "../mail/threads.ts";
 import { requireUser } from "../middleware.ts";
@@ -35,7 +41,10 @@ export function messagesRoutes() {
     const body = c.req.valid("json");
     await requirePerm(db, user.id, body.mailboxId, Perm.WRITE);
     assertOwnedAttachmentKeys(user.id, body.attachments);
-    const result = await sendFromMailbox(c.env, db, user.id, body);
+    // Reply/forward quoting is resolved server-side from the original raw `.eml`
+    // so the quoted body keeps its real (un-proxied) image URLs for the recipient.
+    const quote = body.quote ? await buildQuote(c.env, db, user.id, body.quote) : undefined;
+    const result = await sendFromMailbox(c.env, db, user.id, body, quote);
     return c.json(result, 201);
   });
 
@@ -52,7 +61,12 @@ export function messagesRoutes() {
     if (!msg) throw new HTTPException(404, { message: "not found" });
     // Trashing hides mail thread-wide, so it needs WRITE (matches thread-level trash);
     // seen/starred are per-reader state and only need READ.
-    await requirePerm(db, user.id, msg.mailboxId, patch.trash !== undefined ? Perm.WRITE : Perm.READ);
+    await requirePerm(
+      db,
+      user.id,
+      msg.mailboxId,
+      patch.trash !== undefined ? Perm.WRITE : Perm.READ,
+    );
 
     let flags = msg.flags;
     if (patch.seen !== undefined) flags = setFlag(flags, Flag.SEEN, patch.seen);
@@ -83,7 +97,7 @@ export function messagesRoutes() {
     // Remote images are routed through `/proxy-image` so opening a message
     // never leaks the reader's IP to the sender (tracking pixels).
     const html = parsed.html
-      ? await proxyImages(parsed.html, await getOrCreateAuthSecret(db))
+      ? await proxyRemoteContent(parsed.html, await getOrCreateAuthSecret(db))
       : null;
     // The raw `.eml` never changes once stored, so the parsed body is immutable.
     c.header("Cache-Control", "private, max-age=31536000, immutable");

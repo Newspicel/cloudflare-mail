@@ -7,8 +7,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ApiError, api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
-import { contactsQuery, type DraftRow, type MessageRow, mailboxesQuery } from "@/lib/queries.ts";
+import {
+  contactsQuery,
+  type DraftRow,
+  type MessageRow,
+  mailboxesQuery,
+  messageBodyQuery,
+} from "@/lib/queries.ts";
 import { keys } from "@/lib/query-keys.ts";
+import { sanitizeEmailHtml } from "@/lib/sanitize-email.ts";
 import {
   AddressField,
   collectRecipients,
@@ -34,6 +41,8 @@ interface UploadedAttachment {
 interface ComposeState {
   open: boolean;
   replyToMessage: MessageRow | null;
+  // Reply-all: also carry over the original To/Cc recipients (minus ourselves).
+  replyAll?: boolean;
   forwardMessage: MessageRow | null;
   initialTo?: string;
   // When set, the composer reopens an existing server-persisted draft.
@@ -57,6 +66,7 @@ export function openCompose(partial: Partial<ComposeState> = {}): void {
   state = {
     open: true,
     replyToMessage: null,
+    replyAll: false,
     forwardMessage: null,
     initialTo: undefined,
     draft: null,
@@ -98,38 +108,84 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
   const contacts = contactsData?.contacts ?? [];
   const sendable = (mailboxes?.mailboxes ?? []).filter((m) => (m.perms & 2) === 2);
   const d = s.draft;
+  const rep = s.replyToMessage;
   const fwd = s.forwardMessage;
+  // The original message to quote, as a stable {messageId, kind} ref. Works for
+  // a live reply/forward and for a reopened draft that persisted its quote.
+  const quoteRef = useMemo<{ messageId: string; kind: "reply" | "forward" } | null>(() => {
+    if (rep) return { messageId: rep.id, kind: "reply" };
+    if (fwd) return { messageId: fwd.id, kind: "forward" };
+    if (d?.quoteMessageId && d.quoteKind) return { messageId: d.quoteMessageId, kind: d.quoteKind };
+    return null;
+  }, [rep, fwd, d]);
+
+  // Addresses that are "us" — excluded from reply-all recipients so we don't
+  // reply to ourselves. The reply mailbox's own address plus the envelope
+  // recipient the mail was delivered to.
+  const selfAddrs = useMemo(() => {
+    const set = new Set<string>();
+    const mbAddr = (mailboxes?.mailboxes ?? [])
+      .find((m) => m.id === rep?.mailboxId)
+      ?.address?.toLowerCase();
+    if (mbAddr) set.add(mbAddr);
+    if (rep?.deliveredTo) set.add(rep.deliveredTo.toLowerCase());
+    return set;
+  }, [mailboxes, rep]);
 
   const [mailboxId, setMailboxId] = useState(
-    d?.mailboxId ?? s.replyToMessage?.mailboxId ?? fwd?.mailboxId ?? sendable[0]?.id ?? "",
+    d?.mailboxId ?? rep?.mailboxId ?? fwd?.mailboxId ?? sendable[0]?.id ?? "",
   );
   const [to, setTo] = useState<RecipientsValue>(() => {
     if (d) return { items: d.toAddrs ?? [], input: "" };
-    if (s.replyToMessage)
-      return {
-        items: [
-          { address: s.replyToMessage.fromAddr, name: s.replyToMessage.fromName ?? undefined },
+    if (rep) {
+      const items = uniqueRecipients(
+        [
+          { address: rep.fromAddr, name: rep.fromName ?? undefined },
+          ...(s.replyAll ? (rep.toAddrs ?? []) : []),
         ],
-        input: "",
-      };
+        selfAddrs,
+      );
+      return { items, input: "" };
+    }
     if (s.initialTo) return { items: [{ address: s.initialTo }], input: "" };
     return { items: [], input: "" };
   });
-  const [cc, setCc] = useState<RecipientsValue>(() => ({ items: d?.ccAddrs ?? [], input: "" }));
+  const [cc, setCc] = useState<RecipientsValue>(() => {
+    if (d) return { items: d.ccAddrs ?? [], input: "" };
+    if (rep && s.replyAll) {
+      const exclude = new Set(selfAddrs);
+      for (const a of to.items) exclude.add(a.address.toLowerCase());
+      return { items: uniqueRecipients(rep.ccAddrs ?? [], exclude), input: "" };
+    }
+    return { items: [], input: "" };
+  });
   const [bcc, setBcc] = useState<RecipientsValue>(() => ({ items: d?.bccAddrs ?? [], input: "" }));
   const [showCc, setShowCc] = useState(
-    Boolean((d?.ccAddrs?.length ?? 0) || (d?.bccAddrs?.length ?? 0)),
+    Boolean((d?.ccAddrs?.length ?? 0) || (d?.bccAddrs?.length ?? 0) || cc.items.length),
   );
+  const [showQuote, setShowQuote] = useState(false);
   const [subject, setSubject] = useState(
     d
       ? d.subject
-      : s.replyToMessage
-        ? prefixSubject(s.replyToMessage.subject, "Re")
+      : rep
+        ? prefixSubject(rep.subject, "Re")
         : fwd
           ? prefixSubject(fwd.subject, "Fwd")
           : "",
   );
-  const [text, setText] = useState(d ? d.body : fwd ? quoteForward(fwd) : "");
+  const [text, setText] = useState(d ? d.body : "");
+
+  // The original body, fetched for the quoted-message preview. The server
+  // re-quotes from the raw `.eml` at send time (mail/quote.ts); this is only so
+  // the composer can show what's being included.
+  const origBody = useQuery({
+    ...messageBodyQuery(quoteRef?.messageId ?? ""),
+    enabled: Boolean(quoteRef),
+  });
+  const quotedHtml = useMemo(
+    () => (origBody.data?.html ? sanitizeEmailHtml(origBody.data.html) : null),
+    [origBody.data?.html],
+  );
   const [markdown, setMarkdown] = useState(d?.markdown ?? false);
   const [preview, setPreview] = useState(false);
   const [attachments, setAttachments] = useState<UploadedAttachment[]>(d?.attachments ?? []);
@@ -138,9 +194,14 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
   const [expanded, setExpanded] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Threading context, carried through from a reopened reply/forward draft.
-  const inReplyTo = d?.inReplyTo ?? undefined;
-  const references = d?.references ?? undefined;
+  // Threading context: a reopened draft carries it; a fresh reply derives it
+  // from the message being answered.
+  const inReplyTo = d?.inReplyTo ?? rep?.messageIdHdr ?? undefined;
+  const references =
+    d?.references ??
+    (rep
+      ? [...(rep.references ?? []), rep.messageIdHdr].filter((x): x is string => Boolean(x))
+      : undefined);
 
   // ── Server-persisted drafts ────────────────────────────────────────────
   const draftIdRef = useRef<string | null>(d?.id ?? null);
@@ -180,7 +241,7 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
         if (data.isEmpty) {
           await deleteDraft();
         } else {
-          const payload = { ...data.snap, inReplyTo, references };
+          const payload = { ...data.snap, inReplyTo, references, quote: quoteRef };
           if (draftIdRef.current) {
             await api(`/api/drafts/${draftIdRef.current}`, {
               method: "PATCH",
@@ -205,7 +266,7 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
         if (q) void flush(q);
       }
     },
-    [mailboxId, inReplyTo, references, deleteDraft, invalidateDrafts],
+    [mailboxId, inReplyTo, references, quoteRef, deleteDraft, invalidateDrafts],
   );
 
   // Debounced autosave. Skips while the form is untouched (so merely opening a
@@ -258,6 +319,9 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
           subject,
           text,
           html,
+          inReplyTo,
+          references,
+          quote: quoteRef ?? undefined,
           attachments: attachments.length
             ? attachments.map((a) => ({
                 r2Key: a.r2Key,
@@ -350,7 +414,17 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
         >
           <div className="flex items-center justify-between border-b bg-muted/60 px-4 py-2.5">
             <Dialog.Title className="font-semibold text-[13px] text-foreground tracking-tight">
-              {s.replyToMessage ? "Reply" : s.forwardMessage ? "Forward" : "New message"}
+              {rep
+                ? s.replyAll
+                  ? "Reply all"
+                  : "Reply"
+                : fwd
+                  ? "Forward"
+                  : quoteRef?.kind === "reply"
+                    ? "Reply"
+                    : quoteRef?.kind === "forward"
+                      ? "Forward"
+                      : "New message"}
             </Dialog.Title>
             <div className="flex items-center gap-0.5">
               <button
@@ -483,6 +557,36 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
                 ))}
               </ul>
             )}
+            {quoteRef && (
+              <div className="mt-2 border-t pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowQuote((v) => !v)}
+                  className="rounded px-1.5 py-0.5 font-medium text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  {showQuote ? "Hide" : "Show"} quoted message
+                </button>
+                <p className="mt-0.5 px-1.5 text-[11px] text-muted-foreground/70">
+                  The original message is included below your{" "}
+                  {quoteRef.kind === "forward" ? "forward" : "reply"}.
+                </p>
+                {showQuote && (
+                  <div className="mt-2 max-h-64 overflow-y-auto rounded-md border bg-muted/30 px-3 py-2">
+                    {quotedHtml ? (
+                      <div
+                        className="prose prose-sm max-w-none dark:prose-invert [&_*]:max-w-full"
+                        // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized via sanitizeEmailHtml
+                        dangerouslySetInnerHTML={{ __html: quotedHtml }}
+                      />
+                    ) : (
+                      <pre className="whitespace-pre-wrap font-sans text-[12px] text-muted-foreground">
+                        {origBody.data?.text ?? rep?.snippet ?? fwd?.snippet ?? ""}
+                      </pre>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="flex items-center justify-between gap-3 border-t bg-muted/40 px-3 py-2">
@@ -571,18 +675,18 @@ function prefixSubject(s: string, prefix: "Re" | "Fwd"): string {
   return `${prefix}: ${s}`;
 }
 
-function quoteForward(msg: MessageRow): string {
-  const when = new Date(msg.sentAt ?? msg.receivedAt ?? msg.createdAt).toLocaleString();
-  const to = msg.toAddrs.map((a) => a.address).join(", ");
-  return [
-    "",
-    "",
-    "---------- Forwarded message ----------",
-    `From: ${msg.fromName ?? msg.fromAddr} <${msg.fromAddr}>`,
-    `Date: ${when}`,
-    `Subject: ${msg.subject}`,
-    `To: ${to}`,
-    "",
-    msg.snippet,
-  ].join("\n");
+// Dedupes a recipient list (case-insensitive), dropping any address in `exclude`.
+function uniqueRecipients(
+  items: { name?: string; address: string }[],
+  exclude: Set<string>,
+): { name?: string; address: string }[] {
+  const out: { name?: string; address: string }[] = [];
+  const seen = new Set(exclude);
+  for (const a of items) {
+    const key = a.address.trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push({ address: a.address, name: a.name });
+  }
+  return out;
 }

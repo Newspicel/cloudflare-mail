@@ -94,11 +94,45 @@ async function rewriteSrcset(secret: string, srcset: string): Promise<string> {
   return parts.filter(Boolean).join(", ");
 }
 
+// Matches `url( … )` in CSS — both `url(http://x)` and `url("http://x")`.
+const CSS_URL_RE = /url\(\s*(['"]?)([^'")]+)\1\s*\)/gi;
+// `@import` pulls in a remote stylesheet — a tracking vector with no legit use
+// in a sanitized mail body. Strip the whole rule rather than try to proxy it.
+const CSS_IMPORT_RE = /@import[^;]+;/gi;
+
 /**
- * Rewrite remote `<img>` sources in a parsed HTML body to signed proxy URLs.
+ * Rewrite remote URLs inside a CSS string (a `style` attribute or a `<style>`
+ * block) so background images and the like load through the proxy. Drops
+ * `@import` outright. Relative/`data:` URLs are left untouched.
+ */
+async function rewriteCss(secret: string, css: string): Promise<string> {
+  const cleaned = css.replace(CSS_IMPORT_RE, "");
+  const urls = new Set<string>();
+  for (const m of cleaned.matchAll(CSS_URL_RE)) if (m[2]) urls.add(m[2]);
+  if (urls.size === 0) return cleaned;
+  const map = new Map<string, string>();
+  await Promise.all(
+    [...urls].map(async (u) => {
+      const proxied = await toProxyUrl(secret, u.trim());
+      if (proxied) map.set(u, proxied);
+    }),
+  );
+  return cleaned.replace(CSS_URL_RE, (full, _q, u) => {
+    const proxied = map.get(u);
+    return proxied ? `url("${proxied}")` : full;
+  });
+}
+
+/**
+ * Route every remote-content vector in a parsed HTML body through the signed
+ * proxy: `<img>` `src`/`srcset`, the legacy `background` attribute, and CSS
+ * `url(…)` in both inline `style` attributes and `<style>` blocks. Combined
+ * with the client-side sanitizer's tag/attr allowlist, this leaves the proxy
+ * as the *only* way an email can fetch a remote resource — no tracking pixels.
  * Uses the native Workers HTMLRewriter so we never load the markup into a DOM.
  */
-export async function proxyImages(html: string, secret: string): Promise<string> {
+export async function proxyRemoteContent(html: string, secret: string): Promise<string> {
+  let styleBuf = "";
   const res = new HTMLRewriter()
     .on("img", {
       async element(el) {
@@ -109,6 +143,30 @@ export async function proxyImages(html: string, secret: string): Promise<string>
         }
         const srcset = el.getAttribute("srcset");
         if (srcset) el.setAttribute("srcset", await rewriteSrcset(secret, srcset));
+      },
+    })
+    .on("*", {
+      async element(el) {
+        const style = el.getAttribute("style");
+        if (style?.includes("url(")) el.setAttribute("style", await rewriteCss(secret, style));
+        const bg = el.getAttribute("background");
+        if (bg) {
+          const proxied = await toProxyUrl(secret, bg);
+          if (proxied) el.setAttribute("background", proxied);
+        }
+      },
+    })
+    .on("style", {
+      // Text arrives in chunks; buffer the whole node, then rewrite once.
+      async text(chunk) {
+        styleBuf += chunk.text;
+        if (chunk.lastInTextNode) {
+          const rewritten = await rewriteCss(secret, styleBuf);
+          styleBuf = "";
+          chunk.replace(rewritten, { html: true });
+        } else {
+          chunk.remove();
+        }
       },
     })
     .transform(new Response(html));
