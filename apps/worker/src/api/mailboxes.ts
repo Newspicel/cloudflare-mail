@@ -4,10 +4,12 @@ import {
   mailboxInvite,
   mailboxMember,
   mailboxSpamUsage,
+  message,
   thread,
   threadFolder,
   user,
 } from "@cfmail/db/schema";
+import { Flag } from "@cfmail/shared/flags";
 import { grant, Perm } from "@cfmail/shared/permissions";
 import type {
   MailboxInvitesDto,
@@ -23,6 +25,8 @@ import { HTTPException } from "hono/http-exception";
 import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
 import { collectMailboxBlobKeys, deleteBlobs } from "../mail/blobs.ts";
+import { ingestRaw, MAX_EMAIL_BYTES } from "../mail/ingest.ts";
+import { parseMime } from "../mail/mime.ts";
 import { authorizeMailboxCreate } from "../mailbox-access.ts";
 import { requireUser } from "../middleware.ts";
 import { requirePerm } from "../permissions.ts";
@@ -223,6 +227,67 @@ export function mailboxesRoutes() {
 
     await db.update(mailbox).set(patch).where(eq(mailbox.id, id));
     return c.json({ ok: true });
+  });
+
+  // Import a single exported message (raw .eml bytes). The browser extracts
+  // .eml/.mbox/.zip client-side and POSTs one message per request, which keeps
+  // each call within Worker CPU/memory/body limits regardless of archive size.
+  r.post("/:id/import", async (c) => {
+    const db = dbFromCtx(c);
+    const u = c.get("user")!;
+    const id = c.req.param("id");
+    await requirePerm(db, u.id, id, Perm.WRITE);
+
+    const mb = await db.query.mailbox.findFirst({
+      where: eq(mailbox.id, id),
+      columns: { id: true, localPart: true, domainId: true, type: true },
+    });
+    if (!mb) throw new HTTPException(404, { message: "not found" });
+    if (mb.type === "service") {
+      throw new HTTPException(400, { message: "cannot import into a service mailbox" });
+    }
+
+    const raw = await c.req.raw.arrayBuffer();
+    if (!raw.byteLength) throw new HTTPException(400, { message: "empty" });
+    if (raw.byteLength > MAX_EMAIL_BYTES) throw new HTTPException(413, { message: "too large" });
+
+    const parsed = await parseMime(raw);
+
+    // Dedup by Message-ID within this mailbox so re-importing is idempotent.
+    if (parsed.messageId) {
+      const dup = await db.query.message.findFirst({
+        where: and(eq(message.mailboxId, id), eq(message.messageIdHdr, parsed.messageId)),
+        columns: { id: true },
+      });
+      if (dup) return c.json({ duplicate: true });
+    }
+
+    const dom = await db.query.domain.findFirst({
+      where: eq(domain.id, mb.domainId),
+      columns: { name: true },
+    });
+    const ownAddr = dom ? `${mb.localPart}@${dom.name}`.toLowerCase() : "";
+    const fromAddr = (parsed.from?.address ?? "").trim().toLowerCase();
+    // Mail this mailbox sent is filed as outbound; everything else is inbound.
+    const direction = fromAddr && fromAddr === ownAddr ? "out" : "in";
+
+    const parsedDate = parsed.date ? new Date(parsed.date) : null;
+    const when = parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate : new Date();
+
+    const result = await ingestRaw(c.env, db, {
+      mailboxId: id,
+      raw,
+      parsed,
+      direction,
+      deliveredTo: direction === "in" ? ownAddr || null : null,
+      // Imported historical mail is marked read so it doesn't inflate badges.
+      flags: direction === "out" ? Flag.SENT | Flag.SEEN : Flag.SEEN,
+      receivedAt: direction === "in" ? when : null,
+      sentAt: direction === "out" ? when : null,
+      spam: null,
+    });
+
+    return c.json({ messageId: result.messageId, threadId: result.threadId, duplicate: false });
   });
 
   r.delete("/:id", async (c) => {

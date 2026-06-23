@@ -1,31 +1,12 @@
 import { makeDB } from "@cfmail/db";
-import {
-  attachment,
-  domain,
-  mailbox,
-  mailboxMember,
-  message,
-  redirect,
-  thread,
-} from "@cfmail/db/schema";
-import { Flag } from "@cfmail/shared/flags";
+import { domain, mailbox, mailboxMember, redirect } from "@cfmail/db/schema";
 import { and, eq } from "drizzle-orm";
 import type { Env } from "../env.ts";
 import { broadcastToUsers } from "../hub.ts";
-import {
-  addrsToText,
-  bodyForIndex,
-  extractUnsubscribe,
-  parseMime,
-  snippet,
-  streamToArrayBuffer,
-} from "./mime.ts";
+import { ingestRaw, isAuthenticated, MAX_EMAIL_BYTES } from "./ingest.ts";
+import { parseMime, streamToArrayBuffer } from "./mime.ts";
 import { notifyMailbox } from "./push.ts";
-import type { AuthResult } from "./spam.ts";
 import { evaluateSpam, type SpamEvaluation } from "./spam.ts";
-import { bumpThread, resolveThreadId } from "./threads.ts";
-
-const MAX_EMAIL_BYTES = 25 * 1024 * 1024;
 
 export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Promise<void> {
   const db = makeDB(env.DB);
@@ -109,13 +90,6 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
   }
 
   const raw = await streamToArrayBuffer(msg.raw, MAX_EMAIL_BYTES);
-  const size = raw.byteLength;
-
-  const rawKey = `raw/${mb.id}/${crypto.randomUUID()}.eml`;
-  await env.BLOBS.put(rawKey, raw, {
-    httpMetadata: { contentType: "message/rfc822" },
-  });
-
   const parsed = await parseMime(raw);
 
   let spam: SpamEvaluation | null = null;
@@ -129,100 +103,17 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
     });
   }
 
-  const messageId = crypto.randomUUID();
-  const toAddrs = (parsed.to ?? []).map((a) => normalizeAddr(a));
-  const ccAddrs = (parsed.cc ?? []).map((a) => normalizeAddr(a));
-  const fromAddr = parsed.from?.address ?? msg.from;
-  const fromName = parsed.from?.name ?? undefined;
-
-  const fromParticipant: { name?: string; address: string } = { address: fromAddr };
-  if (fromName) fromParticipant.name = fromName;
-  const participants = [fromParticipant, ...toAddrs, ...ccAddrs].filter((p) => p.address);
-
-  const { threadId, joinedByHeader } = await resolveThreadId(db, {
+  const { messageId, threadId } = await ingestRaw(env, db, {
     mailboxId: mb.id,
-    subject: parsed.subject ?? "",
-    inReplyTo: parsed.inReplyTo ?? null,
-    references: parsed.references ? parsed.references.split(/\s+/).filter(Boolean) : null,
-    participants,
-    fromAddr,
-  });
-
-  // A brand-new thread is auto-filed under Spam — never yank an existing
-  // legitimate conversation into the spam folder over a single message. The one
-  // exception is a header-based join of unauthenticated mail: those splices are
-  // attacker-influenced, so we don't let them launder spam into a real thread.
-  const existingThread = await db.query.thread.findFirst({
-    where: eq(thread.id, threadId),
-    columns: { msgCount: true },
-  });
-  const isNewThread = (existingThread?.msgCount ?? 0) === 0;
-  const fileSpam =
-    !!spam?.folderSpam && (isNewThread || (joinedByHeader && !isAuthenticated(spam.auth)));
-
-  const receivedAt = new Date();
-  const bodyIndex = bodyForIndex(parsed.text, parsed.html);
-  const unsub = extractUnsubscribe(parsed);
-
-  await db.insert(message).values({
-    id: messageId,
-    mailboxId: mb.id,
-    threadId,
+    raw,
+    parsed,
     direction: "in",
-    messageIdHdr: parsed.messageId ?? null,
-    inReplyTo: parsed.inReplyTo ?? null,
-    references: parsed.references ? parsed.references.split(/\s+/).filter(Boolean) : null,
-    fromName: fromName ?? null,
-    fromAddr,
     deliveredTo: msg.to,
-    toAddrs,
-    ccAddrs: ccAddrs.length ? ccAddrs : null,
-    bccAddrs: null,
-    subject: parsed.subject ?? "",
-    snippet: snippet(bodyIndex),
-    bodyText: bodyIndex,
-    toText: addrsToText([...toAddrs, ...ccAddrs]),
     flags: 0,
-    receivedAt,
+    receivedAt: new Date(),
     sentAt: null,
-    rawR2Key: rawKey,
-    sizeBytes: size,
-    spamVerdict: spam?.verdict ?? null,
-    spamScore: spam?.score ?? null,
-    spamReasons: spam?.reasons.length ? spam.reasons : null,
-    spamAuth: spam ? spam.auth : null,
-    listUnsubscribe: unsub.listUnsubscribe,
-    listUnsubscribePost: unsub.listUnsubscribePost,
+    spam,
   });
-
-  if (fileSpam) {
-    await db.update(thread).set({ spam: true }).where(eq(thread.id, threadId));
-  }
-
-  await Promise.all(
-    (parsed.attachments ?? []).map(async (att, idx) => {
-      const attKey = `att/${messageId}/${idx}-${sanitizeFilename(att.filename ?? `file-${idx}`)}`;
-      const bytes =
-        typeof att.content === "string"
-          ? new TextEncoder().encode(att.content)
-          : new Uint8Array(att.content);
-      await env.BLOBS.put(attKey, bytes, {
-        httpMetadata: { contentType: att.mimeType ?? "application/octet-stream" },
-      });
-      await db.insert(attachment).values({
-        id: crypto.randomUUID(),
-        messageId,
-        filename: att.filename ?? `file-${idx}`,
-        contentType: att.mimeType ?? "application/octet-stream",
-        sizeBytes: bytes.byteLength,
-        r2Key: attKey,
-        inline: att.disposition === "inline",
-        contentId: att.contentId ?? null,
-      });
-    }),
-  );
-
-  await bumpThread(db, threadId, receivedAt, participants, +1);
 
   const memberIds = await db
     .select({ userId: mailboxMember.userId })
@@ -241,6 +132,8 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
   if (spam?.verdict !== "spam") {
     // Surface the authentication result so a spoofed From isn't rendered as a
     // trusted sender in the notification.
+    const fromAddr = parsed.from?.address ?? msg.from;
+    const fromName = parsed.from?.name;
     const sender = fromName ? `${fromName} <${fromAddr}>` : fromAddr;
     const unverified = spam ? !isAuthenticated(spam.auth) : false;
     await notifyMailbox(db, {
@@ -251,30 +144,10 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
       url: `/app/m/${mb.id}/t/${threadId}`,
     });
   }
-
-  // Mark as unseen by default (the Flag.SEEN bit is 0 so nothing to do).
-  void Flag;
-}
-
-// The sender is authenticated when DMARC passes, or both SPF and DKIM pass.
-// Unauthenticated mail is treated as potentially forged for spam-filing and
-// notification purposes.
-function isAuthenticated(auth: AuthResult): boolean {
-  return auth.dmarc === "pass" || (auth.spf === "pass" && auth.dkim === "pass");
-}
-
-function normalizeAddr(a: { name?: string; address?: string }): { name?: string; address: string } {
-  const out: { name?: string; address: string } = { address: a.address ?? "" };
-  if (a.name) out.name = a.name;
-  return out;
 }
 
 function splitAddr(addr: string): [string | null, string | null] {
   const at = addr.lastIndexOf("@");
   if (at <= 0) return [null, null];
   return [addr.slice(0, at), addr.slice(at + 1)];
-}
-
-function sanitizeFilename(name: string): string {
-  return name.replace(/[^a-z0-9._-]+/gi, "_").slice(0, 128);
 }
