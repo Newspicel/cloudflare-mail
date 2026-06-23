@@ -137,7 +137,9 @@ function SearchPage() {
     return () => clearTimeout(handle);
   }, [form, navigate]);
 
-  const filters: SearchFilterInput = { ...clean({ ...form }), limit };
+  // Query off the debounced URL `search` (not the live `form`) so requests fire
+  // after the 300ms settle, not on every keystroke.
+  const filters: SearchFilterInput = { ...search, limit };
   const query = useQuery(searchQuery(filters));
   const results = query.data?.results ?? [];
 
