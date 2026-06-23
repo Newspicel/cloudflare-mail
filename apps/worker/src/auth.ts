@@ -1,5 +1,5 @@
 import { type DB, makeDB, schema } from "@cfmail/db";
-import { betterAuth } from "better-auth";
+import { betterAuth } from "better-auth/minimal";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin } from "better-auth/plugins/admin";
 import { twoFactor } from "better-auth/plugins/two-factor";
@@ -73,6 +73,9 @@ export async function createAuth({ env, db, baseURL }: CreateAuthOpts) {
     session: {
       expiresIn: 60 * 60 * 24 * 30,
       updateAge: 60 * 60 * 24,
+      // Serve the session from a signed cookie to skip the per-request D1
+      // read. Short TTL so admin bans / role changes still take effect fast.
+      cookieCache: { enabled: true, maxAge: 60 },
     },
     plugins: [
       admin({
