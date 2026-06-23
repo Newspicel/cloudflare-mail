@@ -1,0 +1,206 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
+import { Folder, FolderPlus, Trash2 } from "lucide-react";
+import { type DragEvent, useState } from "react";
+import { toast } from "sonner";
+import { api } from "@/lib/api.ts";
+import { cn } from "@/lib/cn.ts";
+import { isThreadDrag, readThreadDrag } from "@/lib/dnd.ts";
+import { type FolderRow, foldersQuery } from "@/lib/queries.ts";
+import { keys } from "@/lib/query-keys.ts";
+import { useFileThread } from "@/lib/use-folder-mutations.ts";
+import { useConfirmHelpers } from "./ui/confirm.tsx";
+import { Input } from "./ui/input.tsx";
+
+export function FoldersNav({ onClose }: { onClose?: () => void }) {
+  const { data } = useQuery(foldersQuery);
+  const folders = data?.folders ?? [];
+  const qc = useQueryClient();
+  const nav = useNavigate();
+  const { confirmDelete } = useConfirmHelpers();
+  const params = useParams({ strict: false });
+  const activeId = (params as { folderId?: string }).folderId;
+
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState("");
+
+  const file = useFileThread();
+
+  const create = useMutation({
+    mutationFn: () =>
+      api<{ id: string }>("/api/folders", {
+        method: "POST",
+        body: JSON.stringify({ name: name.trim() }),
+      }),
+    onSuccess: () => {
+      setCreating(false);
+      setName("");
+      qc.invalidateQueries({ queryKey: keys.folders() });
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed to create"),
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: string) => api(`/api/folders/${id}`, { method: "DELETE" }),
+    onSuccess: (_res, id) => {
+      qc.invalidateQueries({ queryKey: keys.folders() });
+      if (activeId === id) nav({ to: "/app" });
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed to delete"),
+  });
+
+  async function onDelete(f: FolderRow) {
+    const ok = await confirmDelete(
+      `folder "${f.name}"`,
+      "The folder is removed; its conversations return to their mailboxes.",
+    );
+    if (ok) remove.mutate(f.id);
+  }
+
+  function onDrop(e: DragEvent, folderId: string) {
+    e.preventDefault();
+    const drag = readThreadDrag(e);
+    if (!drag || drag.fromFolderId === folderId) return;
+    const folderName = folders.find((f) => f.id === folderId)?.name ?? "folder";
+    file.mutate(
+      {
+        folderId,
+        threadId: drag.threadId,
+        mailboxId: drag.mailboxId,
+        fromFolderId: drag.fromFolderId,
+      },
+      { onSuccess: () => toast.success(`Moved to ${folderName}`) },
+    );
+  }
+
+  return (
+    <section>
+      <h3 className="mb-1 flex items-center justify-between gap-1.5 px-2 font-semibold text-[10px] text-muted-foreground uppercase tracking-wider">
+        <span className="flex items-center gap-1.5">
+          <Folder className="h-3 w-3" /> Folders
+        </span>
+        <button
+          type="button"
+          onClick={() => setCreating((v) => !v)}
+          aria-label="New folder"
+          title="New folder"
+          className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
+        >
+          <FolderPlus className="h-3.5 w-3.5" />
+        </button>
+      </h3>
+
+      {creating && (
+        <form
+          className="mb-1 px-1"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (name.trim()) create.mutate();
+          }}
+        >
+          <Input
+            ref={(el) => el?.focus()}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setCreating(false);
+            }}
+            onBlur={() => !name.trim() && setCreating(false)}
+            placeholder="Folder name"
+            maxLength={64}
+            className="h-7 text-[13px]"
+          />
+        </form>
+      )}
+
+      <ul className="flex flex-col gap-0.5">
+        {folders.map((f) => (
+          <li key={f.id} className="group/row relative">
+            <FolderDropTarget onDrop={(e) => onDrop(e, f.id)}>
+              {(over) => (
+                <Link
+                  to="/app/folder/$folderId"
+                  params={{ folderId: f.id }}
+                  onClick={() => onClose?.()}
+                  className={cn(
+                    "flex items-center justify-between rounded-md px-2 py-1.5 text-[13px] transition-colors",
+                    over
+                      ? "bg-primary/15 ring-1 ring-primary/40"
+                      : activeId === f.id
+                        ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                        : "text-sidebar-foreground hover:bg-sidebar-accent/60",
+                  )}
+                >
+                  <span
+                    className={cn("flex min-w-0 items-center gap-2", f.unread > 0 && "font-medium")}
+                  >
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-sm"
+                      style={{ backgroundColor: f.color }}
+                    />
+                    <span className="truncate">{f.name}</span>
+                  </span>
+                  <span className="ml-2 flex shrink-0 items-center gap-1 group-hover/row:invisible">
+                    {f.unread > 0 && (
+                      <span
+                        className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 font-semibold text-[10px] text-primary-foreground tabular-nums leading-none"
+                        role="img"
+                        aria-label={`${f.unread} unread`}
+                      >
+                        {f.unread > 99 ? "99+" : f.unread}
+                      </span>
+                    )}
+                  </span>
+                </Link>
+              )}
+            </FolderDropTarget>
+            <button
+              type="button"
+              aria-label={`Delete ${f.name}`}
+              title="Delete folder"
+              disabled={remove.isPending}
+              onClick={() => onDelete(f)}
+              className="absolute inset-y-0 right-1 my-auto hidden h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive group-hover/row:flex"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </li>
+        ))}
+        {folders.length === 0 && !creating && (
+          <li className="px-2 py-1 text-[11px] text-muted-foreground">
+            No folders yet. Drag mail onto one to file it.
+          </li>
+        )}
+      </ul>
+    </section>
+  );
+}
+
+// Wraps a drop zone, tracking drag-over state and only accepting thread drags.
+function FolderDropTarget({
+  onDrop,
+  children,
+}: {
+  onDrop: (e: DragEvent) => void;
+  children: (over: boolean) => React.ReactNode;
+}) {
+  const [over, setOver] = useState(false);
+  return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: drag-and-drop zone; the link inside stays the keyboard-accessible target
+    <div
+      onDragOver={(e) => {
+        if (!isThreadDrag(e)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        if (!over) setOver(true);
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        setOver(false);
+        onDrop(e);
+      }}
+    >
+      {children(over)}
+    </div>
+  );
+}

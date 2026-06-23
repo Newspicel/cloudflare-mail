@@ -32,6 +32,7 @@ import { sanitizeEmailHtml } from "@/lib/sanitize-email.ts";
 import { openCompose } from "./compose-dock.tsx";
 import { EmailFrame } from "./email-frame.tsx";
 import { LabelChips, LabelsMenu } from "./labels-menu.tsx";
+import { MoveToFolderMenu } from "./move-to-folder-menu.tsx";
 import { Badge } from "./ui/badge.tsx";
 import { Button } from "./ui/button.tsx";
 import { Tooltip, TooltipProvider } from "./ui/tooltip.tsx";
@@ -140,6 +141,20 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
           </h1>
           {!readOnly && messages.at(-1) && (
             <LabelsMenu mailboxId={thread.mailboxId} messageId={messages.at(-1)!.id} />
+          )}
+          {!readOnly && (
+            <MoveToFolderMenu
+              threadId={thread.id}
+              mailboxId={thread.mailboxId}
+              onMoved={(folderName) => {
+                toast.success(`Moved to ${folderName}`);
+                nav({
+                  to: "/app/m/$mailboxId",
+                  params: { mailboxId: thread.mailboxId },
+                  search: { view },
+                });
+              }}
+            />
           )}
           {!readOnly && (
             <>

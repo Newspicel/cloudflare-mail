@@ -20,6 +20,7 @@ import { cn } from "@/lib/cn.ts";
 import { ALL_MAILBOXES, type MailboxSummary, mailboxesQuery } from "@/lib/queries.ts";
 import { formatRemaining, useNow } from "@/lib/time.ts";
 import { openCompose } from "./compose-dock.tsx";
+import { FoldersNav } from "./folders-nav.tsx";
 import { NewTempMailbox } from "./new-temp-mailbox.tsx";
 import { Badge } from "./ui/badge.tsx";
 import { Button } from "./ui/button.tsx";
@@ -230,6 +231,8 @@ function SidebarBody({ onClose }: { onClose?: () => void }) {
             No mailboxes — create one from Admin.
           </div>
         )}
+
+        <FoldersNav onClose={onClose} />
       </nav>
 
       <div className="border-sidebar-border border-t px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">

@@ -11,6 +11,7 @@ import { bootstrapRoutes } from "./bootstrap.ts";
 import { contactsRoutes } from "./contacts.ts";
 import { domainsRoutes } from "./domains.ts";
 import { draftsRoutes } from "./drafts.ts";
+import { foldersRoutes } from "./folders.ts";
 import { labelsRoutes } from "./labels.ts";
 import { mailboxesRoutes } from "./mailboxes.ts";
 import { messagesRoutes } from "./messages.ts";
@@ -76,6 +77,7 @@ export function buildApi() {
   app.route("/api/drafts", draftsRoutes());
   app.route("/api/messages", messagesRoutes());
   app.route("/api/labels", labelsRoutes());
+  app.route("/api/folders", foldersRoutes());
   app.route("/api/attachments", attachmentsRoutes());
   app.route("/api/temp", tempRoutes());
   app.route("/api/push", pushRoutes());

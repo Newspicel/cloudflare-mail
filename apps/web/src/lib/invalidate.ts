@@ -19,6 +19,24 @@ export function invalidateThreadChange(
   if (mailboxId !== "all") qc.invalidateQueries({ queryKey: keys.threadsRoot("all") });
   if (threadId) qc.invalidateQueries({ queryKey: keys.thread(threadId) });
   qc.invalidateQueries({ queryKey: keys.mailboxes() });
+  // Custom folders share threads with the mailbox views: any thread change can
+  // shift folder membership/counts, so refresh the sidebar list + folder views.
+  qc.invalidateQueries({ queryKey: keys.folders() });
+  qc.invalidateQueries({ queryKey: keys.folderThreadsRoot() });
+}
+
+/** Drop threads from a single cached folder thread-list (file/unfile). */
+export function removeThreadsFromFolder(
+  qc: QueryClient,
+  folderId: string,
+  ids: Iterable<string>,
+): void {
+  const idSet = new Set(ids);
+  qc.setQueryData<ThreadList>(keys.folderThreads(folderId), (old) =>
+    old && Array.isArray(old.threads)
+      ? { ...old, threads: old.threads.filter((t) => !idSet.has(t.id)) }
+      : old,
+  );
 }
 
 // ─── Optimistic cache helpers ───────────────────────────────────────────────

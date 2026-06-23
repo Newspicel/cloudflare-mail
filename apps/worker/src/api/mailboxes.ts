@@ -5,13 +5,14 @@ import {
   mailboxMember,
   mailboxSpamUsage,
   thread,
+  threadFolder,
   user,
 } from "@cfmail/db/schema";
 import { grant, Perm } from "@cfmail/shared/permissions";
 import type { MailboxListDto } from "@cfmail/shared/responses";
 import { createMailbox, grantMember, updateMailboxSettings } from "@cfmail/shared/schemas";
 import { zValidator } from "@hono/zod-validator";
-import { and, count, eq, gt, inArray, ne, or } from "drizzle-orm";
+import { and, count, eq, gt, inArray, ne, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { dbFromCtx } from "../db.ts";
@@ -84,6 +85,7 @@ export function mailboxesRoutes() {
 
     // Unread badge per mailbox: active (non-trash/spam) threads with unread
     // inbound mail. `unreadCount > 0` already implies an unseen inbound message.
+    // Threads the user filed into a custom folder are "moved away" and excluded.
     const all = [...owned, ...shared];
     const ids = all.map((m) => m.id);
     const unreadRows = ids.length
@@ -96,6 +98,7 @@ export function mailboxesRoutes() {
               eq(thread.trashed, false),
               eq(thread.spam, false),
               gt(thread.unreadCount, 0),
+              sql`not exists (select 1 from ${threadFolder} where ${threadFolder.threadId} = ${thread.id} and ${threadFolder.userId} = ${u.id})`,
             ),
           )
           .groupBy(thread.mailboxId)
