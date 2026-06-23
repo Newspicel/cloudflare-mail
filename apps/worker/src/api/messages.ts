@@ -24,7 +24,7 @@ import { sendFromMailbox } from "../mail/send.ts";
 import { recomputeThreadUnread } from "../mail/threads.ts";
 import { performUnsubscribe } from "../mail/unsubscribe.ts";
 import { requireUser } from "../middleware.ts";
-import { requirePerm } from "../permissions.ts";
+import { requireEntityAccess, requirePerm } from "../permissions.ts";
 
 const patchSchema = z.object({
   seen: z.boolean().optional(),
@@ -55,17 +55,13 @@ export function messagesRoutes() {
     const id = c.req.param("id");
     const patch = c.req.valid("json");
 
-    const msg = await db.query.message.findFirst({
-      where: eq(message.id, id),
-      columns: { mailboxId: true, threadId: true, flags: true },
-    });
-    if (!msg) throw new HTTPException(404, { message: "not found" });
     // Trashing hides mail thread-wide, so it needs WRITE (matches thread-level trash);
     // seen/starred are per-reader state and only need READ.
-    await requirePerm(
+    const msg = await requireEntityAccess(
       db,
       user.id,
-      msg.mailboxId,
+      message,
+      id,
       patch.trash !== undefined ? Perm.WRITE : Perm.READ,
     );
 
@@ -86,20 +82,10 @@ export function messagesRoutes() {
     const db = dbFromCtx(c);
     const user = c.get("user")!;
     const id = c.req.param("id");
-    const msg = await db.query.message.findFirst({
-      where: eq(message.id, id),
-      columns: {
-        mailboxId: true,
-        direction: true,
-        listUnsubscribe: true,
-        listUnsubscribePost: true,
-      },
-    });
-    if (!msg) throw new HTTPException(404, { message: "not found" });
-    if (msg.direction !== "in") throw new HTTPException(400, { message: "not an inbound message" });
     // Unsubscribing acts outward on the sender's behalf (sends mail / hits their
     // endpoint), so it needs WRITE — the same bar as sending from the mailbox.
-    await requirePerm(db, user.id, msg.mailboxId, Perm.WRITE);
+    const msg = await requireEntityAccess(db, user.id, message, id, Perm.WRITE);
+    if (msg.direction !== "in") throw new HTTPException(400, { message: "not an inbound message" });
     return c.json(await performUnsubscribe(c.env, db, msg));
   });
 
@@ -109,12 +95,8 @@ export function messagesRoutes() {
     const db = dbFromCtx(c);
     const user = c.get("user")!;
     const id = c.req.param("id");
-    const msg = await db.query.message.findFirst({
-      where: eq(message.id, id),
-      columns: { mailboxId: true, rawR2Key: true },
-    });
-    if (!msg?.rawR2Key) throw new HTTPException(404, { message: "not found" });
-    await requirePerm(db, user.id, msg.mailboxId, Perm.READ);
+    const msg = await requireEntityAccess(db, user.id, message, id, Perm.READ);
+    if (!msg.rawR2Key) throw new HTTPException(404, { message: "not found" });
     const obj = await c.env.BLOBS.get(msg.rawR2Key);
     if (!obj) throw new HTTPException(404, { message: "blob missing" });
     const parsed = await parseMime(await obj.arrayBuffer());
@@ -177,12 +159,8 @@ export function messagesRoutes() {
     const db = dbFromCtx(c);
     const user = c.get("user")!;
     const id = c.req.param("id");
-    const msg = await db.query.message.findFirst({
-      where: eq(message.id, id),
-      columns: { mailboxId: true, rawR2Key: true },
-    });
-    if (!msg?.rawR2Key) throw new HTTPException(404, { message: "not found" });
-    await requirePerm(db, user.id, msg.mailboxId, Perm.READ);
+    const msg = await requireEntityAccess(db, user.id, message, id, Perm.READ);
+    if (!msg.rawR2Key) throw new HTTPException(404, { message: "not found" });
     const obj = await c.env.BLOBS.get(msg.rawR2Key);
     if (!obj) throw new HTTPException(404, { message: "blob missing" });
     return new Response(obj.body, {

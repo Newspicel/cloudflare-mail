@@ -18,6 +18,7 @@ import { collectMailboxBlobKeys, deleteBlobs } from "../mail/blobs.ts";
 import { authorizeMailboxCreate } from "../mailbox-access.ts";
 import { requireAdmin, requireUser } from "../middleware.ts";
 import { sha256Hex } from "./svc.ts";
+import { buildPatch, wrapUnique } from "./util.ts";
 
 // Admin-only mailbox & redirect management. Mounted at /api/admin.
 export function adminRoutes() {
@@ -85,18 +86,18 @@ export function adminRoutes() {
     await authorizeMailboxCreate(db, me, body.domainId, body.type);
 
     const id = crypto.randomUUID();
-    try {
-      await db.insert(mailbox).values({
-        id,
-        domainId: body.domainId,
-        localPart: body.localPart.toLowerCase(),
-        displayName: body.displayName ?? null,
-        type: body.type,
-        ownerUserId: body.ownerUserId,
-      });
-    } catch {
-      throw new HTTPException(409, { message: "address already in use" });
-    }
+    await wrapUnique(
+      () =>
+        db.insert(mailbox).values({
+          id,
+          domainId: body.domainId,
+          localPart: body.localPart.toLowerCase(),
+          displayName: body.displayName ?? null,
+          type: body.type,
+          ownerUserId: body.ownerUserId,
+        }),
+      "address already in use",
+    );
     return c.json({ id }, 201);
   });
 
@@ -174,20 +175,13 @@ export function adminRoutes() {
     if (mb.type === "temp")
       throw new HTTPException(400, { message: "temp mailboxes are not editable" });
 
-    const patch: Partial<{
-      displayName: string | null;
-      signature: string | null;
-      replyTo: string | null;
-      spamFilter: "off" | "auth" | "standard" | "ai";
-      spamAiTokenCap: number | null;
-    }> = {};
-    if (body.displayName !== undefined)
-      patch.displayName = body.displayName?.trim() ? body.displayName.trim() : null;
-    if (body.signature !== undefined)
-      patch.signature = body.signature?.trim() ? body.signature : null;
-    if (body.replyTo !== undefined) patch.replyTo = body.replyTo ? body.replyTo : null;
-    if (body.spamFilter !== undefined) patch.spamFilter = body.spamFilter;
-    if (body.spamAiTokenCap !== undefined) patch.spamAiTokenCap = body.spamAiTokenCap;
+    const patch = buildPatch<typeof mailbox.$inferInsert>(body, {
+      displayName: (v: string | null) => (v?.trim() ? v.trim() : null),
+      signature: (v: string | null) => (v?.trim() ? v : null),
+      replyTo: (v: string | null) => (v ? v : null),
+      spamFilter: true,
+      spamAiTokenCap: true,
+    });
     if (Object.keys(patch).length === 0) return c.json({ ok: true });
 
     await db.update(mailbox).set(patch).where(eq(mailbox.id, id));
@@ -295,21 +289,22 @@ export function adminRoutes() {
 
     const id = crypto.randomUUID();
     const key = randomToken(32);
-    try {
-      await db.insert(mailbox).values({
-        id,
-        domainId: body.domainId,
-        localPart: body.localPart.toLowerCase(),
-        displayName: body.displayName ?? null,
-        type: "service",
-        ownerUserId: me.id,
-        serviceMode: body.mode,
-        serviceKeyHash: await sha256Hex(key),
-        spamFilter: "off",
-      });
-    } catch {
-      throw new HTTPException(409, { message: "address already in use" });
-    }
+    const keyHash = await sha256Hex(key);
+    await wrapUnique(
+      () =>
+        db.insert(mailbox).values({
+          id,
+          domainId: body.domainId,
+          localPart: body.localPart.toLowerCase(),
+          displayName: body.displayName ?? null,
+          type: "service",
+          ownerUserId: me.id,
+          serviceMode: body.mode,
+          serviceKeyHash: keyHash,
+          spamFilter: "off",
+        }),
+      "address already in use",
+    );
     return c.json({ id, key }, 201);
   });
 
@@ -339,10 +334,10 @@ export function adminRoutes() {
     });
     if (!mb) throw new HTTPException(404, { message: "not found" });
 
-    const patch: Partial<{ displayName: string | null; serviceMode: "duplex" | "send" }> = {};
-    if (body.displayName !== undefined)
-      patch.displayName = body.displayName?.trim() ? body.displayName.trim() : null;
-    if (body.mode !== undefined) patch.serviceMode = body.mode;
+    const patch = buildPatch<typeof mailbox.$inferInsert>(body, {
+      displayName: (v: string | null) => (v?.trim() ? v.trim() : null),
+      mode: { to: "serviceMode" },
+    });
     if (Object.keys(patch).length === 0) return c.json({ ok: true });
 
     await db.update(mailbox).set(patch).where(eq(mailbox.id, id));
