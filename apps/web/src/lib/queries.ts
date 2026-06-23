@@ -90,6 +90,15 @@ export const draftsQuery = (mailboxId: string) =>
     enabled: Boolean(mailboxId),
   });
 
+// A single draft by id — used by the standalone pop-out compose window, which
+// loads fresh and rehydrates from the server-persisted draft.
+export const draftQuery = (draftId: string) =>
+  queryOptions({
+    queryKey: keys.draft(draftId),
+    queryFn: () => api<{ draft: DraftDto }>(`/api/drafts/${draftId}`),
+    enabled: Boolean(draftId),
+  });
+
 // Keyed under the threads-root prefix so thread invalidations refresh the badges
 // for free; draft mutations also invalidate this prefix.
 export const folderCountsQuery = (mailboxId: string) =>
