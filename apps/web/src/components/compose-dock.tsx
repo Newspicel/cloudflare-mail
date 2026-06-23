@@ -601,12 +601,14 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
                 className={FIELD_INPUT}
               />
             </label>
-            {mode !== "markdown" && (
-              <FormatToolbar
-                onExec={runFormat}
-                onExitRich={mode === "html" ? exitRich : undefined}
-              />
-            )}
+            <FormatToolbar
+              mode={mode}
+              onExec={runFormat}
+              onToggleMarkdown={toggleMarkdown}
+              preview={preview}
+              onTogglePreview={() => setPreview((v) => !v)}
+              onExitRich={exitRich}
+            />
             {mode === "html" ? (
               <RichEditor
                 ref={editorRef}
@@ -718,21 +720,6 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
                   e.target.value = "";
                 }}
               />
-              <Button
-                variant={mode === "markdown" ? "outline" : "ghost"}
-                size="sm"
-                onClick={toggleMarkdown}
-                className={cn(mode === "markdown" && "border-primary text-primary")}
-                aria-pressed={mode === "markdown"}
-                title="Toggle markdown"
-              >
-                MD
-              </Button>
-              {mode === "markdown" && (
-                <Button variant="ghost" size="sm" onClick={() => setPreview((v) => !v)}>
-                  {preview ? "Edit" : "Preview"}
-                </Button>
-              )}
             </div>
             <div className="flex items-center gap-2">
               <span className="text-[11px] text-muted-foreground">

@@ -154,7 +154,7 @@ function ToolBtn({
       onClick={() => onExec(cmd, value)}
       aria-label={label}
       title={label}
-      className="grid size-7 place-items-center rounded text-muted-foreground outline-none transition-colors hover:bg-card hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
+      className="grid size-7 shrink-0 place-items-center rounded text-muted-foreground outline-none transition-colors hover:bg-card hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
     >
       {children}
     </button>
@@ -163,109 +163,154 @@ function ToolBtn({
 
 const SEP = <span className="mx-0.5 h-4 w-px shrink-0 bg-border" aria-hidden />;
 
+const PILL =
+  "h-7 shrink-0 rounded px-1.5 font-medium text-[12px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/45";
+
 export function FormatToolbar({
+  mode,
   onExec,
+  onToggleMarkdown,
+  preview,
+  onTogglePreview,
   onExitRich,
 }: {
+  mode: "text" | "markdown" | "html";
   onExec: (cmd: string, value?: string) => void;
-  // When provided (HTML mode), shows a control to drop back to a plain-text body.
-  onExitRich?: () => void;
+  onToggleMarkdown: () => void;
+  preview: boolean;
+  onTogglePreview: () => void;
+  // Drop an HTML body back to plain text.
+  onExitRich: () => void;
 }) {
   const selectCls =
-    "h-7 rounded border-0 bg-transparent px-1 text-[12px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45";
+    "h-7 shrink-0 rounded border-0 bg-transparent px-1 text-[12px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45";
+  const isMd = mode === "markdown";
   return (
-    <div className="flex flex-wrap items-center gap-0.5 border-b py-1">
-      <select
-        aria-label="Font"
-        className={selectCls}
-        defaultValue=""
-        onMouseDown={(e) => e.stopPropagation()}
-        onChange={(e) => {
-          if (e.target.value) onExec("fontName", e.target.value);
-          e.target.value = "";
-        }}
-      >
-        <option value="" disabled>
-          Font
-        </option>
-        {FONTS.map((f) => (
-          <option key={f.label} value={f.value}>
-            {f.label}
-          </option>
-        ))}
-      </select>
-      <select
-        aria-label="Text size"
-        className={selectCls}
-        defaultValue=""
-        onChange={(e) => {
-          if (e.target.value) onExec("fontSize", e.target.value);
-          e.target.value = "";
-        }}
-      >
-        <option value="" disabled>
-          Size
-        </option>
-        {SIZES.map((s) => (
-          <option key={s.label} value={s.value}>
-            {s.label}
-          </option>
-        ))}
-      </select>
-      {SEP}
-      <ToolBtn onExec={onExec} cmd="bold" label="Bold">
-        <Bold className="size-3.5" />
-      </ToolBtn>
-      <ToolBtn onExec={onExec} cmd="italic" label="Italic">
-        <Italic className="size-3.5" />
-      </ToolBtn>
-      <ToolBtn onExec={onExec} cmd="underline" label="Underline">
-        <Underline className="size-3.5" />
-      </ToolBtn>
-      {/* Text color — native picker; the label keeps the editor selection. */}
-      <label
-        title="Text color"
-        className="relative grid size-7 cursor-pointer place-items-center rounded text-muted-foreground transition-colors hover:bg-card hover:text-foreground"
+    // One line, never wraps — scrolls horizontally when the dock is narrow.
+    <div className="flex items-center gap-0.5 overflow-x-auto border-b py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      {!isMd && (
+        <>
+          <select
+            aria-label="Font"
+            className={selectCls}
+            defaultValue=""
+            onChange={(e) => {
+              if (e.target.value) onExec("fontName", e.target.value);
+              e.target.value = "";
+            }}
+          >
+            <option value="" disabled>
+              Font
+            </option>
+            {FONTS.map((f) => (
+              <option key={f.label} value={f.value}>
+                {f.label}
+              </option>
+            ))}
+          </select>
+          <select
+            aria-label="Text size"
+            className={selectCls}
+            defaultValue=""
+            onChange={(e) => {
+              if (e.target.value) onExec("fontSize", e.target.value);
+              e.target.value = "";
+            }}
+          >
+            <option value="" disabled>
+              Size
+            </option>
+            {SIZES.map((s) => (
+              <option key={s.label} value={s.value}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+          {SEP}
+          <ToolBtn onExec={onExec} cmd="bold" label="Bold">
+            <Bold className="size-3.5" />
+          </ToolBtn>
+          <ToolBtn onExec={onExec} cmd="italic" label="Italic">
+            <Italic className="size-3.5" />
+          </ToolBtn>
+          <ToolBtn onExec={onExec} cmd="underline" label="Underline">
+            <Underline className="size-3.5" />
+          </ToolBtn>
+          {/* Text color — native picker; the label keeps the editor selection. */}
+          <label
+            title="Text color"
+            className="relative grid size-7 shrink-0 cursor-pointer place-items-center rounded text-muted-foreground transition-colors hover:bg-card hover:text-foreground"
+            onMouseDown={(e) => e.preventDefault()}
+          >
+            <Baseline className="size-3.5" />
+            <input
+              type="color"
+              aria-label="Text color"
+              className="absolute inset-0 cursor-pointer opacity-0"
+              onChange={(e) => onExec("foreColor", e.target.value)}
+            />
+          </label>
+          {SEP}
+          <ToolBtn onExec={onExec} cmd="insertUnorderedList" label="Bulleted list">
+            <List className="size-3.5" />
+          </ToolBtn>
+          <ToolBtn onExec={onExec} cmd="insertOrderedList" label="Numbered list">
+            <ListOrdered className="size-3.5" />
+          </ToolBtn>
+          {SEP}
+          <ToolBtn onExec={onExec} cmd="justifyLeft" label="Align left">
+            <AlignLeft className="size-3.5" />
+          </ToolBtn>
+          <ToolBtn onExec={onExec} cmd="justifyCenter" label="Align center">
+            <AlignCenter className="size-3.5" />
+          </ToolBtn>
+          <ToolBtn onExec={onExec} cmd="justifyRight" label="Align right">
+            <AlignRight className="size-3.5" />
+          </ToolBtn>
+          {SEP}
+          <ToolBtn onExec={onExec} cmd="undo" label="Undo">
+            <Undo2 className="size-3.5" />
+          </ToolBtn>
+          <ToolBtn onExec={onExec} cmd="redo" label="Redo">
+            <Redo2 className="size-3.5" />
+          </ToolBtn>
+          {SEP}
+        </>
+      )}
+      {/* Markdown toggle lives in the editor bar. */}
+      <button
+        type="button"
         onMouseDown={(e) => e.preventDefault()}
+        onClick={onToggleMarkdown}
+        aria-pressed={isMd}
+        title="Write in Markdown"
+        className={cn(
+          PILL,
+          isMd
+            ? "bg-primary/10 text-primary"
+            : "text-muted-foreground hover:bg-card hover:text-foreground",
+        )}
       >
-        <Baseline className="size-3.5" />
-        <input
-          type="color"
-          aria-label="Text color"
-          className="absolute inset-0 cursor-pointer opacity-0"
-          onChange={(e) => onExec("foreColor", e.target.value)}
-        />
-      </label>
-      {SEP}
-      <ToolBtn onExec={onExec} cmd="insertUnorderedList" label="Bulleted list">
-        <List className="size-3.5" />
-      </ToolBtn>
-      <ToolBtn onExec={onExec} cmd="insertOrderedList" label="Numbered list">
-        <ListOrdered className="size-3.5" />
-      </ToolBtn>
-      {SEP}
-      <ToolBtn onExec={onExec} cmd="justifyLeft" label="Align left">
-        <AlignLeft className="size-3.5" />
-      </ToolBtn>
-      <ToolBtn onExec={onExec} cmd="justifyCenter" label="Align center">
-        <AlignCenter className="size-3.5" />
-      </ToolBtn>
-      <ToolBtn onExec={onExec} cmd="justifyRight" label="Align right">
-        <AlignRight className="size-3.5" />
-      </ToolBtn>
-      {SEP}
-      <ToolBtn onExec={onExec} cmd="undo" label="Undo">
-        <Undo2 className="size-3.5" />
-      </ToolBtn>
-      <ToolBtn onExec={onExec} cmd="redo" label="Redo">
-        <Redo2 className="size-3.5" />
-      </ToolBtn>
-      {onExitRich && (
+        MD
+      </button>
+      {isMd && (
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={onTogglePreview}
+          aria-pressed={preview}
+          title="Toggle preview"
+          className={cn(PILL, "text-muted-foreground hover:bg-card hover:text-foreground")}
+        >
+          {preview ? "Edit" : "Preview"}
+        </button>
+      )}
+      {mode === "html" && (
         <button
           type="button"
           onMouseDown={(e) => e.preventDefault()}
           onClick={onExitRich}
-          className="ml-auto rounded px-1.5 py-0.5 font-medium text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          className={cn(PILL, "ml-auto text-muted-foreground hover:bg-muted hover:text-foreground")}
           title="Switch back to a plain-text message"
         >
           Plain text
