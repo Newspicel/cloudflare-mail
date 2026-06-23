@@ -120,20 +120,19 @@ export function MailboxSettingsForm({
   const spamLabel = SPAM_LEVELS.find((l) => l.value === spamFilter);
 
   return (
-    <div className="space-y-4">
+    <div className="rounded-md border bg-card">
+      <header className="flex items-center justify-between border-b px-5 py-3">
+        <div className="min-w-0">
+          <div className="truncate font-medium">{address}</div>
+          <div className="text-[11px] text-muted-foreground">{type}</div>
+        </div>
+      </header>
       <form
         onSubmit={(e) => {
           e.preventDefault();
           save.mutate();
         }}
-        className="rounded-md border bg-card"
       >
-        <header className="flex items-center justify-between border-b px-5 py-3">
-          <div className="min-w-0">
-            <div className="truncate font-medium">{address}</div>
-            <div className="text-[11px] text-muted-foreground">{type}</div>
-          </div>
-        </header>
         <div className="grid gap-4 px-5 py-4 text-[13px]">
           <label className="grid gap-1.5">
             <span className="text-[11px] font-medium text-foreground">Display name</span>
@@ -225,7 +224,6 @@ export function MailboxSettingsForm({
       {!admin && type !== "service" && type !== "temp" && (
         <MailboxPgpCard mailboxId={mailboxId} settingsKey={queryKey} />
       )}
-      {!admin && type !== "service" && <MailboxImportCard mailboxId={mailboxId} />}
     </div>
   );
 }
@@ -328,15 +326,15 @@ function MailboxPgpCard({ mailboxId, settingsKey }: { mailboxId: string; setting
   const contacts = contactsQ.data?.keys ?? [];
 
   return (
-    <div className="rounded-md border bg-card">
-      <header className="border-b px-5 py-3">
+    <div className="border-t px-5 py-4">
+      <div className="mb-3">
         <div className="font-medium">Encryption (PGP)</div>
         <div className="text-[11px] text-muted-foreground">
           Sign and encrypt mail for this mailbox. Keys are held on the server — this protects mail
           in transit, not from the server itself.
         </div>
-      </header>
-      <div className="grid gap-4 px-5 py-4 text-[13px]">
+      </div>
+      <div className="grid gap-4 text-[13px]">
         {/* Mode */}
         <label className="grid gap-1.5">
           <span className="text-[11px] font-medium text-foreground">Mode</span>
@@ -502,20 +500,26 @@ function shortFp(fp: string): string {
 }
 
 /**
- * Bulk-import exported mail (.eml/.mbox/.zip) into this mailbox. Extraction runs
- * in the browser; each message is POSTed individually so large archives never
- * hit a Worker body/time limit. Imported mail is marked read and deduped by
- * Message-ID, so re-running an import is safe.
+ * Bulk-import exported mail (.eml/.mbox/.zip) into a chosen mailbox. Extraction
+ * runs in the browser; each message is POSTed individually so large archives
+ * never hit a Worker body/time limit. Imported mail is marked read and deduped
+ * by Message-ID, so re-running an import is safe.
  */
-function MailboxImportCard({ mailboxId }: { mailboxId: string }) {
+export function MailboxImportSection({ mailboxes }: { mailboxes: ImportTarget[] }) {
   const qc = useQueryClient();
   const inputRef = useRef<HTMLInputElement>(null);
+  const [mailboxId, setMailboxId] = useState(mailboxes[0]?.id ?? "");
   const [files, setFiles] = useState<File[]>([]);
   const [progress, setProgress] = useState<ImportProgress | null>(null);
   const [running, setRunning] = useState(false);
 
+  // Keep the selection valid if the mailbox list changes underneath us.
+  useEffect(() => {
+    if (!mailboxes.some((m) => m.id === mailboxId)) setMailboxId(mailboxes[0]?.id ?? "");
+  }, [mailboxes, mailboxId]);
+
   async function start() {
-    if (!files.length || running) return;
+    if (!files.length || running || !mailboxId) return;
     setRunning(true);
     setProgress(null);
     try {
