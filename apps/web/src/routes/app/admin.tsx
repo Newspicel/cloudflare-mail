@@ -206,6 +206,14 @@ function Section({
   );
 }
 
+function Mono({ children }: { children: React.ReactNode }) {
+  return (
+    <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">
+      {children}
+    </code>
+  );
+}
+
 function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return <input {...props} className={cn(inputClass, props.className)} />;
 }
@@ -318,7 +326,7 @@ function DomainsSection() {
     <div className="space-y-5">
       <Section
         title="Transactional email"
-        description="From-address used for password reset and invitation emails. Must be on a verified Email Sending domain."
+        description="Sender address for password-reset and invitation emails. Must be on a verified Email Sending domain."
       >
         <div className="flex gap-2">
           <Input
@@ -333,7 +341,7 @@ function DomainsSection() {
         </div>
       </Section>
 
-      <Section title="Domains" description="Verified mail domains and their allowed mailbox kinds.">
+      <Section title="Domains" description="Verified mail domains and the mailbox kinds each one allows.">
         <div className="overflow-x-auto rounded-md border">
           <table className="w-full min-w-[36rem] text-[13px]">
             <thead className="bg-muted/50 text-[11px] uppercase tracking-wider text-muted-foreground">
@@ -556,7 +564,7 @@ function UsersSection() {
 
   return (
     <div className="space-y-5">
-      <Section title="Users" description="People with access to this deployment.">
+      <Section title="Users" description="Everyone with access to this deployment.">
         <ul className="divide-y rounded-md border">
           {(usersQ.data?.users ?? []).map((u) => (
             <UserRow key={u.id} user={u} />
@@ -571,7 +579,7 @@ function UsersSection() {
 
       <Section
         title="Send invite"
-        description="User sets their own password via a one-time link. Requires the transactional from-address to be configured."
+        description="The user sets their own password via a one-time link. Requires the transactional sender address to be configured."
       >
         <div className="flex flex-wrap gap-2">
           <Input
@@ -608,7 +616,7 @@ function UsersSection() {
 
       <Section
         title="Create user directly"
-        description="Skip the invite flow — set the user's initial password yourself and share it out-of-band."
+        description="Skip the invite flow — set the user's initial password yourself and share it out of band."
       >
         <div className="grid gap-2 sm:grid-cols-2">
           <Input
@@ -843,7 +851,12 @@ function ServiceSection() {
   return (
     <Section
       title="Service mailboxes"
-      description="Key-driven send/receive mailboxes for integrations. No login, no sidebar — authenticate to /api/svc with the bearer key. Inbound mail is kept 30 days."
+      description={
+        <>
+          Key-driven send/receive mailboxes for integrations — no login, no sidebar. Authenticate to{" "}
+          <Mono>/api/svc</Mono> with the bearer key. Inbound mail is kept for 30 days.
+        </>
+      }
     >
       <ul className="divide-y rounded-md border">
         {services.map((s) => (
@@ -1229,7 +1242,13 @@ function AdminMailboxes({ meId }: { meId: string }) {
   return (
     <Section
       title="Mailboxes & redirects"
-      description="Every mailbox and inbound redirect in this deployment. A redirect is an inbound-only alias — mail to it lands in the target mailbox; it cannot send. A catch-all (*@domain) receives anything with no matching mailbox or specific redirect."
+      description={
+        <>
+          Every mailbox and inbound redirect in this deployment. A redirect is an inbound-only alias
+          — mail to it lands in the target mailbox; it can't send. A catch-all <Mono>*@domain</Mono>{" "}
+          receives anything with no matching mailbox or specific redirect.
+        </>
+      }
     >
       {total > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -2209,7 +2228,12 @@ function BlockRequestsPanel() {
   return (
     <Section
       title="Block requests"
-      description="Requests from readers to block a sender. Approving adds the address to the blocklist."
+      description={
+        <>
+          Requests from readers to block a sender. Approving adds the address to the blocklist so its
+          mail is rejected going forward.
+        </>
+      }
     >
       {pending.length === 0 && reviewed.length === 0 ? (
         <p className="text-[12px] text-muted-foreground">No requests yet.</p>
@@ -2433,7 +2457,7 @@ function ProtectedDomainsPanel() {
   return (
     <Section
       title="Protected domains"
-      description="These domains can never be blocked at the domain level — only individual addresses on them. One per line."
+      description="These domains can never be blocked wholesale — only individual addresses on them. One domain per line."
     >
       <textarea
         value={draft}
