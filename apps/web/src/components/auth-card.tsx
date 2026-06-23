@@ -1,5 +1,5 @@
-import { Mail } from "lucide-react";
 import type React from "react";
+import { Logo } from "./logo.tsx";
 import { Button } from "./ui/button.tsx";
 import { inputClass } from "./ui/input.tsx";
 
@@ -8,9 +8,7 @@ export function CardShell({ title, children }: { title: string; children?: React
     <div className="flex min-h-dvh items-center justify-center bg-muted p-6">
       <div className="w-full max-w-sm rounded-xl border bg-card p-7 shadow-black/[0.04] shadow-lg">
         <div className="mb-5 flex items-center gap-2.5">
-          <div className="grid h-8 w-8 place-items-center rounded-md bg-primary text-primary-foreground shadow-primary/20 shadow-sm">
-            <Mail className="h-4 w-4" strokeWidth={2.5} />
-          </div>
+          <Logo className="h-8 w-8 rounded-md shadow-black/[0.06] shadow-sm" />
           <div>
             <div className="font-semibold text-[15px] leading-none tracking-tight">cfmail</div>
             <div className="mt-1 text-[11px] text-muted-foreground">mail on Cloudflare</div>
