@@ -1,6 +1,6 @@
 import { type DB, makeDB, schema } from "@cfmail/db";
-import { betterAuth } from "better-auth/minimal";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { betterAuth } from "better-auth/minimal";
 import { admin } from "better-auth/plugins/admin";
 import { twoFactor } from "better-auth/plugins/two-factor";
 import { getConfig, getOrCreateAuthSecret } from "./config.ts";
