@@ -23,6 +23,7 @@ import {
   patchMessageFlags,
   removeThreadsFromLists,
 } from "@/lib/invalidate.ts";
+import { useUserPrefs } from "@/lib/prefs.ts";
 import type { MailView, MessageRow, ThreadRow } from "@/lib/queries.ts";
 import { messageBodyQuery } from "@/lib/queries.ts";
 import { keys } from "@/lib/query-keys.ts";
@@ -85,9 +86,11 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
   });
 
   // Auto-mark inbound messages as read when the thread is opened.
+  const { prefs } = useUserPrefs();
+  const autoMarkRead = prefs.autoMarkRead !== false;
   const markedRef = useRef<string | null>(null);
   useEffect(() => {
-    if (readOnly || markedRef.current === thread.id) return;
+    if (readOnly || !autoMarkRead || markedRef.current === thread.id) return;
     const unseen = messages.filter((m) => m.direction === "in" && !hasFlag(m.flags, Flag.SEEN));
     if (unseen.length === 0) return;
     markedRef.current = thread.id;
@@ -96,7 +99,7 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
         api(`/api/messages/${m.id}`, { method: "PATCH", body: JSON.stringify({ seen: true }) }),
       ),
     ).then(invalidate);
-  }, [thread.id, messages, readOnly, invalidate]);
+  }, [thread.id, messages, readOnly, autoMarkRead, invalidate]);
 
   function act(patch: { trashed?: boolean; spam?: boolean }, label: string, undo: typeof patch) {
     setState.mutate(patch, {

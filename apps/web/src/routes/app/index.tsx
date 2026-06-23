@@ -1,5 +1,6 @@
+import { parseUserPrefs } from "@cfmail/shared";
 import { createFileRoute, Navigate } from "@tanstack/react-router";
-import { mailboxesQuery } from "@/lib/queries.ts";
+import { mailboxesQuery, meQuery } from "@/lib/queries.ts";
 
 export const Route = createFileRoute("/app/")({
   component: AppIndex,
@@ -8,15 +9,12 @@ export const Route = createFileRoute("/app/")({
 function AppIndex() {
   const { queryClient } = Route.useRouteContext();
   const mailboxes = queryClient.getQueryData(mailboxesQuery.queryKey);
+  const me = queryClient.getQueryData(meQuery.queryKey);
   const first = mailboxes?.mailboxes[0];
-  if (first)
-    return (
-      <Navigate
-        to="/app/m/$mailboxId"
-        params={{ mailboxId: first.id }}
-        search={{ view: "inbox" }}
-      />
-    );
+  if (first) {
+    const view = parseUserPrefs(me?.user?.preferences).defaultView ?? "inbox";
+    return <Navigate to="/app/m/$mailboxId" params={{ mailboxId: first.id }} search={{ view }} />;
+  }
   return (
     <div className="flex h-full items-center justify-center p-12 text-center">
       <div className="max-w-md rounded-md border bg-card px-8 py-10">

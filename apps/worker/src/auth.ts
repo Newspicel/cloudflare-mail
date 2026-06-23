@@ -66,6 +66,13 @@ export async function createAuth({ env, db, baseURL }: CreateAuthOpts) {
       },
       resetPasswordTokenExpiresIn: 3600,
     },
+    user: {
+      // App preferences ride on the session user so /api/me returns them and
+      // authClient.updateUser persists them. Value is a JSON string (UserPrefs).
+      additionalFields: {
+        preferences: { type: "string", required: false, input: true },
+      },
+    },
     advanced: {
       crossSubDomainCookies: { enabled: false },
       defaultCookieAttributes: { sameSite: "lax" },
