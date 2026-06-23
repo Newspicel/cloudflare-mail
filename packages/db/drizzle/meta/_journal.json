@@ -26,33 +26,40 @@
     {
       "idx": 3,
       "version": "6",
+      "when": 1776700536597,
+      "tag": "0003_zero_config_init",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
       "when": 1782147483187,
       "tag": "0004_redirects_delivered_to",
       "breakpoints": true
     },
     {
-      "idx": 4,
+      "idx": 5,
       "version": "6",
       "when": 1782147483188,
       "tag": "0005_folders_drafts",
       "breakpoints": true
     },
     {
-      "idx": 5,
+      "idx": 6,
       "version": "6",
       "when": 1782147483189,
       "tag": "0006_push_notifications",
       "breakpoints": true
     },
     {
-      "idx": 6,
+      "idx": 7,
       "version": "6",
       "when": 1782147483190,
       "tag": "0007_spam_filter",
       "breakpoints": true
     },
     {
-      "idx": 7,
+      "idx": 8,
       "version": "6",
       "when": 1782147483191,
       "tag": "0008_two_factor_verified",
