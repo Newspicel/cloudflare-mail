@@ -1,6 +1,8 @@
 import { has, Perm } from "@cfmail/shared/permissions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
+import { Check, Copy } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { MailboxSettingsForm } from "@/components/mailbox-settings-form.tsx";
@@ -113,6 +115,36 @@ function PrimaryBtn(props: React.ButtonHTMLAttributes<HTMLButtonElement>) {
   );
 }
 
+function CopyButton({ value, label }: { value: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(value);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        } catch {
+          toast.error("Copy failed");
+        }
+      }}
+      className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium transition hover:bg-muted"
+    >
+      {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+      {copied ? "Copied" : label}
+    </button>
+  );
+}
+
+function totpSecret(uri: string): string | null {
+  try {
+    return new URL(uri).searchParams.get("secret");
+  } catch {
+    return null;
+  }
+}
+
 function TwoFactorSection({ enabled }: { enabled: boolean }) {
   const qc = useQueryClient();
   const [password, setPassword] = useState("");
@@ -163,6 +195,8 @@ function TwoFactorSection({ enabled }: { enabled: boolean }) {
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
+  const secret = totpUri ? totpSecret(totpUri) : null;
+
   return (
     <Section
       title="Two-factor authentication"
@@ -190,12 +224,23 @@ function TwoFactorSection({ enabled }: { enabled: boolean }) {
       {totpUri && (
         <div className="space-y-3">
           <div className="rounded-md border bg-muted/40 p-3 text-[12px]">
-            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Authenticator setup URI
+            <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Authenticator setup
             </div>
-            <div className="font-mono break-all">{totpUri}</div>
-            <div className="mt-2 text-[11px] text-muted-foreground">
-              Paste this into your authenticator app or render it as a QR code.
+            <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center">
+              <div className="rounded-md bg-white p-2">
+                <QRCodeSVG value={totpUri} size={144} />
+              </div>
+              <div className="min-w-0 space-y-2">
+                <div className="text-[11px] text-muted-foreground">
+                  Scan with your authenticator app, or enter the secret manually.
+                </div>
+                {secret && <div className="font-mono text-[12px] break-all">{secret}</div>}
+                <div className="flex flex-wrap gap-2">
+                  {secret && <CopyButton value={secret} label="Copy secret" />}
+                  <CopyButton value={totpUri} label="Copy URI" />
+                </div>
+              </div>
             </div>
           </div>
           {backupCodes && backupCodes.length > 0 && (
