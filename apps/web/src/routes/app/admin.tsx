@@ -1655,18 +1655,33 @@ function AdminMailboxRow({
   const [membersOpen, setMembersOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [newOwner, setNewOwner] = useState(m.ownerUserId);
+  const [newType, setNewType] = useState(m.type);
   const [redirectTo, setRedirectTo] = useState("");
+
+  // Only personal⇄group are interchangeable; temp/service have no type toggle.
+  const canRetype = m.type === "personal" || m.type === "group";
+  const ownerChanged = newOwner !== m.ownerUserId;
+  const typeChanged = canRetype && newType !== m.type;
 
   const migrate = useMutation({
     mutationFn: () =>
       api(`/api/admin/mailboxes/${m.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ ownerUserId: newOwner }),
+        body: JSON.stringify({
+          ...(ownerChanged ? { ownerUserId: newOwner } : {}),
+          ...(typeChanged ? { type: newType } : {}),
+        }),
       }),
     onSuccess: () => {
       setMigrateOpen(false);
       invalidate();
-      toast.success("Owner changed");
+      toast.success(
+        ownerChanged && typeChanged
+          ? "Mailbox migrated"
+          : typeChanged
+            ? "Type changed"
+            : "Owner changed",
+      );
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
@@ -1727,6 +1742,7 @@ function AdminMailboxRow({
           <GhostBtn
             onClick={() => {
               setNewOwner(m.ownerUserId);
+              setNewType(m.type);
               setMigrateOpen((v) => !v);
               setDeleteOpen(false);
               setMembersOpen(false);
@@ -1759,21 +1775,47 @@ function AdminMailboxRow({
       )}
 
       {migrateOpen && (
-        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-3">
-          <span className="text-[11px] text-muted-foreground">New owner</span>
-          <Select value={newOwner} onChange={(e) => setNewOwner(e.target.value)} className="flex-1">
-            {users.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.email}
-              </option>
-            ))}
-          </Select>
-          <PrimaryBtn
-            onClick={() => migrate.mutate()}
-            disabled={newOwner === m.ownerUserId || migrate.isPending}
-          >
-            Migrate
-          </PrimaryBtn>
+        <div className="mt-3 flex flex-col gap-2 rounded-md border bg-muted/30 p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="w-16 text-[11px] text-muted-foreground">Owner</span>
+            <Select
+              value={newOwner}
+              onChange={(e) => setNewOwner(e.target.value)}
+              className="flex-1"
+            >
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.email}
+                </option>
+              ))}
+            </Select>
+          </div>
+          {canRetype && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="w-16 text-[11px] text-muted-foreground">Type</span>
+              <Select
+                value={newType}
+                onChange={(e) => setNewType(e.target.value as AdminMailbox["type"])}
+                className="flex-1"
+              >
+                <option value="personal">personal</option>
+                <option value="group">group</option>
+              </Select>
+            </div>
+          )}
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] text-muted-foreground">
+              {typeChanged && newType === "personal"
+                ? "Switching to personal removes shared members."
+                : ""}
+            </span>
+            <PrimaryBtn
+              onClick={() => migrate.mutate()}
+              disabled={(!ownerChanged && !typeChanged) || migrate.isPending}
+            >
+              Migrate
+            </PrimaryBtn>
+          </div>
         </div>
       )}
 
