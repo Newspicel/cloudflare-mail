@@ -33,6 +33,22 @@ export async function streamToArrayBuffer(
   return out.buffer;
 }
 
+// Pull the RFC 2369/8058 unsubscribe headers off a parsed message. `headers` is
+// postal-mime's flat `{ key, value }[]` with lowercased keys; we keep the raw
+// values and interpret them later (mailto vs https, one-click) at action time.
+export function extractUnsubscribe(parsed: ParsedEmail): {
+  listUnsubscribe: string | null;
+  listUnsubscribePost: string | null;
+} {
+  const headers = parsed.headers ?? [];
+  const get = (name: string) =>
+    headers.find((h) => h.key.toLowerCase() === name)?.value?.trim() || null;
+  return {
+    listUnsubscribe: get("list-unsubscribe"),
+    listUnsubscribePost: get("list-unsubscribe-post"),
+  };
+}
+
 export interface ThreadingHeaders {
   messageId: string;
   inReplyTo?: string;

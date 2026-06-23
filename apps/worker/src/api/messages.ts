@@ -22,6 +22,7 @@ import { parseMime } from "../mail/mime.ts";
 import { buildQuote } from "../mail/quote.ts";
 import { sendFromMailbox } from "../mail/send.ts";
 import { recomputeThreadUnread } from "../mail/threads.ts";
+import { performUnsubscribe } from "../mail/unsubscribe.ts";
 import { requireUser } from "../middleware.ts";
 import { requirePerm } from "../permissions.ts";
 
@@ -77,6 +78,29 @@ export function messagesRoutes() {
     // SEEN drives the thread's unread badge; keep the cached count in sync.
     if (patch.seen !== undefined) await recomputeThreadUnread(db, msg.threadId);
     return c.json({ flags });
+  });
+
+  // Act on the message's List-Unsubscribe headers (newsletter opt-out). May POST
+  // a one-click request, send a mailto, or hand back an https link to open.
+  r.post("/:id/unsubscribe", async (c) => {
+    const db = dbFromCtx(c);
+    const user = c.get("user")!;
+    const id = c.req.param("id");
+    const msg = await db.query.message.findFirst({
+      where: eq(message.id, id),
+      columns: {
+        mailboxId: true,
+        direction: true,
+        listUnsubscribe: true,
+        listUnsubscribePost: true,
+      },
+    });
+    if (!msg) throw new HTTPException(404, { message: "not found" });
+    if (msg.direction !== "in") throw new HTTPException(400, { message: "not an inbound message" });
+    // Unsubscribing acts outward on the sender's behalf (sends mail / hits their
+    // endpoint), so it needs WRITE — the same bar as sending from the mailbox.
+    await requirePerm(db, user.id, msg.mailboxId, Perm.WRITE);
+    return c.json(await performUnsubscribe(c.env, db, msg));
   });
 
   // Full body, parsed on demand from the raw `.eml`. Listing endpoints only

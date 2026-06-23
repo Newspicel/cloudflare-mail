@@ -77,6 +77,17 @@ export interface MessageBodyDto {
   text: string | null;
 }
 
+/**
+ * Outcome of a List-Unsubscribe action. `unsubscribed` = handled server-side (an
+ * RFC 8058 one-click POST or a mailto request was sent). `open` = the only target
+ * is an https page the client must open in a new tab (carries `url`).
+ */
+export interface UnsubscribeResultDto {
+  status: "unsubscribed" | "open";
+  method: "one-click" | "email" | "link";
+  url?: string;
+}
+
 export type MailView = "inbox" | "drafts" | "sent" | "marked" | "spam" | "trash" | "all";
 export type FolderCountsDto = Record<MailView, { total: number; unread: number }>;
 
