@@ -1,12 +1,24 @@
+import {
+  DOMAIN_KINDS,
+  EDITOR_FORMATS,
+  MAILBOX_TYPES,
+  MESSAGE_DIRECTIONS,
+  QUOTE_KINDS,
+  SERVICE_MODES,
+  SPAM_FILTER_LEVELS,
+  USER_ROLES,
+} from "@cfmail/db/enums";
 import { z } from "zod";
 
-export const MailboxType = z.enum(["personal", "group", "service", "temp"]);
+// Enum validators derive from the shared tuples in @cfmail/db/enums, so the
+// Zod input contracts can never drift from the DB columns.
+export const MailboxType = z.enum(MAILBOX_TYPES);
 export type MailboxType = z.infer<typeof MailboxType>;
 
-export const DomainKind = z.enum(["primary", "sub"]);
+export const DomainKind = z.enum(DOMAIN_KINDS);
 export type DomainKind = z.infer<typeof DomainKind>;
 
-export const MessageDirection = z.enum(["in", "out"]);
+export const MessageDirection = z.enum(MESSAGE_DIRECTIONS);
 export type MessageDirection = z.infer<typeof MessageDirection>;
 
 // No "+" — it is reserved for plus/sub-addressing, which routes to the base
@@ -71,18 +83,18 @@ export const upsertDomainGrant = z.object({
 
 export const createUserInvite = z.object({
   email: emailAddress,
-  role: z.enum(["admin", "user"]).default("user"),
+  role: z.enum(USER_ROLES).default("user"),
 });
 
 export const adminCreateUser = z.object({
   email: emailAddress,
   name: z.string().min(1).max(200),
   password: z.string().min(8).max(200),
-  role: z.enum(["admin", "user"]).default("user"),
+  role: z.enum(USER_ROLES).default("user"),
 });
 
 export const adminUpdateUser = z.object({
-  role: z.enum(["admin", "user"]).optional(),
+  role: z.enum(USER_ROLES).optional(),
   banned: z.boolean().optional(),
 });
 
@@ -119,7 +131,7 @@ const draftAttachment = z.object({
 // resolves the quoted body from the raw `.eml` at send time (mail/quote.ts).
 export const messageQuoteRef = z.object({
   messageId: z.string().min(1),
-  kind: z.enum(["reply", "forward"]),
+  kind: z.enum(QUOTE_KINDS),
 });
 
 export const createDraft = z.object({
@@ -130,7 +142,7 @@ export const createDraft = z.object({
   subject: z.string().max(998).default(""),
   body: z.string().max(5_000_000).default(""),
   markdown: z.boolean().default(false),
-  format: z.enum(["text", "markdown", "html"]).default("text"),
+  format: z.enum(EDITOR_FORMATS).default("text"),
   inReplyTo: messageId.optional(),
   references: z.array(messageId).max(100).optional(),
   quote: messageQuoteRef.nullish(),
@@ -145,7 +157,7 @@ export const updateDraft = z.object({
   subject: z.string().max(998).optional(),
   body: z.string().max(5_000_000).optional(),
   markdown: z.boolean().optional(),
-  format: z.enum(["text", "markdown", "html"]).optional(),
+  format: z.enum(EDITOR_FORMATS).optional(),
   inReplyTo: messageId.optional(),
   references: z.array(messageId).max(100).optional(),
   quote: messageQuoteRef.nullish(),
@@ -206,7 +218,7 @@ export const createMailbox = z.object({
     .optional(),
 });
 
-export const ServiceMode = z.enum(["duplex", "send"]);
+export const ServiceMode = z.enum(SERVICE_MODES);
 export type ServiceMode = z.infer<typeof ServiceMode>;
 
 // Admin: create a key-driven service mailbox. No owner/members — access is the
@@ -253,7 +265,7 @@ export const createRedirect = z.object({
   targetMailboxId: z.string().min(1),
 });
 
-export const spamFilterLevel = z.enum(["off", "auth", "standard", "ai"]);
+export const spamFilterLevel = z.enum(SPAM_FILTER_LEVELS);
 export type SpamFilterLevel = z.infer<typeof spamFilterLevel>;
 
 export const updateMailboxSettings = z.object({
