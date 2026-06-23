@@ -29,6 +29,8 @@ export async function createAuth({ env, db, baseURL }: CreateAuthOpts) {
     baseURL,
     secret,
     trustedOrigins: [baseURL],
+    // Drops @opentelemetry/semantic-conventions (~54 KB) from the bundle.
+    telemetry: { enabled: false },
     database: drizzleAdapter(database, {
       provider: "sqlite",
       schema: {

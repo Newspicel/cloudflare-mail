@@ -4,6 +4,12 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-04-01",
   "compatibility_flags": ["nodejs_compat"],
+  "minify": true,
+  // mimetext only uses mime-types#contentType to validate attachment types;
+  // the shim avoids bundling the ~134 KB mime-db table.
+  "alias": {
+    "mime-types": "./src/shims/mime-types.ts"
+  },
   "observability": {
     "enabled": true,
     "logs": { "enabled": true }
