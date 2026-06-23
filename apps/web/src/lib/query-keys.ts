@@ -17,6 +17,7 @@ export const keys = {
   threads: (mailboxId: string, view: MailView) => ["threads", mailboxId, view] as const,
   folderCounts: (mailboxId: string) => ["threads", mailboxId, "counts"] as const,
   thread: (threadId: string) => ["thread", threadId] as const,
+  messageBody: (messageId: string) => ["message-body", messageId] as const,
   drafts: (mailboxId: string) => ["drafts", mailboxId] as const,
   search: (q: string) => ["search", q] as const,
   labels: (mailboxId: string) => ["labels", mailboxId] as const,

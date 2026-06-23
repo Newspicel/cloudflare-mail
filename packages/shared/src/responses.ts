@@ -70,6 +70,12 @@ export interface MessageLabelDto {
   color: string;
 }
 
+/** Full message body, parsed on demand from the raw `.eml` in R2. */
+export interface MessageBodyDto {
+  html: string | null;
+  text: string | null;
+}
+
 export type MailView = "inbox" | "drafts" | "sent" | "marked" | "spam" | "trash" | "all";
 export type FolderCountsDto = Record<MailView, { total: number; unread: number }>;
 

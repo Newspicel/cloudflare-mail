@@ -1,5 +1,5 @@
 import { Flag, hasFlag, setFlag } from "@cfmail/shared/flags";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import DOMPurify from "dompurify";
 import {
@@ -25,6 +25,7 @@ import {
   snapshotMailboxThreads,
 } from "@/lib/invalidate.ts";
 import type { MailView, MessageRow, ThreadRow } from "@/lib/queries.ts";
+import { messageBodyQuery } from "@/lib/queries.ts";
 import { keys } from "@/lib/query-keys.ts";
 import { openCompose } from "./compose-dock.tsx";
 import { LabelChips, LabelsMenu } from "./labels-menu.tsx";
@@ -292,11 +293,14 @@ function MessageCard({
   readOnly: boolean;
   onToggleStar: () => void;
 }) {
+  // The body isn't in the thread payload (listing only carries the snippet);
+  // fetch the full parsed body lazily when the card mounts.
+  const body = useQuery(messageBodyQuery(msg.id));
   const bodyHtml = useMemo(() => {
-    const html = (msg as { html?: string | null }).html ?? null;
+    const html = body.data?.html;
     if (html) return DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
     return null;
-  }, [msg]);
+  }, [body.data?.html]);
   const starred = hasFlag(msg.flags, Flag.STARRED);
   const when = new Date(msg.sentAt ?? msg.receivedAt ?? msg.createdAt);
 
@@ -350,7 +354,11 @@ function MessageCard({
             dangerouslySetInnerHTML={{ __html: bodyHtml }}
           />
         ) : (
-          <pre className="whitespace-pre-wrap font-sans text-[13px]">{msg.snippet}</pre>
+          // Plain-text body once loaded; the snippet shows while the body is in
+          // flight (or if parsing yields neither html nor text).
+          <pre className="whitespace-pre-wrap font-sans text-[13px]">
+            {body.data?.text ?? msg.snippet}
+          </pre>
         )}
       </div>
     </article>
