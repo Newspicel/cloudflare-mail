@@ -122,12 +122,13 @@ export function FoldersNav({ onClose }: { onClose?: () => void }) {
                   to="/app/folder/$folderId"
                   params={{ folderId: f.id }}
                   onClick={() => onClose?.()}
+                  data-active-nav={(!over && activeId === f.id) || undefined}
                   className={cn(
-                    "flex items-center justify-between rounded-md px-2 py-1.5 text-[13px] transition-colors",
+                    "relative z-10 flex items-center justify-between rounded-md px-2 py-1.5 text-[13px] transition-colors",
                     over
                       ? "bg-primary/15 ring-1 ring-primary/40"
                       : activeId === f.id
-                        ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                        ? "font-medium text-sidebar-accent-foreground"
                         : "text-sidebar-foreground hover:bg-sidebar-accent/60",
                   )}
                 >
@@ -166,11 +167,6 @@ export function FoldersNav({ onClose }: { onClose?: () => void }) {
             </button>
           </li>
         ))}
-        {folders.length === 0 && !creating && (
-          <li className="px-2 py-1 text-[11px] text-muted-foreground">
-            No folders yet. Drag mail onto one to file it.
-          </li>
-        )}
       </ul>
     </section>
   );
