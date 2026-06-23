@@ -15,6 +15,16 @@ export function formatRemaining(expiresAt: string | null | undefined): string | 
   return `${d}d ${h % 24}h`;
 }
 
+// Compact thread-list timestamp: clock time for today, "Mon D" otherwise.
+export function formatTime(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) {
+    return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  }
+  return d.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
 export function useNow(intervalMs = 30_000): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
