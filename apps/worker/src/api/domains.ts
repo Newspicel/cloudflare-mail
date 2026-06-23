@@ -32,7 +32,23 @@ export function domainsRoutes() {
   r.put("/settings/auth-from", requireAdmin, zValidator("json", setAuthFromAddress), async (c) => {
     const db = dbFromCtx(c);
     const body = c.req.valid("json");
-    await setConfig(db, "auth_from_address", body.address.toLowerCase());
+    const address = body.address.toLowerCase();
+    const domainName = address.slice(address.indexOf("@") + 1);
+    const row = await db.query.domain.findFirst({
+      where: eq(domain.name, domainName),
+      columns: { spfOk: true, dkimOk: true },
+    });
+    if (!row) {
+      throw new HTTPException(400, {
+        message: `${domainName} is not a configured domain`,
+      });
+    }
+    if (!row.spfOk || !row.dkimOk) {
+      throw new HTTPException(400, {
+        message: `${domainName} is not verified for sending (SPF and DKIM must pass)`,
+      });
+    }
+    await setConfig(db, "auth_from_address", address);
     return c.json({ ok: true });
   });
 
