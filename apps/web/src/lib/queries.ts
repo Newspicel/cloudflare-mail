@@ -67,6 +67,17 @@ export const mailboxesQuery = queryOptions({
   queryFn: () => api<{ mailboxes: MailboxSummary[] }>("/api/mailboxes"),
 });
 
+export interface Contact {
+  address: string;
+  name?: string;
+}
+
+export const contactsQuery = queryOptions({
+  queryKey: ["contacts"],
+  queryFn: () => api<{ contacts: Contact[] }>("/api/contacts"),
+  staleTime: 5 * 60_000,
+});
+
 export type MailView = "inbox" | "drafts" | "sent" | "marked" | "spam" | "trash" | "all";
 export const MAIL_VIEWS: MailView[] = ["inbox", "drafts", "sent", "marked", "spam", "trash", "all"];
 

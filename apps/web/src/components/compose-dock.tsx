@@ -7,7 +7,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ApiError, api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
-import { type DraftRow, type MessageRow, mailboxesQuery } from "@/lib/queries.ts";
+import { contactsQuery, type DraftRow, type MessageRow, mailboxesQuery } from "@/lib/queries.ts";
+import { AddressField } from "./address-field.tsx";
 import { Button } from "./ui/button.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select.tsx";
 import { Textarea } from "./ui/textarea.tsx";
@@ -91,6 +92,8 @@ const FIELD_INPUT =
 function ComposePanel({ state: s }: { state: ComposeState }) {
   const qc = useQueryClient();
   const { data: mailboxes } = useQuery(mailboxesQuery);
+  const { data: contactsData } = useQuery(contactsQuery);
+  const contacts = contactsData?.contacts ?? [];
   const sendable = (mailboxes?.mailboxes ?? []).filter((m) => (m.perms & 2) === 2);
   const d = s.draft;
   const fwd = s.forwardMessage;
@@ -371,44 +374,40 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
                 </SelectContent>
               </Select>
             </div>
-            <label className="flex items-center gap-2 border-b py-1">
-              <span className={FIELD_LABEL}>To</span>
-              <input
-                value={to}
-                onChange={(e) => setTo(e.target.value)}
-                placeholder="name@example.com"
-                className={FIELD_INPUT}
-              />
-              {!showCc && (
-                <button
-                  type="button"
-                  onClick={() => setShowCc(true)}
-                  className="shrink-0 font-medium text-[11px] text-muted-foreground hover:text-foreground"
-                >
-                  Cc/Bcc
-                </button>
-              )}
-            </label>
+            <AddressField
+              label="To"
+              value={to}
+              onChange={setTo}
+              placeholder="name@example.com"
+              contacts={contacts}
+              trailing={
+                !showCc && (
+                  <button
+                    type="button"
+                    onClick={() => setShowCc(true)}
+                    className="shrink-0 font-medium text-[11px] text-muted-foreground hover:text-foreground"
+                  >
+                    Cc/Bcc
+                  </button>
+                )
+              }
+            />
             {showCc && (
               <>
-                <label className="flex items-center gap-2 border-b py-1">
-                  <span className={FIELD_LABEL}>Cc</span>
-                  <input
-                    value={cc}
-                    onChange={(e) => setCc(e.target.value)}
-                    placeholder="cc@example.com"
-                    className={FIELD_INPUT}
-                  />
-                </label>
-                <label className="flex items-center gap-2 border-b py-1">
-                  <span className={FIELD_LABEL}>Bcc</span>
-                  <input
-                    value={bcc}
-                    onChange={(e) => setBcc(e.target.value)}
-                    placeholder="bcc@example.com"
-                    className={FIELD_INPUT}
-                  />
-                </label>
+                <AddressField
+                  label="Cc"
+                  value={cc}
+                  onChange={setCc}
+                  placeholder="cc@example.com"
+                  contacts={contacts}
+                />
+                <AddressField
+                  label="Bcc"
+                  value={bcc}
+                  onChange={setBcc}
+                  placeholder="bcc@example.com"
+                  contacts={contacts}
+                />
               </>
             )}
             <label className="flex items-center gap-2 border-b py-1">
