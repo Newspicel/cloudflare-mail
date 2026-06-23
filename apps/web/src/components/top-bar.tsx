@@ -48,8 +48,6 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
       <div className="flex items-center gap-2">
         <Logo className="h-7 w-7 rounded-md shadow-black/[0.06] shadow-sm" />
         <span className="hidden font-semibold text-[13px] tracking-tight sm:inline">cfmail</span>
-        <span className="ml-2 hidden h-5 w-px bg-border sm:block" />
-        <span className="hidden text-[12px] text-muted-foreground sm:block">Mail</span>
       </div>
 
       <SearchBox />
