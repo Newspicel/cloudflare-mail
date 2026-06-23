@@ -38,6 +38,7 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
   const invalidate = useCallback(() => {
     qc.invalidateQueries({ queryKey: ["threads", thread.mailboxId] });
     qc.invalidateQueries({ queryKey: ["thread", thread.id] });
+    qc.invalidateQueries({ queryKey: ["mailboxes"] });
   }, [qc, thread.mailboxId, thread.id]);
 
   const setState = useMutation({

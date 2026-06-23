@@ -5,6 +5,7 @@ import {
   mailboxMember,
   mailboxSpamUsage,
   shareToken,
+  thread,
   user,
 } from "@cfmail/db/schema";
 import { grant, Perm } from "@cfmail/shared/permissions";
@@ -15,7 +16,7 @@ import {
   updateMailboxSettings,
 } from "@cfmail/shared/schemas";
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq, or } from "drizzle-orm";
+import { and, count, desc, eq, gt, inArray, or } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { dbFromCtx } from "../db.ts";
@@ -85,7 +86,29 @@ export function mailboxesRoutes() {
         perms: m.perms,
       }));
 
-    return c.json({ mailboxes: [...owned, ...shared] });
+    // Unread badge per mailbox: active (non-trash/spam) threads with unread
+    // inbound mail. `unreadCount > 0` already implies an unseen inbound message.
+    const all = [...owned, ...shared];
+    const ids = all.map((m) => m.id);
+    const unreadRows = ids.length
+      ? await db
+          .select({ mailboxId: thread.mailboxId, c: count() })
+          .from(thread)
+          .where(
+            and(
+              inArray(thread.mailboxId, ids),
+              eq(thread.trashed, false),
+              eq(thread.spam, false),
+              gt(thread.unreadCount, 0),
+            ),
+          )
+          .groupBy(thread.mailboxId)
+      : [];
+    const unreadMap = new Map(unreadRows.map((row) => [row.mailboxId, row.c]));
+
+    return c.json({
+      mailboxes: all.map((m) => ({ ...m, unread: unreadMap.get(m.id) ?? 0 })),
+    });
   });
 
   r.post("/", zValidator("json", createMailbox), async (c) => {

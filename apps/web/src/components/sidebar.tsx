@@ -116,7 +116,9 @@ function SidebarBody({ onClose }: { onClose?: () => void }) {
                             : "text-sidebar-foreground hover:bg-sidebar-accent/60",
                         )}
                       >
-                        <span className="truncate">{m.displayName ?? m.address}</span>
+                        <span className={cn("truncate", m.unread > 0 && "font-medium")}>
+                          {m.displayName ?? m.address}
+                        </span>
                         <span className="ml-2 flex shrink-0 items-center gap-1">
                           {readOnly && (
                             <span role="img" aria-label="Read-only" title="Read-only">
@@ -124,6 +126,15 @@ function SidebarBody({ onClose }: { onClose?: () => void }) {
                             </span>
                           )}
                           {m.expiresAt && <TtlBadge expiresAt={m.expiresAt} />}
+                          {m.unread > 0 && (
+                            <span
+                              className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 font-semibold text-[10px] text-primary-foreground tabular-nums leading-none"
+                              role="img"
+                              aria-label={`${m.unread} unread`}
+                            >
+                              {m.unread > 99 ? "99+" : m.unread}
+                            </span>
+                          )}
                         </span>
                       </Link>
                     </li>

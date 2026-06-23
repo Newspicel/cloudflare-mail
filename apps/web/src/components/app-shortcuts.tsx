@@ -29,6 +29,7 @@ export function AppShortcuts() {
     onSuccess: () => {
       if (mailboxId) qc.invalidateQueries({ queryKey: ["threads", mailboxId] });
       if (threadId) qc.invalidateQueries({ queryKey: ["thread", threadId] });
+      qc.invalidateQueries({ queryKey: ["mailboxes"] });
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
@@ -146,6 +147,7 @@ export function AppShortcuts() {
           body: JSON.stringify({ seen: false }),
         }).then(() => {
           if (mailboxId) qc.invalidateQueries({ queryKey: ["threads", mailboxId] });
+          qc.invalidateQueries({ queryKey: ["mailboxes"] });
         }),
       );
       return;

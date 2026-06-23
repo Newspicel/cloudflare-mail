@@ -46,6 +46,7 @@ export function ThreadList({
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["threads", mailboxId] });
+      qc.invalidateQueries({ queryKey: ["mailboxes"] });
       setSelected(new Set());
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
@@ -194,7 +195,10 @@ function ThreadRowItem({
   const patch = useMutation({
     mutationFn: (body: { trashed?: boolean; read?: boolean }) =>
       api(`/api/threads/${thread.id}`, { method: "PATCH", body: JSON.stringify(body) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["threads", mailboxId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["threads", mailboxId] });
+      qc.invalidateQueries({ queryKey: ["mailboxes"] });
+    },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
