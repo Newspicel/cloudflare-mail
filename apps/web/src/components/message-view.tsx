@@ -1,4 +1,5 @@
 import { Flag, hasFlag, setFlag } from "@cfmail/shared/flags";
+import type { UnsubscribeResultDto } from "@cfmail/shared/responses";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
@@ -13,7 +14,7 @@ import {
   Star,
   Trash2,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
@@ -290,6 +291,49 @@ function SpamBanner({ msg }: { msg: MessageRow }) {
   );
 }
 
+// Newsletters carry a List-Unsubscribe header; surface a one-tap opt-out. The
+// worker decides the channel (one-click POST / mailto / link) — a "link" result
+// is an https page we open in a new tab, everything else is handled server-side.
+function UnsubscribeBanner({ msg, readOnly }: { msg: MessageRow; readOnly: boolean }) {
+  const [done, setDone] = useState(false);
+  const unsub = useMutation({
+    mutationFn: () =>
+      api<UnsubscribeResultDto>(`/api/messages/${msg.id}/unsubscribe`, { method: "POST" }),
+    onSuccess: (res) => {
+      if (res.status === "open" && res.url) {
+        window.open(res.url, "_blank", "noopener,noreferrer");
+        return;
+      }
+      setDone(true);
+      toast.success("Unsubscribe request sent");
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed to unsubscribe"),
+  });
+
+  if (msg.direction !== "in" || !msg.listUnsubscribe) return null;
+
+  return (
+    <div className="flex items-center justify-between gap-3 border-b bg-muted/60 px-4 py-2 text-[12px] text-muted-foreground">
+      <div className="flex min-w-0 items-center gap-2">
+        <MailMinus className="size-4 shrink-0" />
+        <span className="truncate">
+          {done ? "Unsubscribe request sent." : "This is a newsletter."}
+        </span>
+      </div>
+      {!readOnly && !done && (
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => unsub.mutate()}
+          disabled={unsub.isPending}
+        >
+          {unsub.isPending ? "Unsubscribing…" : "Unsubscribe"}
+        </Button>
+      )}
+    </div>
+  );
+}
+
 function addrList(list: { name?: string; address: string }[]): string {
   return list.map((a) => a.name ?? a.address).join(", ");
 }
@@ -415,6 +459,7 @@ function MessageCard({
         </div>
       </header>
       <SpamBanner msg={msg} />
+      <UnsubscribeBanner msg={msg} readOnly={readOnly} />
       {bodyHtml ? (
         // Untrusted HTML renders in a sandboxed, scriptless iframe so a
         // sanitizer bypass can't reach the app origin or the session.

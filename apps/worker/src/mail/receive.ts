@@ -12,7 +12,14 @@ import { Flag } from "@cfmail/shared/flags";
 import { and, eq } from "drizzle-orm";
 import type { Env } from "../env.ts";
 import { broadcastToUsers } from "../hub.ts";
-import { addrsToText, bodyForIndex, parseMime, snippet, streamToArrayBuffer } from "./mime.ts";
+import {
+  addrsToText,
+  bodyForIndex,
+  extractUnsubscribe,
+  parseMime,
+  snippet,
+  streamToArrayBuffer,
+} from "./mime.ts";
 import { notifyMailbox } from "./push.ts";
 import type { AuthResult } from "./spam.ts";
 import { evaluateSpam, type SpamEvaluation } from "./spam.ts";
@@ -155,6 +162,7 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
 
   const receivedAt = new Date();
   const bodyIndex = bodyForIndex(parsed.text, parsed.html);
+  const unsub = extractUnsubscribe(parsed);
 
   await db.insert(message).values({
     id: messageId,
@@ -183,6 +191,8 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
     spamScore: spam?.score ?? null,
     spamReasons: spam?.reasons.length ? spam.reasons : null,
     spamAuth: spam ? spam.auth : null,
+    listUnsubscribe: unsub.listUnsubscribe,
+    listUnsubscribePost: unsub.listUnsubscribePost,
   });
 
   if (fileSpam) {

@@ -328,6 +328,13 @@ export const message = sqliteTable(
       dkim?: string;
       dmarc?: string;
     }>(),
+    // RFC 2369/8058 unsubscribe headers, captured at receive time. Their presence
+    // is what flags a message as a newsletter in the UI. `listUnsubscribe` is the
+    // raw List-Unsubscribe header (mailto:/https: targets); `listUnsubscribePost`
+    // is the List-Unsubscribe-Post value ("List-Unsubscribe=One-Click") that marks
+    // the sender as supporting one-click POST unsubscribe.
+    listUnsubscribe: text("list_unsubscribe"),
+    listUnsubscribePost: text("list_unsubscribe_post"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(now),
   },
   (t) => [
@@ -442,6 +449,11 @@ export const draft = sqliteTable(
     subject: text("subject").notNull().default(""),
     body: text("body").notNull().default(""),
     markdown: integer("markdown", { mode: "boolean" }).notNull().default(false),
+    // Body editor format. `markdown` is kept in sync (= format === "markdown")
+    // for back-compat; new code reads `format`.
+    format: text("format", { enum: ["text", "markdown", "html"] })
+      .notNull()
+      .default("text"),
     attachments: text("attachments", { mode: "json" })
       .$type<{ r2Key: string; filename: string; contentType: string; sizeBytes: number }[]>()
       .notNull()
