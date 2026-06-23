@@ -128,9 +128,6 @@ export function ThreadList({
         ) : (
           <div className="flex h-11 shrink-0 items-center gap-2 border-b px-2">
             <FolderTabs mailboxId={mailboxId} view={view} />
-            <span className="ml-auto pr-1 text-[11px] text-muted-foreground tabular-nums">
-              {threads.length}
-            </span>
           </div>
         )}
         {expiresAt && <ExpiryBanner expiresAt={expiresAt} />}
