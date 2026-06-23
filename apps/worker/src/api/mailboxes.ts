@@ -269,41 +269,20 @@ export function mailboxesRoutes() {
     if (body.write) perms = grant(perms, Perm.WRITE);
     if (body.manage) perms = grant(perms, Perm.MANAGE);
 
-    let targetUserId = body.userId;
-    if (!targetUserId && body.email) {
-      const found = await db.query.user.findFirst({
-        where: eq(user.email, body.email.toLowerCase()),
-        columns: { id: true },
-      });
-      if (!found) {
-        const inviteId = crypto.randomUUID();
-        await db
-          .insert(mailboxInvite)
-          .values({
-            id: inviteId,
-            mailboxId: id,
-            email: body.email.toLowerCase(),
-            perms,
-            invitedByUserId: u.id,
-          })
-          .onConflictDoUpdate({
-            target: [mailboxInvite.mailboxId, mailboxInvite.email],
-            set: { perms, invitedByUserId: u.id },
-          });
-        return c.json({ ok: true, invited: true, email: body.email.toLowerCase() }, 202);
-      }
-      targetUserId = found.id;
-    }
-    if (!targetUserId) throw new HTTPException(400, { message: "userId or email required" });
+    const found = await db.query.user.findFirst({
+      where: eq(user.id, body.userId),
+      columns: { id: true },
+    });
+    if (!found) throw new HTTPException(404, { message: "user not found" });
 
     await db
       .insert(mailboxMember)
-      .values({ mailboxId: id, userId: targetUserId, perms })
+      .values({ mailboxId: id, userId: found.id, perms })
       .onConflictDoUpdate({
         target: [mailboxMember.mailboxId, mailboxMember.userId],
         set: { perms },
       });
-    return c.json({ ok: true, userId: targetUserId });
+    return c.json({ ok: true, userId: found.id });
   });
 
   r.get("/:id/invites", async (c) => {
