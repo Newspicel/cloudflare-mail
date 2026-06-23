@@ -5,6 +5,7 @@ import type {
   LabelDto,
   MailboxSummaryDto,
   MailView,
+  MessageBodyDto,
   MessageDto,
   MessageLabelDto,
   MeUserDto,
@@ -96,6 +97,16 @@ export const threadQuery = (threadId: string) =>
     queryKey: keys.thread(threadId),
     queryFn: () => api<{ thread: ThreadDto; messages: MessageDto[] }>(`/api/threads/${threadId}`),
     enabled: Boolean(threadId),
+  });
+
+// Full body, parsed on demand from the raw `.eml`. Immutable per message, so it
+// never goes stale once fetched.
+export const messageBodyQuery = (messageId: string) =>
+  queryOptions({
+    queryKey: keys.messageBody(messageId),
+    queryFn: () => api<MessageBodyDto>(`/api/messages/${messageId}/body`),
+    enabled: Boolean(messageId),
+    staleTime: Number.POSITIVE_INFINITY,
   });
 
 export const searchQuery = (q: string) =>
