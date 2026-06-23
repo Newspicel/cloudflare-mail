@@ -7,6 +7,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
+import { assertOwnedAttachmentKeys } from "../mail/attachment-keys.ts";
 import { requireUser } from "../middleware.ts";
 import { requirePerm } from "../permissions.ts";
 import { serializeDraft } from "./serialize.ts";
@@ -43,6 +44,7 @@ export function draftsRoutes() {
     const user = c.get("user")!;
     const body = c.req.valid("json");
     await requirePerm(db, user.id, body.mailboxId, Perm.WRITE);
+    assertOwnedAttachmentKeys(user.id, body.attachments);
 
     const id = crypto.randomUUID();
     await db.insert(draft).values({
@@ -70,6 +72,7 @@ export function draftsRoutes() {
     const id = c.req.param("id");
     const body = c.req.valid("json");
     await loadOwn(db, id, user.id);
+    if (body.attachments !== undefined) assertOwnedAttachmentKeys(user.id, body.attachments);
 
     const patch: Record<string, unknown> = { updatedAt: new Date() };
     if (body.to !== undefined) patch.toAddrs = body.to;
@@ -94,8 +97,15 @@ export function draftsRoutes() {
     const id = c.req.param("id");
     const row = await loadOwn(db, id, user.id);
 
-    // Best-effort cleanup of orphaned draft attachment blobs in R2.
-    await Promise.all((row.attachments ?? []).map((a) => c.env.BLOBS.delete(a.r2Key)));
+    // Best-effort cleanup of orphaned draft attachment blobs in R2. Only touch
+    // keys in the caller's own upload namespace — never delete other tenants'
+    // blobs, even if a stale row somehow holds a foreign key.
+    const prefix = `draft/${user.id}/`;
+    await Promise.all(
+      (row.attachments ?? [])
+        .filter((a) => a.r2Key.startsWith(prefix))
+        .map((a) => c.env.BLOBS.delete(a.r2Key)),
+    );
     await db.delete(draft).where(eq(draft.id, id));
     return c.json({ ok: true });
   });
