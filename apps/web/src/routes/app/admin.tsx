@@ -1186,13 +1186,41 @@ function AdminMailboxes({ meId }: { meId: string }) {
   const mailboxes = mailboxesQ.data?.mailboxes ?? [];
   const redirects = redirectsQ.data?.redirects ?? [];
 
+  const [query, setQuery] = useState("");
+  const [kindFilter, setKindFilter] = useState<
+    "all" | "personal" | "group" | "service" | "temp" | "redirect"
+  >("all");
+  const [sort, setSort] = useState<"address" | "address-desc" | "type">("address");
+
   type Entry =
     | { kind: "mailbox"; address: string; mb: AdminMailbox }
     | { kind: "redirect"; address: string; rd: RedirectRow };
-  const entries: Entry[] = [
+  const allEntries: Entry[] = [
     ...mailboxes.map((mb): Entry => ({ kind: "mailbox", address: mb.address, mb })),
     ...redirects.map((rd): Entry => ({ kind: "redirect", address: rd.address, rd })),
-  ].toSorted((a, b) => a.address.localeCompare(b.address));
+  ];
+  const total = allEntries.length;
+
+  const kindOf = (e: Entry) => (e.kind === "redirect" ? "redirect" : e.mb.type);
+  const q = query.trim().toLowerCase();
+  const entries = allEntries
+    .filter((e) => kindFilter === "all" || kindOf(e) === kindFilter)
+    .filter((e) => {
+      if (!q) return true;
+      if (e.kind === "redirect")
+        return e.address.toLowerCase().includes(q) || e.rd.targetAddress.toLowerCase().includes(q);
+      return [e.address, e.mb.displayName, e.mb.ownerEmail, e.mb.ownerName].some((v) =>
+        v?.toLowerCase().includes(q),
+      );
+    })
+    .toSorted((a, b) => {
+      if (sort === "address-desc") return b.address.localeCompare(a.address);
+      if (sort === "type") {
+        const t = kindOf(a).localeCompare(kindOf(b));
+        return t !== 0 ? t : a.address.localeCompare(b.address);
+      }
+      return a.address.localeCompare(b.address);
+    });
 
   const eligibleDomains = (domainsQ.data?.domains ?? []).filter((d) => d.allowedKinds !== 0);
 
@@ -1201,6 +1229,41 @@ function AdminMailboxes({ meId }: { meId: string }) {
       title="Mailboxes & redirects"
       description="Every mailbox and inbound redirect in this deployment. A redirect is an inbound-only alias — mail to it lands in the target mailbox; it cannot send. A catch-all (*@domain) receives anything with no matching mailbox or specific redirect."
     >
+      {total > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <Input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search address or owner…"
+            className="h-8 min-w-[12rem] flex-1 text-[13px]"
+          />
+          <Select
+            value={kindFilter}
+            onChange={(e) => setKindFilter(e.target.value as typeof kindFilter)}
+            className="h-8 text-[13px]"
+          >
+            <option value="all">All kinds</option>
+            <option value="personal">Personal</option>
+            <option value="group">Group</option>
+            <option value="service">Service</option>
+            <option value="temp">Temp</option>
+            <option value="redirect">Redirect</option>
+          </Select>
+          <Select
+            value={sort}
+            onChange={(e) => setSort(e.target.value as typeof sort)}
+            className="h-8 text-[13px]"
+          >
+            <option value="address">Address A–Z</option>
+            <option value="address-desc">Address Z–A</option>
+            <option value="type">Kind</option>
+          </Select>
+          <span className="text-[12px] text-muted-foreground">
+            {entries.length === total ? total : `${entries.length} / ${total}`}
+          </span>
+        </div>
+      )}
       <ul className="divide-y rounded-md border">
         {entries.map((e) =>
           e.kind === "mailbox" ? (
@@ -1226,7 +1289,7 @@ function AdminMailboxes({ meId }: { meId: string }) {
         )}
         {entries.length === 0 && (
           <li className="px-3 py-8 text-center text-[12px] text-muted-foreground">
-            No mailboxes or redirects yet.
+            {total === 0 ? "No mailboxes or redirects yet." : "No matches."}
           </li>
         )}
       </ul>
