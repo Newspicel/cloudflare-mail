@@ -26,6 +26,12 @@ interface MailboxSettings {
   pgpConfigured: boolean;
 }
 
+interface ImportTarget {
+  id: string;
+  address: string;
+  displayName?: string | null;
+}
+
 interface ContactKey {
   id: string;
   email: string;
@@ -557,6 +563,21 @@ export function MailboxImportSection({ mailboxes }: { mailboxes: ImportTarget[] 
         </div>
       </header>
       <div className="grid gap-3 px-5 py-4 text-[13px]">
+        <label className="grid gap-1.5">
+          <span className="text-[11px] font-medium text-foreground">Import into</span>
+          <select
+            value={mailboxId}
+            disabled={running}
+            onChange={(e) => setMailboxId(e.target.value)}
+            className={cn(inputClass, "cursor-pointer appearance-none disabled:opacity-60")}
+          >
+            {mailboxes.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.displayName ? `${m.displayName} (${m.address})` : m.address}
+              </option>
+            ))}
+          </select>
+        </label>
         <input
           ref={inputRef}
           type="file"
@@ -586,7 +607,12 @@ export function MailboxImportSection({ mailboxes }: { mailboxes: ImportTarget[] 
         )}
       </div>
       <div className="flex justify-end border-t bg-muted/30 px-5 py-2.5">
-        <Button type="button" variant="primary" disabled={!files.length || running} onClick={start}>
+        <Button
+          type="button"
+          variant="primary"
+          disabled={!files.length || running || !mailboxId}
+          onClick={start}
+        >
           {running
             ? "Importing…"
             : files.length

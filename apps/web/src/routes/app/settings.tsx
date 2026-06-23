@@ -6,7 +6,7 @@ import { Check, Copy, Trash2 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { MailboxSettingsForm } from "@/components/mailbox-settings-form.tsx";
+import { MailboxImportSection, MailboxSettingsForm } from "@/components/mailbox-settings-form.tsx";
 import { RulesSection } from "@/components/rules-settings.tsx";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar.tsx";
 import { useConfirmHelpers } from "@/components/ui/confirm.tsx";
@@ -49,6 +49,8 @@ function SettingsPage() {
   const editable = (mailboxesQ.data?.mailboxes ?? []).filter(
     (m) => m.type !== "temp" && has(m.perms, Perm.MANAGE),
   );
+  // Service mailboxes can't be imported into (no owner-facing inbox).
+  const importable = editable.filter((m) => m.type !== "service");
 
   return (
     <div className="h-full overflow-y-auto">
@@ -104,6 +106,7 @@ function SettingsPage() {
                   type={m.type}
                 />
               ))}
+              {importable.length > 0 && <MailboxImportSection mailboxes={importable} />}
             </div>
           </div>
         </div>

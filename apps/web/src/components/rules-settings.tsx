@@ -87,7 +87,12 @@ export function RulesSection({ mailboxes }: { mailboxes: MailboxSummary[] }) {
           <div className="w-48 shrink-0">
             <Select value={mailboxId} onValueChange={(v) => setMailboxId(v as string)}>
               <SelectTrigger aria-label="Mailbox">
-                <SelectValue />
+                <SelectValue>
+                  {(value) => {
+                    const m = mailboxes.find((mb) => mb.id === value);
+                    return m?.displayName ?? m?.address ?? "";
+                  }}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {mailboxes.map((m) => (
