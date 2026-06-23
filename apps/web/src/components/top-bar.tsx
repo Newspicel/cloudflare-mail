@@ -18,6 +18,7 @@ import { cn } from "@/lib/cn.ts";
 import { meQuery, type SearchResult, searchQuery } from "@/lib/queries.ts";
 import { type Theme, useTheme } from "@/lib/theme.ts";
 import { Logo } from "./logo.tsx";
+import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar.tsx";
 import { Button } from "./ui/button.tsx";
 import {
   DropdownMenu,
@@ -55,7 +56,7 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
       <SearchBox />
 
       <div className="flex flex-1 items-center justify-end">
-        <AccountMenu email={data?.user?.email} name={data?.user?.name} />
+        <AccountMenu email={data?.user?.email} name={data?.user?.name} image={data?.user?.image} />
       </div>
     </header>
   );
@@ -67,7 +68,15 @@ const THEME_OPTIONS: { value: Theme; label: string; icon: typeof Monitor }[] = [
   { value: "dark", label: "Dark", icon: Moon },
 ];
 
-function AccountMenu({ email, name }: { email?: string | null; name?: string | null }) {
+function AccountMenu({
+  email,
+  name,
+  image,
+}: {
+  email?: string | null;
+  name?: string | null;
+  image?: string | null;
+}) {
   const nav = useNavigate();
   const { theme, setTheme } = useTheme();
   const initial = name?.[0]?.toUpperCase() ?? email?.[0]?.toUpperCase() ?? "?";
@@ -80,10 +89,13 @@ function AccountMenu({ email, name }: { email?: string | null; name?: string | n
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        className="grid h-8 w-8 shrink-0 select-none place-items-center rounded-full bg-primary/12 font-semibold text-[12px] text-primary outline-none transition hover:bg-primary/20 focus-visible:ring-2 focus-visible:ring-ring/45"
+        className="shrink-0 rounded-full outline-none transition focus-visible:ring-2 focus-visible:ring-ring/45"
         aria-label="Account menu"
       >
-        {initial}
+        <Avatar className="size-8 bg-primary/12 text-[12px] font-semibold text-primary transition hover:bg-primary/20">
+          {image && <AvatarImage src={image} alt={name ?? email ?? ""} />}
+          <AvatarFallback>{initial}</AvatarFallback>
+        </Avatar>
       </DropdownMenuTrigger>
       <DropdownMenuContent className="min-w-[13rem]">
         {email && (
