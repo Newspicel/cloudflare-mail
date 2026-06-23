@@ -9,6 +9,7 @@ import type { AppBindings } from "../env.ts";
 import { getOrCreateVapid } from "../mail/push.ts";
 import { requireUser } from "../middleware.ts";
 import { requirePerm } from "../permissions.ts";
+import { isBlockedHost } from "../ssrf.ts";
 
 // Push endpoints are always public HTTPS hosts handed out by a browser push
 // service. Reject anything else at registration so the fan-out fetch can never
@@ -25,12 +26,11 @@ const pushEndpoint = z
     }
     if (url.protocol !== "https:") return false;
     const host = url.hostname.toLowerCase();
-    if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local"))
-      return false;
-    // IPv4 literal, bracketed IPv6 literal, or no dot (bare hostname) — none are real push services.
-    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(":") || !host.includes(".")) {
-      return false;
-    }
+    // Bracketed IPv6 literal or no dot (bare hostname) — never a real push
+    // service. `isBlockedHost` additionally rejects loopback/private/reserved
+    // targets in any IPv4 encoding (e.g. `127.1`, `0x7f000001`).
+    if (host.includes(":") || !host.includes(".")) return false;
+    if (isBlockedHost(host)) return false;
     return true;
   }, "endpoint must be a public https URL");
 

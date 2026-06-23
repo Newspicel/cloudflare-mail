@@ -3,6 +3,7 @@ import { mailboxNotify, pushSubscription } from "@cfmail/db/schema";
 import { buildPushHTTPRequest } from "@pushforge/builder";
 import { and, eq, inArray } from "drizzle-orm";
 import { getConfig, setConfig } from "../config.ts";
+import { safeRedirectFetch } from "../ssrf.ts";
 
 const VAPID_PUBLIC = "vapid_public";
 const VAPID_PRIVATE = "vapid_private_jwk";
@@ -97,7 +98,11 @@ export async function notifyMailbox(db: DB, n: MailNotification): Promise<void> 
               options: { ttl: 12 * 60 * 60, urgency: "high" },
             },
           });
-          const res = await fetch(endpoint, { method: "POST", headers, body });
+          // Endpoints are validated at registration, but re-guard each hop:
+          // a push host that 302s elsewhere must not steer us at an internal
+          // target (blind status-only oracle otherwise).
+          const res = await safeRedirectFetch(new URL(endpoint), { method: "POST", headers, body });
+          if ("blocked" in res) return;
           if (res.status === 404 || res.status === 410) dead.push(sub.id);
         } catch (err) {
           console.error("push send failed", err);

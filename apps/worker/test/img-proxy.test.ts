@@ -113,8 +113,29 @@ describe("isBlockedHost", () => {
     }
   });
 
+  it("blocks loopback/private in non-decimal IPv4 encodings", () => {
+    for (const h of [
+      "2130706433", // 127.0.0.1 as a single decimal
+      "0x7f000001", // hex
+      "0177.0.0.1", // octal first octet
+      "127.1", // short form
+      "127.0.1", // 3-part short form
+      "::ffff:127.0.0.1", // IPv4-mapped IPv6
+      "::ffff:169.254.169.254", // IPv4-mapped metadata
+      "::", // unspecified
+    ]) {
+      expect(isBlockedHost(h), h).toBe(true);
+    }
+  });
+
   it("allows public hosts", () => {
-    for (const h of ["example.com", "8.8.8.8", "172.32.0.1", "2606:4700::1111"]) {
+    for (const h of [
+      "example.com",
+      "8.8.8.8",
+      "172.32.0.1",
+      "2606:4700::1111",
+      "16843009", // 1.1.1.1 as a single decimal — public, must pass
+    ]) {
       expect(isBlockedHost(h), h).toBe(false);
     }
   });
