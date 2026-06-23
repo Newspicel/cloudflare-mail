@@ -72,15 +72,18 @@ export function mailboxesRoutes() {
       role: "owner" as const,
       perms: 7,
     }));
-    const shared = memberRows.map((m) => ({
-      id: m.id,
-      address: `${m.localPart}@${m.domainName}`,
-      displayName: m.displayName,
-      type: m.type,
-      expiresAt: m.expiresAt,
-      role: "member" as const,
-      perms: m.perms,
-    }));
+    const ownedIds = new Set(ownerRows.map((m) => m.id));
+    const shared = memberRows
+      .filter((m) => !ownedIds.has(m.id))
+      .map((m) => ({
+        id: m.id,
+        address: `${m.localPart}@${m.domainName}`,
+        displayName: m.displayName,
+        type: m.type,
+        expiresAt: m.expiresAt,
+        role: "member" as const,
+        perms: m.perms,
+      }));
 
     return c.json({ mailboxes: [...owned, ...shared] });
   });

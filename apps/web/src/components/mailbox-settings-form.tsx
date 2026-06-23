@@ -137,7 +137,7 @@ export function MailboxSettingsForm({
             onChange={(e) => setSignature(e.target.value)}
             rows={4}
             placeholder="Appended to every outgoing message"
-            className={cn(inputClass, "min-h-[6rem] resize-y")}
+            className={cn(inputClass, "h-auto min-h-[6rem] resize-y py-2 leading-normal")}
             maxLength={5000}
           />
         </label>
