@@ -1,0 +1,1 @@
+ALTER TABLE `draft` ADD `from_address` text;

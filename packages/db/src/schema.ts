@@ -497,6 +497,10 @@ export const draft = sqliteTable(
     // Reply/forward threading context (the thread id is resolved at send time).
     inReplyTo: text("in_reply_to"),
     references: text("references", { mode: "json" }).$type<string[]>(),
+    // Sender override — a plus-alias of the mailbox (e.g. "hi+tag@") chosen when
+    // replying to mail delivered to that sub-address. Null = the mailbox's own
+    // address. Validated against the mailbox at send time (mail/send.ts).
+    fromAddress: text("from_address"),
     // Reply/forward quote source. The original message is re-quoted from its raw
     // `.eml` at send time (mail/quote.ts); persisting the ref lets a reopened
     // draft restore the quote it would otherwise lose.

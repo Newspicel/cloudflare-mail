@@ -59,6 +59,7 @@ export function draftsRoutes() {
         id,
         mailboxId: body.mailboxId,
         userId: user.id,
+        fromAddress: body.fromAddress ?? null,
         inReplyTo: body.inReplyTo ?? null,
         references: body.references ?? null,
         quoteMessageId: body.quote?.messageId ?? null,
@@ -86,6 +87,7 @@ export function draftsRoutes() {
     if (body.attachments !== undefined) assertOwnedAttachmentKeys(user.id, body.attachments);
 
     const patch = buildPatch<typeof draft.$inferInsert>(body, {
+      fromAddress: true,
       to: { to: "toAddrs" },
       cc: { to: "ccAddrs" },
       bcc: { to: "bccAddrs" },
