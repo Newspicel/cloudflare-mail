@@ -3,7 +3,15 @@
 // and signs/encrypts outbound + decrypts/verifies inbound, so search/spam/
 // threading keep working on plaintext. This is NOT end-to-end — the server can
 // read mail. See CLAUDE.md invariant 17.
-import * as openpgp from "openpgp";
+import type * as OpenPGP from "openpgp";
+
+// openpgp is ~377 KB and PGP is opt-in per mailbox, so most isolates never run
+// it. Load it lazily (cached) to keep it out of cold-start top-level eval.
+let pgpModule: Promise<typeof import("openpgp")> | null = null;
+function loadPgp(): Promise<typeof import("openpgp")> {
+  if (!pgpModule) pgpModule = import("openpgp");
+  return pgpModule;
+}
 
 const CRLF = "\r\n";
 
@@ -47,6 +55,7 @@ function newPassphrase(): string {
 }
 
 export async function generateKeypair(name: string, email: string): Promise<MailboxKeyMaterial> {
+  const openpgp = await loadPgp();
   const passphrase = newPassphrase();
   const { privateKey, publicKey } = await openpgp.generateKey({
     type: "curve25519",
@@ -70,6 +79,7 @@ export async function importPrivateKey(
   armored: string,
   passphrase?: string,
 ): Promise<MailboxKeyMaterial> {
+  const openpgp = await loadPgp();
   let priv = await openpgp.readPrivateKey({ armoredKey: armored });
   if (!priv.isDecrypted()) {
     if (!passphrase) throw new Error("private key is passphrase-protected");
@@ -90,6 +100,7 @@ export interface PublicKeyInfo {
 
 // Parse an armored public key for the contact-key store.
 export async function readPublicKeyInfo(armored: string): Promise<PublicKeyInfo> {
+  const openpgp = await loadPgp();
   const key = await openpgp.readKey({ armoredKey: armored });
   if (key.isPrivate()) throw new Error("expected a public key, got a private key");
   const emails = key
@@ -159,6 +170,7 @@ export async function buildSignedMime(
   privArmored: string,
   passphrase: string,
 ): Promise<string> {
+  const openpgp = await loadPgp();
   const priv = await unlockPrivate(privArmored, passphrase);
   const entity = buildContentEntity(content);
   const detached = await openpgp.sign({
@@ -197,6 +209,7 @@ export async function buildEncryptedMime(
   passphrase: string,
   recipientPublicKeys: string[],
 ): Promise<string> {
+  const openpgp = await loadPgp();
   const priv = await unlockPrivate(privArmored, passphrase);
   const encryptionKeys = await Promise.all(
     recipientPublicKeys.map((k) => openpgp.readKey({ armoredKey: k })),
@@ -251,6 +264,7 @@ export async function decryptVerify(args: {
   senderPublicKey?: string | null;
 }): Promise<DecryptResult> {
   const { rawText, privArmored, passphrase, senderPublicKey } = args;
+  const openpgp = await loadPgp();
   const shape = detectPgp(rawText);
   const verificationKeys = await readVerificationKeys(senderPublicKey);
   const haveKey = verificationKeys.length > 0;
@@ -327,10 +341,11 @@ export async function decryptVerify(args: {
   return { encrypted: false, signed: false, verify: null, signedBy: null, decryptedRaw: null };
 }
 
-async function readVerificationKeys(armored?: string | null): Promise<openpgp.PublicKey[]> {
+async function readVerificationKeys(armored?: string | null): Promise<OpenPGP.PublicKey[]> {
   if (!armored) return [];
+  const openpgp = await loadPgp();
   try {
-    return [(await openpgp.readKey({ armoredKey: armored })) as openpgp.PublicKey];
+    return [(await openpgp.readKey({ armoredKey: armored })) as OpenPGP.PublicKey];
   } catch {
     return [];
   }
@@ -426,13 +441,15 @@ function topHeaders(h: PgpHeaders, extra: Record<string, string>): string {
   return lines.join(CRLF);
 }
 
-async function unlockPrivate(armored: string, passphrase: string): Promise<openpgp.PrivateKey> {
+async function unlockPrivate(armored: string, passphrase: string): Promise<OpenPGP.PrivateKey> {
+  const openpgp = await loadPgp();
   const priv = await openpgp.readPrivateKey({ armoredKey: armored });
   if (priv.isDecrypted()) return priv;
   return openpgp.decryptKey({ privateKey: priv, passphrase });
 }
 
 async function signatureMicalg(armoredSig: string): Promise<string> {
+  const openpgp = await loadPgp();
   const sig = await openpgp.readSignature({ armoredSignature: armoredSig });
   // biome-ignore lint/suspicious/noExplicitAny: signature packet shape isn't in the public types
   const algo = (sig.packets[0] as any)?.hashAlgorithm as number | undefined;
