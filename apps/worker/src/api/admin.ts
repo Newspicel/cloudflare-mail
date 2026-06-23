@@ -1,13 +1,15 @@
-import { domain, mailbox, mailboxSpamUsage, redirect, user } from "@cfmail/db/schema";
+import { domain, mailbox, mailboxSpamUsage, message, redirect, user } from "@cfmail/db/schema";
 import {
   adminCreateMailbox,
   adminDeleteMailbox,
   createRedirect,
+  createServiceMailbox,
   migrateMailbox,
   updateMailboxSettings,
+  updateServiceMailbox,
 } from "@cfmail/shared/schemas";
 import { zValidator } from "@hono/zod-validator";
-import { aliasedTable, and, asc, desc, eq } from "drizzle-orm";
+import { aliasedTable, and, asc, count, desc, eq, inArray, max, ne } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { dbFromCtx } from "../db.ts";
@@ -15,6 +17,7 @@ import type { AppBindings } from "../env.ts";
 import { collectMailboxBlobKeys, deleteBlobs } from "../mail/blobs.ts";
 import { authorizeMailboxCreate } from "../mailbox-access.ts";
 import { requireAdmin, requireUser } from "../middleware.ts";
+import { sha256Hex } from "./svc.ts";
 
 // Admin-only mailbox & redirect management. Mounted at /api/admin.
 export function adminRoutes() {
@@ -41,6 +44,8 @@ export function adminRoutes() {
       .from(mailbox)
       .innerJoin(domain, eq(mailbox.domainId, domain.id))
       .innerJoin(user, eq(mailbox.ownerUserId, user.id))
+      // service mailboxes have their own section (GET /service).
+      .where(ne(mailbox.type, "service"))
       .orderBy(asc(domain.name), asc(mailbox.localPart));
     return c.json({
       mailboxes: rows.map((m) => ({
@@ -63,6 +68,11 @@ export function adminRoutes() {
     const body = c.req.valid("json");
     if (body.type === "temp") {
       throw new HTTPException(400, { message: "temp mailboxes are created via /api/temp" });
+    }
+    if (body.type === "service") {
+      throw new HTTPException(400, {
+        message: "service mailboxes are created via /api/admin/service",
+      });
     }
 
     const owner = await db.query.user.findFirst({
@@ -223,6 +233,133 @@ export function adminRoutes() {
         targetMailboxId: target.id,
       });
     }
+    return c.body(null, 204);
+  });
+
+  // ─── Service mailboxes ──────────────────────────────────────────────────────
+  // Key-driven, no owner/members. The key is shown once on create/rotate and
+  // only its SHA-256 hash is stored.
+
+  r.get("/service", async (c) => {
+    const db = dbFromCtx(c);
+    const rows = await db
+      .select({
+        id: mailbox.id,
+        localPart: mailbox.localPart,
+        displayName: mailbox.displayName,
+        domainName: domain.name,
+        mode: mailbox.serviceMode,
+        keyHash: mailbox.serviceKeyHash,
+        createdAt: mailbox.createdAt,
+      })
+      .from(mailbox)
+      .innerJoin(domain, eq(mailbox.domainId, domain.id))
+      .where(eq(mailbox.type, "service"))
+      .orderBy(asc(domain.name), asc(mailbox.localPart));
+
+    const ids = rows.map((row) => row.id);
+    const stats = ids.length
+      ? await db
+          .select({
+            mailboxId: message.mailboxId,
+            c: count(),
+            last: max(message.createdAt),
+          })
+          .from(message)
+          .where(inArray(message.mailboxId, ids))
+          .groupBy(message.mailboxId)
+      : [];
+    const statMap = new Map(stats.map((s) => [s.mailboxId, s]));
+
+    return c.json({
+      services: rows.map((row) => ({
+        id: row.id,
+        address: `${row.localPart}@${row.domainName}`,
+        displayName: row.displayName,
+        mode: row.mode,
+        hasKey: Boolean(row.keyHash),
+        messageCount: statMap.get(row.id)?.c ?? 0,
+        lastMessageAt: statMap.get(row.id)?.last ?? null,
+        createdAt: row.createdAt,
+      })),
+    });
+  });
+
+  r.post("/service", zValidator("json", createServiceMailbox), async (c) => {
+    const db = dbFromCtx(c);
+    const me = c.get("user")!;
+    const body = c.req.valid("json");
+
+    // Admin bypasses the per-user grant; domain.allowedKinds is still enforced.
+    await authorizeMailboxCreate(db, me, body.domainId, "service");
+
+    const id = crypto.randomUUID();
+    const key = crypto.randomUUID();
+    try {
+      await db.insert(mailbox).values({
+        id,
+        domainId: body.domainId,
+        localPart: body.localPart.toLowerCase(),
+        displayName: body.displayName ?? null,
+        type: "service",
+        ownerUserId: me.id,
+        serviceMode: body.mode,
+        serviceKeyHash: await sha256Hex(key),
+        spamFilter: "off",
+      });
+    } catch {
+      throw new HTTPException(409, { message: "address already in use" });
+    }
+    return c.json({ id, key }, 201);
+  });
+
+  r.post("/service/:id/rotate", async (c) => {
+    const db = dbFromCtx(c);
+    const id = c.req.param("id");
+    const mb = await db.query.mailbox.findFirst({
+      where: and(eq(mailbox.id, id), eq(mailbox.type, "service")),
+      columns: { id: true },
+    });
+    if (!mb) throw new HTTPException(404, { message: "not found" });
+    const key = crypto.randomUUID();
+    await db
+      .update(mailbox)
+      .set({ serviceKeyHash: await sha256Hex(key) })
+      .where(eq(mailbox.id, id));
+    return c.json({ key });
+  });
+
+  r.patch("/service/:id", zValidator("json", updateServiceMailbox), async (c) => {
+    const db = dbFromCtx(c);
+    const id = c.req.param("id");
+    const body = c.req.valid("json");
+    const mb = await db.query.mailbox.findFirst({
+      where: and(eq(mailbox.id, id), eq(mailbox.type, "service")),
+      columns: { id: true },
+    });
+    if (!mb) throw new HTTPException(404, { message: "not found" });
+
+    const patch: Partial<{ displayName: string | null; serviceMode: "duplex" | "send" }> = {};
+    if (body.displayName !== undefined)
+      patch.displayName = body.displayName?.trim() ? body.displayName.trim() : null;
+    if (body.mode !== undefined) patch.serviceMode = body.mode;
+    if (Object.keys(patch).length === 0) return c.json({ ok: true });
+
+    await db.update(mailbox).set(patch).where(eq(mailbox.id, id));
+    return c.json({ ok: true });
+  });
+
+  r.delete("/service/:id", async (c) => {
+    const db = dbFromCtx(c);
+    const id = c.req.param("id");
+    const mb = await db.query.mailbox.findFirst({
+      where: and(eq(mailbox.id, id), eq(mailbox.type, "service")),
+      columns: { id: true },
+    });
+    if (!mb) throw new HTTPException(404, { message: "not found" });
+    const keys = await collectMailboxBlobKeys(db, id);
+    await deleteBlobs(c.env, keys);
+    await db.delete(mailbox).where(eq(mailbox.id, id));
     return c.body(null, 204);
   });
 

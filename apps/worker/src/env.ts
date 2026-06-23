@@ -16,6 +16,14 @@ export interface HonoVars {
   user: User | null;
   sessionId: string | null;
   shareMailboxId: string | null;
+  // Set by the bearer-key middleware on /api/svc routes — the mailbox the key
+  // unlocks. Never set on session routes.
+  serviceMailbox: {
+    id: string;
+    domainId: string;
+    localPart: string;
+    mode: "duplex" | "send";
+  } | null;
   baseUrl: string;
 }
 

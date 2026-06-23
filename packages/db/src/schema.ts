@@ -188,6 +188,14 @@ export const mailbox = sqliteTable(
     // Monthly Workers AI token budget for spam classification; null = unlimited.
     // When exceeded, the ai level silently falls back to standard.
     spamAiTokenCap: integer("spam_ai_token_cap"),
+    // service mailboxes only — SHA-256 (hex) of the bearer API key. Null until a
+    // key is issued; rotating replaces it (single key, instant cutover).
+    serviceKeyHash: text("service_key_hash"),
+    // service mailboxes only — "duplex" accepts inbound (poll via API);
+    // "send" rejects inbound with a hard bounce. Ignored for other types.
+    serviceMode: text("service_mode", { enum: ["duplex", "send"] })
+      .notNull()
+      .default("duplex"),
     expiresAt: integer("expires_at", { mode: "timestamp" }),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(now),
   },
@@ -196,6 +204,7 @@ export const mailbox = sqliteTable(
     index("mailbox_owner_idx").on(t.ownerUserId),
     index("mailbox_expires_idx").on(t.expiresAt),
     index("mailbox_type_idx").on(t.type),
+    uniqueIndex("mailbox_service_key_idx").on(t.serviceKeyHash),
   ],
 );
 

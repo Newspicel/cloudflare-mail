@@ -155,6 +155,24 @@ export const createMailbox = z.object({
     .optional(),
 });
 
+export const ServiceMode = z.enum(["duplex", "send"]);
+export type ServiceMode = z.infer<typeof ServiceMode>;
+
+// Admin: create a key-driven service mailbox. No owner/members — access is the
+// API key alone. `duplex` accepts inbound (poll via API); `send` is send-only.
+export const createServiceMailbox = z.object({
+  domainId: z.string().min(1),
+  localPart,
+  displayName: z.string().max(200).optional(),
+  mode: ServiceMode.default("duplex"),
+});
+
+// Admin: edit a service mailbox's identity / direction.
+export const updateServiceMailbox = z.object({
+  displayName: z.string().max(200).nullable().optional(),
+  mode: ServiceMode.optional(),
+});
+
 // Admin: create a mailbox owned by an arbitrary user.
 export const adminCreateMailbox = z.object({
   domainId: z.string().min(1),
@@ -231,6 +249,11 @@ export const sendMessage = z.object({
     .optional(),
 });
 export type SendMessageInput = z.infer<typeof sendMessage>;
+
+// Key-authed send from a service mailbox — the mailbox is resolved from the
+// bearer key, and attachments (which require pre-uploaded R2 keys) are omitted.
+export const serviceSend = sendMessage.omit({ mailboxId: true, attachments: true });
+export type ServiceSendInput = z.infer<typeof serviceSend>;
 
 export const createTempMailbox = z.object({
   domainId: z.string().min(1),
