@@ -65,7 +65,8 @@ export function draftsRoutes() {
       bccAddrs: body.bcc ?? null,
       subject: body.subject,
       body: body.body,
-      markdown: body.markdown,
+      format: body.format,
+      markdown: body.format === "markdown",
       attachments: body.attachments,
     });
     const row = await db.query.draft.findFirst({ where: eq(draft.id, id) });
@@ -87,7 +88,10 @@ export function draftsRoutes() {
     if (body.bcc !== undefined) patch.bccAddrs = body.bcc;
     if (body.subject !== undefined) patch.subject = body.subject;
     if (body.body !== undefined) patch.body = body.body;
-    if (body.markdown !== undefined) patch.markdown = body.markdown;
+    if (body.format !== undefined) {
+      patch.format = body.format;
+      patch.markdown = body.format === "markdown";
+    }
     if (body.inReplyTo !== undefined) patch.inReplyTo = body.inReplyTo;
     if (body.references !== undefined) patch.references = body.references;
     if (body.quote !== undefined) {
