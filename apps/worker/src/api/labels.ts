@@ -1,5 +1,6 @@
 import { label, message, messageLabel } from "@cfmail/db/schema";
 import { Perm } from "@cfmail/shared/permissions";
+import type { LabelListDto, MessageLabelsDto } from "@cfmail/shared/responses";
 import { createLabel, updateLabel } from "@cfmail/shared/schemas";
 import { zValidator } from "@hono/zod-validator";
 import { and, asc, eq, inArray } from "drizzle-orm";
@@ -25,7 +26,7 @@ export function labelsRoutes() {
       .from(label)
       .where(eq(label.mailboxId, mailboxId))
       .orderBy(asc(label.name));
-    return c.json({ labels: rows });
+    return c.json({ labels: rows } satisfies LabelListDto);
   });
 
   r.post("/", zValidator("json", createLabel), async (c) => {
@@ -114,7 +115,7 @@ export function labelsRoutes() {
     const db = dbFromCtx(c);
     const user = c.get("user")!;
     const ids = c.req.queries("id") ?? [];
-    if (ids.length === 0) return c.json({ labels: {} });
+    if (ids.length === 0) return c.json({ labels: {} } satisfies MessageLabelsDto);
 
     const rows = await db
       .select({
@@ -150,7 +151,7 @@ export function labelsRoutes() {
       }
       list.push({ id: row.labelId, name: row.name, color: row.color });
     }
-    return c.json({ labels: out });
+    return c.json({ labels: out } satisfies MessageLabelsDto);
   });
 
   return r;

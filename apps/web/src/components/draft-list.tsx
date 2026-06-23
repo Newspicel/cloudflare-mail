@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
 import type { DraftRow, MailView } from "@/lib/queries.ts";
+import { keys } from "@/lib/query-keys.ts";
 import { openCompose } from "./compose-dock.tsx";
 import { FOLDER_META, FolderTabs } from "./folder-tabs.tsx";
 import { Button } from "./ui/button.tsx";
@@ -24,8 +25,8 @@ export function DraftList({ mailboxId, view, drafts, loading }: Props) {
   const remove = useMutation({
     mutationFn: (id: string) => api(`/api/drafts/${id}`, { method: "DELETE" }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["drafts", mailboxId] });
-      qc.invalidateQueries({ queryKey: ["threads", mailboxId, "counts"] });
+      qc.invalidateQueries({ queryKey: keys.drafts(mailboxId) });
+      qc.invalidateQueries({ queryKey: keys.folderCounts(mailboxId) });
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });

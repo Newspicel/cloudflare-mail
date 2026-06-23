@@ -176,7 +176,7 @@ function TwoFactorSection({ enabled }: { enabled: boolean }) {
       setVerifyCode("");
       setTotpUri(null);
       setBackupCodes(null);
-      qc.invalidateQueries({ queryKey: ["me"] });
+      qc.invalidateQueries({ queryKey: meQuery.queryKey });
       toast.success("Two-factor enabled");
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
@@ -189,7 +189,7 @@ function TwoFactorSection({ enabled }: { enabled: boolean }) {
     },
     onSuccess: () => {
       setPassword("");
-      qc.invalidateQueries({ queryKey: ["me"] });
+      qc.invalidateQueries({ queryKey: meQuery.queryKey });
       toast.success("Two-factor disabled");
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),

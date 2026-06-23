@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
 import { labelsQuery, messageLabelsQuery } from "@/lib/queries.ts";
+import { keys } from "@/lib/query-keys.ts";
 import { Button } from "./ui/button.tsx";
 import { useConfirm } from "./ui/confirm.tsx";
 import { Input } from "./ui/input.tsx";
@@ -57,8 +58,8 @@ function LabelsPopover({ mailboxId, messageId }: { mailboxId: string; messageId:
   const [color, setColor] = useState(DEFAULT_COLOR);
 
   const invalidate = () => {
-    qc.invalidateQueries({ queryKey: ["labels", mailboxId] });
-    qc.invalidateQueries({ queryKey: ["message-labels"] });
+    qc.invalidateQueries({ queryKey: keys.labels(mailboxId) });
+    qc.invalidateQueries({ queryKey: keys.messageLabelsRoot() });
   };
 
   const toggle = useMutation({

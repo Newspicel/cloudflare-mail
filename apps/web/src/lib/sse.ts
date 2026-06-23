@@ -1,7 +1,9 @@
 import type { HubEvent } from "@cfmail/shared/events";
 import type { QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { bumpMailboxUnread, bumpThreadToTop, invalidateThreadChange } from "./invalidate.ts";
 import { type MailboxSummary, mailboxesQuery } from "./queries.ts";
+import { keys } from "./query-keys.ts";
 
 type Navigate = (to: { mailboxId: string; threadId: string }) => void;
 
@@ -13,19 +15,21 @@ export function connectStream(qc: QueryClient, navigate?: Navigate): () => void 
       const evt = JSON.parse(raw.data) as HubEvent;
       switch (evt.type) {
         case "new_message": {
-          qc.invalidateQueries({ queryKey: ["threads", evt.mailboxId] });
-          qc.invalidateQueries({ queryKey: ["thread", evt.threadId] });
-          qc.invalidateQueries({ queryKey: ["mailboxes"] });
+          const nowIso = new Date().toISOString();
+          bumpThreadToTop(qc, evt.mailboxId, evt.threadId, nowIso, true);
+          bumpMailboxUnread(qc, evt.mailboxId, 1);
+          invalidateThreadChange(qc, evt.mailboxId, evt.threadId);
           notifyNewMessage(qc, evt.mailboxId, evt.threadId, navigate);
           break;
         }
         case "message_sent": {
-          qc.invalidateQueries({ queryKey: ["threads", evt.mailboxId] });
-          qc.invalidateQueries({ queryKey: ["thread", evt.threadId] });
+          const nowIso = new Date().toISOString();
+          bumpThreadToTop(qc, evt.mailboxId, evt.threadId, nowIso, false);
+          invalidateThreadChange(qc, evt.mailboxId, evt.threadId);
           break;
         }
         case "mailbox_expired": {
-          qc.invalidateQueries({ queryKey: ["mailboxes"] });
+          qc.invalidateQueries({ queryKey: keys.mailboxes() });
           break;
         }
         case "ping":

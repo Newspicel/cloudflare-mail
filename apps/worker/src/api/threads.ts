@@ -1,6 +1,7 @@
 import { draft, message, thread } from "@cfmail/db/schema";
 import { Flag } from "@cfmail/shared/flags";
 import { Perm } from "@cfmail/shared/permissions";
+import type { FolderCountsResponseDto } from "@cfmail/shared/responses";
 import { updateThread } from "@cfmail/shared/schemas";
 import { zValidator } from "@hono/zod-validator";
 import { and, asc, count, desc, eq, gt, type SQL, sql } from "drizzle-orm";
@@ -11,6 +12,7 @@ import type { AppBindings } from "../env.ts";
 import { recomputeThreadUnread } from "../mail/threads.ts";
 import { requireUser } from "../middleware.ts";
 import { requirePerm } from "../permissions.ts";
+import { serializeMessage, serializeThread } from "./serialize.ts";
 
 export function threadsRoutes() {
   const r = new Hono<AppBindings>();
@@ -61,7 +63,7 @@ export function threadsRoutes() {
       )
       .orderBy(desc(thread.lastMsgAt))
       .limit(limit);
-    return c.json({ threads: rows });
+    return c.json({ threads: rows.map(serializeThread) });
   });
 
   // Per-folder badge counts for the icon bar. `unread` is only meaningful for
@@ -113,7 +115,7 @@ export function threadsRoutes() {
         trash: { total: trash, unread: 0 },
         all: { total: all, unread: 0 },
       },
-    });
+    } satisfies FolderCountsResponseDto);
   });
 
   r.get("/:id", async (c) => {
@@ -131,7 +133,7 @@ export function threadsRoutes() {
       .where(and(eq(message.threadId, id), eq(message.mailboxId, th.mailboxId)))
       .orderBy(asc(message.createdAt));
 
-    return c.json({ thread: th, messages: msgs });
+    return c.json({ thread: serializeThread(th), messages: msgs.map(serializeMessage) });
   });
 
   r.patch("/:id", zValidator("json", updateThread), async (c) => {

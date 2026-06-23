@@ -1,85 +1,60 @@
+import type {
+  ContactDto,
+  DraftDto,
+  FolderCountsDto,
+  LabelDto,
+  MailboxSummaryDto,
+  MailView,
+  MessageDto,
+  MessageLabelDto,
+  MeUserDto,
+  SearchResultDto,
+  ThreadDto,
+} from "@cfmail/shared";
 import { queryOptions } from "@tanstack/react-query";
 import { api } from "./api.ts";
+import { keys } from "./query-keys.ts";
 
-export interface MailboxSummary {
-  id: string;
-  address: string;
-  displayName: string | null;
-  type: "personal" | "group" | "service" | "temp";
-  expiresAt: string | null;
-  role: "owner" | "member";
-  perms: number;
-  unread: number;
-}
-
-export interface ThreadRow {
-  id: string;
-  mailboxId: string;
-  subjectNorm: string;
-  lastMsgAt: string;
-  msgCount: number;
-  unreadCount: number;
-  participants: { name?: string; address: string }[];
-  trashed: boolean;
-  spam: boolean;
-}
-
-export interface MessageRow {
-  id: string;
-  mailboxId: string;
-  threadId: string;
-  direction: "in" | "out";
-  fromName: string | null;
-  fromAddr: string;
-  deliveredTo: string | null;
-  toAddrs: { name?: string; address: string }[];
-  subject: string;
-  snippet: string;
-  flags: number;
-  receivedAt: string | null;
-  sentAt: string | null;
-  createdAt: string;
-  spamVerdict: "clean" | "suspicious" | "spam" | null;
-  spamReasons: string[] | null;
-}
-
-export interface MeUser {
-  id: string;
-  name: string;
-  email: string;
-  role: "admin" | "user";
-  twoFactorEnabled?: boolean;
-}
+// Response models are owned by `@cfmail/shared` (single source of truth, derived
+// from the DB schema). Re-exported here under the names the UI already uses so
+// call sites stay put.
+export type {
+  ContactDto as Contact,
+  DraftDto as DraftRow,
+  FolderCountsDto as FolderCounts,
+  LabelDto as LabelRow,
+  MailboxSummaryDto as MailboxSummary,
+  MailView,
+  MessageDto as MessageRow,
+  MessageLabelDto as MessageLabel,
+  MeUserDto as MeUser,
+  SearchResultDto as SearchResult,
+  ThreadDto as ThreadRow,
+};
 
 export const meQuery = queryOptions({
-  queryKey: ["me"],
-  queryFn: () => api<{ user: MeUser | null }>("/api/me"),
+  queryKey: keys.me(),
+  queryFn: () => api<{ user: MeUserDto | null }>("/api/me"),
   staleTime: 60_000,
 });
 
 export const bootstrapQuery = queryOptions({
-  queryKey: ["bootstrap"],
+  queryKey: keys.bootstrap(),
   queryFn: () => api<{ needsBootstrap: boolean }>("/api/bootstrap"),
   staleTime: 0,
 });
 
 export const mailboxesQuery = queryOptions({
-  queryKey: ["mailboxes"],
-  queryFn: () => api<{ mailboxes: MailboxSummary[] }>("/api/mailboxes"),
+  queryKey: keys.mailboxes(),
+  queryFn: () => api<{ mailboxes: MailboxSummaryDto[] }>("/api/mailboxes"),
 });
 
-export interface Contact {
-  address: string;
-  name?: string;
-}
-
 export const contactsQuery = queryOptions({
-  queryKey: ["contacts"],
-  queryFn: () => api<{ contacts: Contact[] }>("/api/contacts"),
+  queryKey: keys.contacts(),
+  queryFn: () => api<{ contacts: ContactDto[] }>("/api/contacts"),
   staleTime: 5 * 60_000,
 });
 
-export type MailView = "inbox" | "drafts" | "sent" | "marked" | "spam" | "trash" | "all";
 export const MAIL_VIEWS: MailView[] = ["inbox", "drafts", "sent", "marked", "spam", "trash", "all"];
 
 export function parseMailView(value: unknown): MailView {
@@ -88,47 +63,29 @@ export function parseMailView(value: unknown): MailView {
 
 export const threadsQuery = (mailboxId: string, view: MailView = "inbox") =>
   queryOptions({
-    queryKey: ["threads", mailboxId, view],
+    queryKey: keys.threads(mailboxId, view),
     queryFn: () =>
-      api<{ threads: ThreadRow[] }>(
+      api<{ threads: ThreadDto[] }>(
         `/api/threads?mailboxId=${encodeURIComponent(mailboxId)}&view=${view}`,
       ),
     enabled: Boolean(mailboxId),
   });
 
-export interface DraftRow {
-  id: string;
-  mailboxId: string;
-  inReplyTo: string | null;
-  references: string[] | null;
-  toAddrs: { name?: string; address: string }[];
-  ccAddrs: { name?: string; address: string }[] | null;
-  bccAddrs: { name?: string; address: string }[] | null;
-  subject: string;
-  body: string;
-  markdown: boolean;
-  attachments: { r2Key: string; filename: string; contentType: string; sizeBytes: number }[];
-  createdAt: string;
-  updatedAt: string;
-}
-
 export const draftsQuery = (mailboxId: string) =>
   queryOptions({
-    queryKey: ["drafts", mailboxId],
+    queryKey: keys.drafts(mailboxId),
     queryFn: () =>
-      api<{ drafts: DraftRow[] }>(`/api/drafts?mailboxId=${encodeURIComponent(mailboxId)}`),
+      api<{ drafts: DraftDto[] }>(`/api/drafts?mailboxId=${encodeURIComponent(mailboxId)}`),
     enabled: Boolean(mailboxId),
   });
 
-export type FolderCounts = Record<MailView, { total: number; unread: number }>;
-
-// Keyed under the ["threads", mailboxId] prefix so thread invalidations refresh
-// the badges for free; draft mutations also invalidate this prefix.
+// Keyed under the threads-root prefix so thread invalidations refresh the badges
+// for free; draft mutations also invalidate this prefix.
 export const folderCountsQuery = (mailboxId: string) =>
   queryOptions({
-    queryKey: ["threads", mailboxId, "counts"],
+    queryKey: keys.folderCounts(mailboxId),
     queryFn: () =>
-      api<{ counts: FolderCounts }>(
+      api<{ counts: FolderCountsDto }>(
         `/api/threads/counts?mailboxId=${encodeURIComponent(mailboxId)}`,
       ),
     enabled: Boolean(mailboxId),
@@ -136,61 +93,33 @@ export const folderCountsQuery = (mailboxId: string) =>
 
 export const threadQuery = (threadId: string) =>
   queryOptions({
-    queryKey: ["thread", threadId],
-    queryFn: () => api<{ thread: ThreadRow; messages: MessageRow[] }>(`/api/threads/${threadId}`),
+    queryKey: keys.thread(threadId),
+    queryFn: () => api<{ thread: ThreadDto; messages: MessageDto[] }>(`/api/threads/${threadId}`),
     enabled: Boolean(threadId),
   });
 
-export interface SearchResult {
-  messageId: string;
-  threadId: string;
-  mailboxId: string;
-  mailboxAddress: string;
-  subject: string;
-  snippet: string;
-  fromName: string | null;
-  fromAddr: string;
-  direction: "in" | "out";
-  flags: number;
-  receivedAt: string | null;
-  sentAt: string | null;
-}
-
 export const searchQuery = (q: string) =>
   queryOptions({
-    queryKey: ["search", q],
-    queryFn: () => api<{ results: SearchResult[] }>(`/api/search?q=${encodeURIComponent(q)}`),
+    queryKey: keys.search(q),
+    queryFn: () => api<{ results: SearchResultDto[] }>(`/api/search?q=${encodeURIComponent(q)}`),
     enabled: q.trim().length > 0,
     staleTime: 15_000,
   });
 
-export interface LabelRow {
-  id: string;
-  mailboxId: string;
-  name: string;
-  color: string;
-}
-
 export const labelsQuery = (mailboxId: string) =>
   queryOptions({
-    queryKey: ["labels", mailboxId],
+    queryKey: keys.labels(mailboxId),
     queryFn: () =>
-      api<{ labels: LabelRow[] }>(`/api/labels?mailboxId=${encodeURIComponent(mailboxId)}`),
+      api<{ labels: LabelDto[] }>(`/api/labels?mailboxId=${encodeURIComponent(mailboxId)}`),
     enabled: Boolean(mailboxId),
   });
 
-export interface MessageLabel {
-  id: string;
-  name: string;
-  color: string;
-}
-
 export const messageLabelsQuery = (messageIds: string[]) =>
   queryOptions({
-    queryKey: ["message-labels", messageIds.toSorted().join(",")],
+    queryKey: keys.messageLabels(messageIds.toSorted().join(",")),
     queryFn: () => {
       const qs = messageIds.map((id) => `id=${encodeURIComponent(id)}`).join("&");
-      return api<{ labels: Record<string, MessageLabel[]> }>(`/api/labels/by-messages?${qs}`);
+      return api<{ labels: Record<string, MessageLabelDto[]> }>(`/api/labels/by-messages?${qs}`);
     },
     enabled: messageIds.length > 0,
   });

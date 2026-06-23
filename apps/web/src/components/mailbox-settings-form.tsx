@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button.tsx";
 import { inputClass } from "@/components/ui/input.tsx";
 import { api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
+import { keys } from "@/lib/query-keys.ts";
 
 export type SpamLevel = "off" | "auth" | "standard" | "ai";
 
@@ -86,7 +87,7 @@ export function MailboxSettingsForm({
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey });
-      qc.invalidateQueries({ queryKey: ["mailboxes"] });
+      qc.invalidateQueries({ queryKey: keys.mailboxes() });
       toast.success("Settings saved");
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Save failed"),

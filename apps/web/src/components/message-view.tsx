@@ -1,4 +1,4 @@
-import { Flag, hasFlag } from "@cfmail/shared/flags";
+import { Flag, hasFlag, setFlag } from "@cfmail/shared/flags";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import DOMPurify from "dompurify";
@@ -17,7 +17,15 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
+import {
+  invalidateThreadChange,
+  patchMessageFlags,
+  removeThreadsFromLists,
+  restoreSnapshot,
+  snapshotMailboxThreads,
+} from "@/lib/invalidate.ts";
 import type { MailView, MessageRow, ThreadRow } from "@/lib/queries.ts";
+import { keys } from "@/lib/query-keys.ts";
 import { openCompose } from "./compose-dock.tsx";
 import { LabelChips, LabelsMenu } from "./labels-menu.tsx";
 import { Badge } from "./ui/badge.tsx";
@@ -35,24 +43,49 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
   const nav = useNavigate();
   const qc = useQueryClient();
 
-  const invalidate = useCallback(() => {
-    qc.invalidateQueries({ queryKey: ["threads", thread.mailboxId] });
-    qc.invalidateQueries({ queryKey: ["thread", thread.id] });
-    qc.invalidateQueries({ queryKey: ["mailboxes"] });
-  }, [qc, thread.mailboxId, thread.id]);
+  const invalidate = useCallback(
+    () => invalidateThreadChange(qc, thread.mailboxId, thread.id),
+    [qc, thread.mailboxId, thread.id],
+  );
 
+  // Trash/spam optimistically drops the thread from the open mailbox's lists;
+  // `act()` navigates away, so the row vanishes instantly. Settle reconciles.
   const setState = useMutation({
     mutationFn: (patch: { trashed?: boolean; spam?: boolean }) =>
       api(`/api/threads/${thread.id}`, { method: "PATCH", body: JSON.stringify(patch) }),
-    onSuccess: invalidate,
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: keys.threadsRoot(thread.mailboxId) });
+      const snapshot = snapshotMailboxThreads(qc, thread.mailboxId);
+      removeThreadsFromLists(qc, thread.mailboxId, [thread.id]);
+      return { snapshot };
+    },
+    onError: (e: unknown, _patch, ctx) => {
+      if (ctx) restoreSnapshot(qc, ctx.snapshot);
+      toast.error(e instanceof Error ? e.message : "Failed");
+    },
+    onSettled: invalidate,
   });
 
   const setMsg = useMutation({
     mutationFn: (input: { id: string; patch: { seen?: boolean; starred?: boolean } }) =>
       api(`/api/messages/${input.id}`, { method: "PATCH", body: JSON.stringify(input.patch) }),
-    onSuccess: invalidate,
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+    onMutate: async ({ id, patch }) => {
+      await qc.cancelQueries({ queryKey: keys.thread(thread.id) });
+      const prev = qc.getQueryData<{ messages: MessageRow[] }>(keys.thread(thread.id));
+      const current = prev?.messages.find((m) => m.id === id);
+      if (current) {
+        let flags = current.flags;
+        if (patch.seen !== undefined) flags = setFlag(flags, Flag.SEEN, patch.seen);
+        if (patch.starred !== undefined) flags = setFlag(flags, Flag.STARRED, patch.starred);
+        patchMessageFlags(qc, thread.id, id, flags);
+      }
+      return { prev };
+    },
+    onError: (e: unknown, _input, ctx) => {
+      if (ctx?.prev) qc.setQueryData(keys.thread(thread.id), ctx.prev);
+      toast.error(e instanceof Error ? e.message : "Failed");
+    },
+    onSettled: invalidate,
   });
 
   // Auto-mark inbound messages as read when the thread is opened.

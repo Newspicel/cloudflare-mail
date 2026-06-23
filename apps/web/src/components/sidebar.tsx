@@ -75,7 +75,7 @@ function SidebarBody({ onClose }: { onClose?: () => void }) {
   const deleteMailbox = useMutation({
     mutationFn: (id: string) => api(`/api/mailboxes/${id}`, { method: "DELETE" }),
     onSuccess: (_res, id) => {
-      qc.setQueryData<{ mailboxes: MailboxSummary[] }>(["mailboxes"], (old) =>
+      qc.setQueryData<{ mailboxes: MailboxSummary[] }>(mailboxesQuery.queryKey, (old) =>
         old ? { mailboxes: old.mailboxes.filter((m) => m.id !== id) } : old,
       );
       if (activeId === id) nav({ to: "/app" });
