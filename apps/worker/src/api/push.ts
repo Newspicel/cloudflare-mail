@@ -10,8 +10,32 @@ import { getOrCreateVapid } from "../mail/push.ts";
 import { requireUser } from "../middleware.ts";
 import { requirePerm } from "../permissions.ts";
 
+// Push endpoints are always public HTTPS hosts handed out by a browser push
+// service. Reject anything else at registration so the fan-out fetch can never
+// be steered at a non-HTTPS scheme, an IP literal, or a loopback/internal host.
+const pushEndpoint = z
+  .string()
+  .url()
+  .refine((u) => {
+    let url: URL;
+    try {
+      url = new URL(u);
+    } catch {
+      return false;
+    }
+    if (url.protocol !== "https:") return false;
+    const host = url.hostname.toLowerCase();
+    if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local"))
+      return false;
+    // IPv4 literal, bracketed IPv6 literal, or no dot (bare hostname) — none are real push services.
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(":") || !host.includes(".")) {
+      return false;
+    }
+    return true;
+  }, "endpoint must be a public https URL");
+
 const subscribeBody = z.object({
-  endpoint: z.string().url(),
+  endpoint: pushEndpoint,
   keys: z.object({ p256dh: z.string().min(1), auth: z.string().min(1) }),
 });
 

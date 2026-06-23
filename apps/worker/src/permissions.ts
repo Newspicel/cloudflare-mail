@@ -1,8 +1,13 @@
 import type { DB } from "@cfmail/db";
 import { mailbox, mailboxMember } from "@cfmail/db/schema";
 import { ALL_PERMS, has, type PermBit } from "@cfmail/shared/permissions";
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
+
+// Sentinel mailbox id for the combined "All" view. Real ids are UUIDs, so this
+// can never collide. Used by the threads/drafts list endpoints to aggregate
+// across every mailbox the user can read instead of a single one.
+export const ALL_MAILBOXES = "all";
 
 export interface MailboxAccess {
   mailboxId: string;
