@@ -36,23 +36,27 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
 
   return (
     <header className="flex h-[calc(3rem+env(safe-area-inset-top))] shrink-0 items-center gap-3 border-b bg-card px-3 pt-[env(safe-area-inset-top)] pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] sm:pl-[max(1rem,env(safe-area-inset-left))] sm:pr-[max(1rem,env(safe-area-inset-right))]">
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={onMenuClick}
-        className="shrink-0 md:hidden"
-        aria-label="Toggle menu"
-      >
-        <Menu />
-      </Button>
-      <div className="flex items-center gap-2">
-        <Logo className="h-7 w-7 rounded-md shadow-black/[0.06] shadow-sm" />
-        <span className="hidden font-semibold text-[13px] tracking-tight sm:inline">cfmail</span>
+      <div className="flex flex-1 items-center gap-3">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onMenuClick}
+          className="shrink-0 md:hidden"
+          aria-label="Toggle menu"
+        >
+          <Menu />
+        </Button>
+        <div className="flex items-center gap-2">
+          <Logo className="h-7 w-7 rounded-md shadow-black/[0.06] shadow-sm" />
+          <span className="hidden font-semibold text-[13px] tracking-tight sm:inline">cfmail</span>
+        </div>
       </div>
 
       <SearchBox />
 
-      <AccountMenu email={data?.user?.email} name={data?.user?.name} />
+      <div className="flex flex-1 items-center justify-end">
+        <AccountMenu email={data?.user?.email} name={data?.user?.name} />
+      </div>
     </header>
   );
 }
@@ -76,7 +80,7 @@ function AccountMenu({ email, name }: { email?: string | null; name?: string | n
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        className="ml-auto grid h-8 w-8 shrink-0 select-none place-items-center rounded-full bg-primary/12 font-semibold text-[12px] text-primary outline-none transition hover:bg-primary/20 focus-visible:ring-2 focus-visible:ring-ring/45"
+        className="grid h-8 w-8 shrink-0 select-none place-items-center rounded-full bg-primary/12 font-semibold text-[12px] text-primary outline-none transition hover:bg-primary/20 focus-visible:ring-2 focus-visible:ring-ring/45"
         aria-label="Account menu"
       >
         {initial}
@@ -184,7 +188,7 @@ function SearchBox() {
   const showDropdown = open && raw.trim().length >= MIN_SEARCH_CHARS;
 
   return (
-    <div ref={rootRef} className="relative mx-auto w-full max-w-xl">
+    <div ref={rootRef} className="relative w-full max-w-xl">
       <label className="flex items-center gap-2 rounded-full border bg-muted/60 px-3.5 py-1.5 text-[13px] text-muted-foreground transition focus-within:border-ring focus-within:bg-card focus-within:ring-2 focus-within:ring-ring/30">
         <Search className="h-3.5 w-3.5" />
         <input
