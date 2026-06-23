@@ -28,13 +28,17 @@ export function FolderTabs({ mailboxId, view }: { mailboxId: string; view: MailV
   const { data } = useQuery(folderCountsQuery(mailboxId));
   const activeIndex = Math.max(0, MAIL_VIEWS.indexOf(view));
   return (
-    <div className="relative flex w-fit items-center gap-0.5 rounded-lg bg-muted p-0.5">
-      {/* Gliding active-tab indicator: tabs are fixed w-7 with gap-0.5, so the
-          card slides by index * (tab width + gap). */}
+    <div className="relative flex flex-1 items-center rounded-lg bg-muted p-0.5">
+      {/* Gliding active-tab indicator: tabs are equal-width (flex-1), so one
+          segment is (100% - padding) / count and the card slides by index
+          segments (translateX % is relative to its own width). */}
       <span
         aria-hidden
-        className="absolute top-0.5 left-0.5 h-7 w-7 rounded-md bg-card shadow-black/5 shadow-sm transition-transform duration-200 ease-out motion-reduce:transition-none"
-        style={{ transform: `translateX(calc(${activeIndex} * (1.75rem + 0.125rem)))` }}
+        className="absolute top-0.5 left-0.5 h-7 rounded-md bg-card shadow-black/5 shadow-sm transition-transform duration-200 ease-out motion-reduce:transition-none"
+        style={{
+          width: `calc((100% - 0.25rem) / ${MAIL_VIEWS.length})`,
+          transform: `translateX(calc(${activeIndex} * 100%))`,
+        }}
       />
       {MAIL_VIEWS.map((v) => {
         const m = FOLDER_META[v];
@@ -51,7 +55,7 @@ export function FolderTabs({ mailboxId, view }: { mailboxId: string; view: MailV
               aria-label={label}
               aria-current={active ? "page" : undefined}
               className={cn(
-                "relative z-10 grid h-7 w-7 shrink-0 place-items-center rounded-md transition-colors",
+                "relative z-10 grid h-7 flex-1 place-items-center rounded-md transition-colors",
                 active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
               )}
             >
