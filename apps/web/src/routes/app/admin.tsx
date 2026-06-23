@@ -1200,7 +1200,7 @@ function AdminMailboxes({ meId }: { meId: string }) {
   return (
     <Section
       title="Mailboxes & redirects"
-      description="Every mailbox and inbound redirect in this deployment. A redirect is an inbound-only alias — mail to it lands in the target mailbox; it cannot send."
+      description="Every mailbox and inbound redirect in this deployment. A redirect is an inbound-only alias — mail to it lands in the target mailbox; it cannot send. A catch-all (*@domain) receives anything with no matching mailbox or specific redirect."
     >
       <ul className="divide-y rounded-md border">
         {entries.map((e) =>
@@ -1357,6 +1357,8 @@ function AdminCreateForm({
   const [rLocal, setRLocal] = useState("");
   const [rDomain, setRDomain] = useState("");
   const [target, setTarget] = useState("");
+  const [rCatchAll, setRCatchAll] = useState(false);
+  const effLocal = rCatchAll ? "*" : rLocal;
 
   const dom = eligibleDomains.find((d) => d.id === domain);
   const typeOptions = KIND_CHECKBOXES.filter((k) => dom && (dom.allowedKinds & k.bit) === k.bit);
@@ -1380,10 +1382,11 @@ function AdminCreateForm({
     mutationFn: () =>
       api("/api/admin/redirects", {
         method: "POST",
-        body: JSON.stringify({ domainId: rDomain, localPart: rLocal, targetMailboxId: target }),
+        body: JSON.stringify({ domainId: rDomain, localPart: effLocal, targetMailboxId: target }),
       }),
     onSuccess: () => {
       setRLocal("");
+      setRCatchAll(false);
       onCreated();
       toast.success("Redirect created");
     },
@@ -1480,11 +1483,20 @@ function AdminCreateForm({
       ) : (
         <div className="flex flex-wrap items-center gap-2">
           <Input
-            value={rLocal}
+            value={rCatchAll ? "*" : rLocal}
             onChange={(e) => setRLocal(e.target.value)}
             placeholder="local-part"
+            disabled={rCatchAll}
             className="min-w-[120px] flex-1"
           />
+          <label className="flex items-center gap-1 text-[13px] text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={rCatchAll}
+              onChange={(e) => setRCatchAll(e.target.checked)}
+            />
+            catch-all
+          </label>
           <span className="text-[13px] text-muted-foreground">@</span>
           <Select
             value={rDomain}
@@ -1513,7 +1525,7 @@ function AdminCreateForm({
           </Select>
           <PrimaryBtn
             onClick={() => createRedirect.mutate()}
-            disabled={!rDomain || !rLocal || !target || createRedirect.isPending}
+            disabled={!rDomain || !effLocal || !target || createRedirect.isPending}
           >
             Add redirect
           </PrimaryBtn>

@@ -192,10 +192,13 @@ export const adminDeleteMailbox = z.object({
   redirectToMailboxId: z.string().min(1).optional(),
 });
 
-// Admin: standalone redirect creation.
+// Admin: standalone redirect creation. "*" is the domain catch-all, which
+// receives any address with no matching mailbox or specific redirect.
+const redirectLocalPart = z.union([localPart, z.literal("*")]);
+
 export const createRedirect = z.object({
   domainId: z.string().min(1),
-  localPart,
+  localPart: redirectLocalPart,
   targetMailboxId: z.string().min(1),
 });
 
