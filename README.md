@@ -100,7 +100,7 @@ Key files to orient from:
 
 ## Quick start
 
-The goal: clone, deploy, open the URL, create the admin account in the browser. No `wrangler secret put`, no editing env vars in `wrangler.jsonc`. Per-domain config (which mailbox kinds, who can create what) is configured in the in-app admin panel.
+The goal: fork, connect the repo to Cloudflare, open the URL, create the admin account in the browser. Deploys happen automatically on every push to `main` via Workers Builds — no `wrangler deploy`, no `wrangler secret put`, no editing env vars in `wrangler.jsonc`. Per-domain config (which mailbox kinds, who can create what) is configured in the in-app admin panel.
 
 ### 1. Prerequisites
 
@@ -116,7 +116,7 @@ cd cloudflare-mail
 pnpm install
 ```
 
-### 3. Provision and deploy
+### 3. Provision resources (one time)
 
 ```bash
 # D1 database — copy the printed database_id into apps/worker/wrangler.jsonc
@@ -124,16 +124,28 @@ pnpm --filter @cfmail/worker exec wrangler d1 create cfmail
 
 # R2 bucket (name is referenced from wrangler.jsonc)
 pnpm --filter @cfmail/worker exec wrangler r2 bucket create cfmail-blobs
-
-# Apply schema and ship
-pnpm --filter @cfmail/db migrate           # production D1
-pnpm --filter @cfmail/web build
-pnpm --filter @cfmail/worker deploy
 ```
 
-That's the whole deploy. No secrets to set: the auth secret is lazy-generated on first request and stored in D1 (`system_config`). The app URL is derived from the request `Host` header, so whatever custom domain you bind to the Worker in the Cloudflare dashboard becomes your app URL automatically.
+Commit the updated `wrangler.jsonc` (with the new `database_id`) and push.
 
-### 4. First-run setup (in the browser)
+### 4. Connect the repo to Workers Builds
+
+Deploys are handled by Cloudflare Workers Builds — connect once and every push to `main` builds and ships automatically.
+
+1. Cloudflare dashboard → **Workers & Pages** → your worker → **Settings → Build**.
+2. **Connect** your fork of the repo.
+3. Set:
+   - **Build command:** `pnpm run build`
+   - **Deploy command:** `pnpm run deploy`
+   - **Root directory:** `/`
+   - **Production branch:** `main`
+4. Save. The next push to `main` (or a manual "Retry build") builds the web app and Worker, runs the production D1 migrations, and deploys.
+
+That's the whole deploy. The `deploy` script applies pending migrations (`@cfmail/db migrate --remote`) before `wrangler deploy`, so schema changes ship with the code. No secrets to set: the auth secret is lazy-generated on first request and stored in D1 (`system_config`). The app URL is derived from the request `Host` header, so whatever custom domain you bind to the Worker in the Cloudflare dashboard becomes your app URL automatically.
+
+> Prefer the CLI? You can still deploy by hand with `pnpm run deploy` from a checkout authenticated via `wrangler login`.
+
+### 5. First-run setup (in the browser)
 
 1. Bind a custom domain to the deployed Worker (Cloudflare dashboard → Workers → your worker → Custom Domains).
 2. Open that URL. The first visit shows a **Create administrator** form — this becomes the system admin.
@@ -143,14 +155,12 @@ That's the whole deploy. No secrets to set: the auth secret is lazy-generated on
    - Set the **Transactional email** from-address (must be on a verified Email Sending domain) so password reset and invite emails can go out.
 4. In Cloudflare: enable **Email Routing** per zone, route catch-all → this Worker, and verify the zone under **Email Sending**.
 
-### 5. Local dev
+### 6. Local dev
 
 ```bash
 pnpm --filter @cfmail/db migrate:local
 pnpm dev          # Vite (:5173) + Wrangler (:8787), Vite proxies /api
 ```
-
-For the long-form walk-through (DNS records, troubleshooting, recovery options) see [`docs/DEPLOY.md`](./docs/DEPLOY.md).
 
 ## Verification commands
 
