@@ -222,16 +222,28 @@ function buildMatch(f: SearchFilters): string {
   return excludes.length ? `(${core}) NOT (${excludes.join(" OR ")})` : core;
 }
 
+// Cap tokens per field and skip prefix (`*`) globbing on very short tokens —
+// otherwise `q=a b c …` forces broad prefix scans over all readable body text.
+const MAX_TOKENS = 16;
+const MIN_PREFIX_LEN = 3;
+
+// Tokens long enough get a prefix match; shorter ones match exactly to avoid
+// fanning out across the whole index.
+function ftsToken(tok: string): string {
+  return tok.length >= MIN_PREFIX_LEN ? `${tok}*` : tok;
+}
+
 // Split a query into prefix-matched positive tokens and `-`-prefixed negatives.
 function splitQuery(q: string): { positives: string[]; negatives: string[] } {
   const positives: string[] = [];
   const negatives: string[] = [];
   for (const raw of q.split(/\s+/)) {
     if (!raw) continue;
+    if (positives.length + negatives.length >= MAX_TOKENS) break;
     const neg = raw.startsWith("-");
     const tok = sanitize(neg ? raw.slice(1) : raw);
     if (!tok) continue;
-    (neg ? negatives : positives).push(`${tok}*`);
+    (neg ? negatives : positives).push(ftsToken(tok));
   }
   return { positives, negatives };
 }
@@ -242,7 +254,8 @@ function tokensOf(value: string | undefined): string[] {
     .split(/\s+/)
     .map((t) => sanitize(t))
     .filter(Boolean)
-    .map((t) => `${t}*`);
+    .slice(0, MAX_TOKENS)
+    .map(ftsToken);
 }
 
 function sanitize(token: string): string {
