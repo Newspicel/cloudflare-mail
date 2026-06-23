@@ -32,6 +32,26 @@ export const addressObject = z.object({
 });
 export type AddressObject = z.infer<typeof addressObject>;
 
+// RFC 5322 msg-id shape (<id-left@id-right>). The angle-bracket + no-whitespace
+// form blocks CRLF/header injection: these flow verbatim into In-Reply-To /
+// References on the real outbound (env.EMAIL.send) and into the archived .eml,
+// where mimetext writes custom headers without sanitizing.
+const messageId = z
+  .string()
+  .max(998)
+  .regex(/^<[^\s<>]+@[^\s<>]+>$/, "invalid Message-ID");
+
+// Attachment filename: mimetext interpolates this unescaped into the quoted
+// Content-Disposition fil="…", so reject control chars, quotes and backslash.
+const attachmentFilename = z
+  .string()
+  .min(1)
+  .max(255)
+  .refine(
+    (s) => ![...s].some((c) => c.charCodeAt(0) < 0x20 || c === '"' || c === "\\"),
+    "invalid filename",
+  );
+
 const allowedKinds = z.number().int().min(0).max(15); // 4 bits
 
 export const createDomain = z.object({
@@ -90,7 +110,7 @@ export const updateThread = z.object({
 
 const draftAttachment = z.object({
   r2Key: z.string().min(1),
-  filename: z.string().min(1).max(255),
+  filename: attachmentFilename,
   contentType: z.string().min(1).max(127),
   sizeBytes: z.number().int().min(0),
 });
@@ -110,8 +130,8 @@ export const createDraft = z.object({
   subject: z.string().max(998).default(""),
   body: z.string().max(5_000_000).default(""),
   markdown: z.boolean().default(false),
-  inReplyTo: z.string().optional(),
-  references: z.array(z.string()).optional(),
+  inReplyTo: messageId.optional(),
+  references: z.array(messageId).max(100).optional(),
   quote: messageQuoteRef.nullish(),
   attachments: z.array(draftAttachment).max(20).default([]),
 });
@@ -124,8 +144,8 @@ export const updateDraft = z.object({
   subject: z.string().max(998).optional(),
   body: z.string().max(5_000_000).optional(),
   markdown: z.boolean().optional(),
-  inReplyTo: z.string().optional(),
-  references: z.array(z.string()).optional(),
+  inReplyTo: messageId.optional(),
+  references: z.array(messageId).max(100).optional(),
   quote: messageQuoteRef.nullish(),
   attachments: z.array(draftAttachment).max(20).optional(),
 });
@@ -245,8 +265,8 @@ export const sendMessage = z.object({
   subject: z.string().max(998).default(""),
   text: z.string().max(1_000_000).optional(),
   html: z.string().max(5_000_000).optional(),
-  inReplyTo: z.string().optional(),
-  references: z.array(z.string()).optional(),
+  inReplyTo: messageId.optional(),
+  references: z.array(messageId).max(100).optional(),
   // Reply/forward: the original message to quote below the composed body. The
   // server fetches its raw `.eml` and appends a formatted quote at send time.
   quote: messageQuoteRef.optional(),
@@ -254,7 +274,7 @@ export const sendMessage = z.object({
     .array(
       z.object({
         r2Key: z.string().min(1),
-        filename: z.string().min(1).max(255),
+        filename: attachmentFilename,
         contentType: z.string().min(1).max(127),
       }),
     )
