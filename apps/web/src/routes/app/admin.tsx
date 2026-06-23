@@ -115,7 +115,7 @@ function AdminPage() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="mx-auto max-w-5xl space-y-6 px-8 py-8">
+      <div className="mx-auto max-w-5xl space-y-6 px-4 py-6 sm:px-8 sm:py-8">
         <header>
           <h1 className="text-[22px] font-semibold tracking-tight">Admin</h1>
           <p className="mt-1 text-[13px] text-muted-foreground">
@@ -332,8 +332,8 @@ function DomainsSection() {
       </Section>
 
       <Section title="Domains" description="Verified mail domains and their allowed mailbox kinds.">
-        <div className="overflow-hidden rounded-md border">
-          <table className="w-full text-[13px]">
+        <div className="overflow-x-auto rounded-md border">
+          <table className="w-full min-w-[36rem] text-[13px]">
             <thead className="bg-muted/50 text-[11px] uppercase tracking-wider text-muted-foreground">
               <tr>
                 <th className="px-3 py-2 text-left font-medium">Domain</th>

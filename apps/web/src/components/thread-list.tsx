@@ -244,7 +244,9 @@ function ThreadRowItem({
           "flex w-9 shrink-0 items-center justify-center transition-opacity",
           selecting || selected
             ? "opacity-100"
-            : "opacity-0 focus-within:opacity-100 group-hover:opacity-100",
+            : // No hover on touch: keep the checkbox visible below md (the
+              // full-width mobile list) so multi-select is reachable.
+              "opacity-100 md:opacity-0 md:focus-within:opacity-100 md:group-hover:opacity-100",
         )}
       >
         <Checkbox

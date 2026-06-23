@@ -415,7 +415,7 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
               : "sm:h-[560px] sm:w-[516px]",
           )}
         >
-          <div className="flex items-center justify-between border-b bg-muted/60 px-4 py-2.5">
+          <div className="flex items-center justify-between border-b bg-muted/60 px-4 py-2.5 pt-[max(0.625rem,env(safe-area-inset-top))] sm:pt-2.5">
             <Dialog.Title className="font-semibold text-[13px] text-foreground tracking-tight">
               {rep
                 ? s.replyAll
@@ -590,7 +590,7 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
             )}
           </div>
 
-          <div className="flex items-center justify-between gap-3 border-t bg-muted/40 px-3 py-2">
+          <div className="flex items-center justify-between gap-3 border-t bg-muted/40 px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:pb-2">
             <div className="flex items-center gap-1.5">
               <Button
                 variant="primary"

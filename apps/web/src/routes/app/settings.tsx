@@ -26,7 +26,7 @@ function SettingsPage() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="mx-auto max-w-3xl space-y-6 px-8 py-8">
+      <div className="mx-auto max-w-3xl space-y-6 px-4 py-6 sm:px-8 sm:py-8">
         <header>
           <h1 className="text-[22px] font-semibold tracking-tight">Settings</h1>
           <p className="mt-1 text-[13px] text-muted-foreground">

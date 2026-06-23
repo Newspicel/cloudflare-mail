@@ -89,4 +89,15 @@
   select {
     font-feature-settings: normal;
   }
+  /* iOS Safari zooms the viewport when a focused control's text is under 16px.
+     The UI uses 13px fields for density; force ≥16px on small/touch screens so
+     focusing a field never triggers an unwanted zoom. !important beats the
+     Tailwind text-[..] utility on the element. */
+  @media (max-width: 639px) {
+    input:not([type="checkbox"]):not([type="radio"]),
+    textarea,
+    select {
+      font-size: 16px !important;
+    }
+  }
 }

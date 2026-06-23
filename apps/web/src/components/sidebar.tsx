@@ -104,7 +104,7 @@ function SidebarBody({ onClose }: { onClose?: () => void }) {
 
   return (
     <>
-      <div className="flex flex-col gap-2 border-sidebar-border border-b px-3 py-3">
+      <div className="flex flex-col gap-2 border-sidebar-border border-b px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
         <Button
           variant="primary"
           className="w-full justify-start gap-2.5 rounded-lg px-3.5 shadow-primary/20"
@@ -232,7 +232,7 @@ function SidebarBody({ onClose }: { onClose?: () => void }) {
         )}
       </nav>
 
-      <div className="border-sidebar-border border-t px-2 py-2">
+      <div className="border-sidebar-border border-t px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
         <Link
           to="/app/admin"
           onClick={() => onClose?.()}
