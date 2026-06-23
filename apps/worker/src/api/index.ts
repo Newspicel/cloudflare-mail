@@ -84,8 +84,14 @@ export function buildApi() {
   app.route("/api/search", searchRoutes());
   app.get("/api/stream", streamRoute);
 
+  // One error shape everywhere: `{ error }`. HTTPExceptions carrying their own
+  // response (e.g. zValidator) keep it; the rest become JSON so clients never
+  // have to special-case a plain-text body.
   app.onError((err, c) => {
-    if (err instanceof HTTPException) return err.getResponse();
+    if (err instanceof HTTPException) {
+      if (err.res) return err.getResponse();
+      return c.json({ error: err.message }, err.status);
+    }
     console.error("unhandled", err);
     return c.json({ error: "internal_error" }, 500);
   });

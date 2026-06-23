@@ -2,6 +2,7 @@ import type { DB } from "@cfmail/db";
 import { mailbox, mailboxMember } from "@cfmail/db/schema";
 import { ALL_PERMS, has, type PermBit } from "@cfmail/shared/permissions";
 import { and, eq, ne } from "drizzle-orm";
+import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core";
 import { HTTPException } from "hono/http-exception";
 
 // Sentinel mailbox id for the combined "All" view. Real ids are UUIDs, so this
@@ -63,4 +64,19 @@ export async function requirePerm(
     throw new HTTPException(403, { message: "forbidden" });
   }
   return access;
+}
+
+// Load a mailbox-scoped entity by id, 404 if missing, then enforce mailbox
+// RBAC — the "lookup → 404 → requirePerm" shape that backed every mutating
+// mailbox route. Funnelling it here keeps the permission choke-point
+// (invariant 2) impossible to skip and 404 messages uniform. Returns the full
+// row so callers don't re-fetch.
+export async function requireEntityAccess<
+  T extends SQLiteTable & { id: SQLiteColumn; mailboxId: SQLiteColumn },
+>(db: DB, userId: string, table: T, id: string, bit: PermBit): Promise<T["$inferSelect"]> {
+  const rows = await db.select().from(table).where(eq(table.id, id)).limit(1);
+  const row = rows[0] as T["$inferSelect"] | undefined;
+  if (!row) throw new HTTPException(404, { message: "not found" });
+  await requirePerm(db, userId, (row as { mailboxId: string }).mailboxId, bit);
+  return row;
 }

@@ -11,6 +11,7 @@ import type { AppBindings } from "../env.ts";
 import { requireUser } from "../middleware.ts";
 import { accessibleMailboxIds, requirePerm } from "../permissions.ts";
 import { serializeThread } from "./serialize.ts";
+import { buildPatch, wrapUnique } from "./util.ts";
 
 function serializeFolder(r: typeof folder.$inferSelect, total: number, unread: number): FolderDto {
   return { ...r, createdAt: r.createdAt.toISOString(), total, unread };
@@ -71,20 +72,17 @@ export function foldersRoutes() {
       .where(eq(folder.userId, user.id));
 
     const id = crypto.randomUUID();
-    try {
-      await db.insert(folder).values({
-        id,
-        userId: user.id,
-        name: body.name.trim(),
-        color: body.color ?? "#64748b",
-        position: (max[0]?.m ?? -1) + 1,
-      });
-    } catch (err) {
-      if (/UNIQUE/i.test(err instanceof Error ? err.message : "")) {
-        throw new HTTPException(409, { message: "name already exists" });
-      }
-      throw err;
-    }
+    await wrapUnique(
+      () =>
+        db.insert(folder).values({
+          id,
+          userId: user.id,
+          name: body.name.trim(),
+          color: body.color ?? "#64748b",
+          position: (max[0]?.m ?? -1) + 1,
+        }),
+      "name already exists",
+    );
     return c.json({ id }, 201);
   });
 
@@ -94,23 +92,21 @@ export function foldersRoutes() {
     const body = c.req.valid("json");
     await requireOwnFolder(db, user.id, c.req.param("id"));
 
-    const patch: Partial<typeof folder.$inferInsert> = {};
-    if (body.name !== undefined) patch.name = body.name.trim();
-    if (body.color !== undefined) patch.color = body.color;
-    if (body.position !== undefined) patch.position = body.position;
+    const patch = buildPatch<typeof folder.$inferInsert>(body, {
+      name: (v: string) => v.trim(),
+      color: true,
+      position: true,
+    });
     if (Object.keys(patch).length === 0) return c.json({ ok: true });
 
-    try {
-      await db
-        .update(folder)
-        .set(patch)
-        .where(eq(folder.id, c.req.param("id")));
-    } catch (err) {
-      if (/UNIQUE/i.test(err instanceof Error ? err.message : "")) {
-        throw new HTTPException(409, { message: "name already exists" });
-      }
-      throw err;
-    }
+    await wrapUnique(
+      () =>
+        db
+          .update(folder)
+          .set(patch)
+          .where(eq(folder.id, c.req.param("id"))),
+      "name already exists",
+    );
     return c.json({ ok: true });
   });
 

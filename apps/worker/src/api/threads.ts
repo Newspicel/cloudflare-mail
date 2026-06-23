@@ -11,7 +11,12 @@ import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
 import { recomputeThreadUnread } from "../mail/threads.ts";
 import { requireUser } from "../middleware.ts";
-import { ALL_MAILBOXES, accessibleMailboxIds, requirePerm } from "../permissions.ts";
+import {
+  ALL_MAILBOXES,
+  accessibleMailboxIds,
+  requireEntityAccess,
+  requirePerm,
+} from "../permissions.ts";
 import { serializeMessage, serializeThread } from "./serialize.ts";
 
 export function threadsRoutes() {
@@ -150,9 +155,7 @@ export function threadsRoutes() {
     const user = c.get("user")!;
     const id = c.req.param("id");
 
-    const th = await db.query.thread.findFirst({ where: eq(thread.id, id) });
-    if (!th) throw new HTTPException(404, { message: "not found" });
-    await requirePerm(db, user.id, th.mailboxId, Perm.READ);
+    const th = await requireEntityAccess(db, user.id, thread, id, Perm.READ);
 
     const msgs = await db
       .select()
@@ -169,12 +172,7 @@ export function threadsRoutes() {
     const id = c.req.param("id");
     const body = c.req.valid("json");
 
-    const th = await db.query.thread.findFirst({
-      where: eq(thread.id, id),
-      columns: { mailboxId: true, trashed: true, spam: true, unreadCount: true },
-    });
-    if (!th) throw new HTTPException(404, { message: "not found" });
-    await requirePerm(db, user.id, th.mailboxId, Perm.WRITE);
+    const th = await requireEntityAccess(db, user.id, thread, id, Perm.WRITE);
 
     // Trash and spam are mutually exclusive buckets: entering one clears the
     // other so a thread only ever shows up in a single folder.

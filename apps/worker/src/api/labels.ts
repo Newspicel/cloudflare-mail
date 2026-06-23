@@ -9,7 +9,8 @@ import { HTTPException } from "hono/http-exception";
 import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
 import { requireUser } from "../middleware.ts";
-import { requirePerm } from "../permissions.ts";
+import { requireEntityAccess, requirePerm } from "../permissions.ts";
+import { buildPatch, wrapUnique } from "./util.ts";
 
 export function labelsRoutes() {
   const r = new Hono<AppBindings>();
@@ -35,20 +36,16 @@ export function labelsRoutes() {
     const body = c.req.valid("json");
     await requirePerm(db, user.id, body.mailboxId, Perm.WRITE);
     const id = crypto.randomUUID();
-    try {
-      await db.insert(label).values({
-        id,
-        mailboxId: body.mailboxId,
-        name: body.name.trim(),
-        color: body.color ?? "#64748b",
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "";
-      if (/UNIQUE/i.test(msg)) {
-        throw new HTTPException(409, { message: "name already exists" });
-      }
-      throw err;
-    }
+    await wrapUnique(
+      () =>
+        db.insert(label).values({
+          id,
+          mailboxId: body.mailboxId,
+          name: body.name.trim(),
+          color: body.color ?? "#64748b",
+        }),
+      "name already exists",
+    );
     return c.json({ id }, 201);
   });
 
@@ -57,15 +54,11 @@ export function labelsRoutes() {
     const user = c.get("user")!;
     const id = c.req.param("id");
     const body = c.req.valid("json");
-    const lab = await db.query.label.findFirst({
-      where: eq(label.id, id),
-      columns: { mailboxId: true },
+    await requireEntityAccess(db, user.id, label, id, Perm.WRITE);
+    const patch = buildPatch<typeof label.$inferInsert>(body, {
+      name: (v: string) => v.trim(),
+      color: true,
     });
-    if (!lab) throw new HTTPException(404, { message: "not found" });
-    await requirePerm(db, user.id, lab.mailboxId, Perm.WRITE);
-    const patch: Partial<{ name: string; color: string }> = {};
-    if (body.name !== undefined) patch.name = body.name.trim();
-    if (body.color !== undefined) patch.color = body.color;
     if (Object.keys(patch).length === 0) return c.json({ ok: true });
     await db.update(label).set(patch).where(eq(label.id, id));
     return c.json({ ok: true });
@@ -75,12 +68,7 @@ export function labelsRoutes() {
     const db = dbFromCtx(c);
     const user = c.get("user")!;
     const id = c.req.param("id");
-    const lab = await db.query.label.findFirst({
-      where: eq(label.id, id),
-      columns: { mailboxId: true },
-    });
-    if (!lab) throw new HTTPException(404, { message: "not found" });
-    await requirePerm(db, user.id, lab.mailboxId, Perm.WRITE);
+    await requireEntityAccess(db, user.id, label, id, Perm.WRITE);
     await db.delete(label).where(eq(label.id, id));
     return c.body(null, 204);
   });

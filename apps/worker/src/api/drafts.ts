@@ -11,6 +11,7 @@ import { assertOwnedAttachmentKeys } from "../mail/attachment-keys.ts";
 import { requireUser } from "../middleware.ts";
 import { ALL_MAILBOXES, requirePerm } from "../permissions.ts";
 import { serializeDraft } from "./serialize.ts";
+import { buildPatch } from "./util.ts";
 
 export function draftsRoutes() {
   const r = new Hono<AppBindings>();
@@ -52,24 +53,26 @@ export function draftsRoutes() {
     assertOwnedAttachmentKeys(user.id, body.attachments);
 
     const id = crypto.randomUUID();
-    await db.insert(draft).values({
-      id,
-      mailboxId: body.mailboxId,
-      userId: user.id,
-      inReplyTo: body.inReplyTo ?? null,
-      references: body.references ?? null,
-      quoteMessageId: body.quote?.messageId ?? null,
-      quoteKind: body.quote?.kind ?? null,
-      toAddrs: body.to,
-      ccAddrs: body.cc ?? null,
-      bccAddrs: body.bcc ?? null,
-      subject: body.subject,
-      body: body.body,
-      format: body.format,
-      markdown: body.format === "markdown",
-      attachments: body.attachments,
-    });
-    const row = await db.query.draft.findFirst({ where: eq(draft.id, id) });
+    const [row] = await db
+      .insert(draft)
+      .values({
+        id,
+        mailboxId: body.mailboxId,
+        userId: user.id,
+        inReplyTo: body.inReplyTo ?? null,
+        references: body.references ?? null,
+        quoteMessageId: body.quote?.messageId ?? null,
+        quoteKind: body.quote?.kind ?? null,
+        toAddrs: body.to,
+        ccAddrs: body.cc ?? null,
+        bccAddrs: body.bcc ?? null,
+        subject: body.subject,
+        body: body.body,
+        format: body.format,
+        markdown: body.format === "markdown",
+        attachments: body.attachments,
+      })
+      .returning();
     if (!row) throw new HTTPException(500, { message: "draft not found after insert" });
     return c.json({ draft: serializeDraft(row) }, 201);
   });
@@ -82,26 +85,29 @@ export function draftsRoutes() {
     await loadOwn(db, id, user.id);
     if (body.attachments !== undefined) assertOwnedAttachmentKeys(user.id, body.attachments);
 
-    const patch: Record<string, unknown> = { updatedAt: new Date() };
-    if (body.to !== undefined) patch.toAddrs = body.to;
-    if (body.cc !== undefined) patch.ccAddrs = body.cc;
-    if (body.bcc !== undefined) patch.bccAddrs = body.bcc;
-    if (body.subject !== undefined) patch.subject = body.subject;
-    if (body.body !== undefined) patch.body = body.body;
+    const patch = buildPatch<typeof draft.$inferInsert>(body, {
+      to: { to: "toAddrs" },
+      cc: { to: "ccAddrs" },
+      bcc: { to: "bccAddrs" },
+      subject: true,
+      body: true,
+      inReplyTo: true,
+      references: true,
+      attachments: true,
+    });
+    patch.updatedAt = new Date();
+    // format drives the `markdown` flag; quote fans out to two columns — both
+    // are one-to-many so they stay out of the field map.
     if (body.format !== undefined) {
       patch.format = body.format;
       patch.markdown = body.format === "markdown";
     }
-    if (body.inReplyTo !== undefined) patch.inReplyTo = body.inReplyTo;
-    if (body.references !== undefined) patch.references = body.references;
     if (body.quote !== undefined) {
       patch.quoteMessageId = body.quote?.messageId ?? null;
       patch.quoteKind = body.quote?.kind ?? null;
     }
-    if (body.attachments !== undefined) patch.attachments = body.attachments;
 
-    await db.update(draft).set(patch).where(eq(draft.id, id));
-    const row = await db.query.draft.findFirst({ where: eq(draft.id, id) });
+    const [row] = await db.update(draft).set(patch).where(eq(draft.id, id)).returning();
     if (!row) throw new HTTPException(404, { message: "not found" });
     return c.json({ draft: serializeDraft(row) });
   });
