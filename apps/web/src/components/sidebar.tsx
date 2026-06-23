@@ -13,11 +13,11 @@ import {
   Trash2,
   Users,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useLayoutEffect, useRef } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
-import { ALL_MAILBOXES, type MailboxSummary, mailboxesQuery } from "@/lib/queries.ts";
+import { ALL_MAILBOXES, foldersQuery, type MailboxSummary, mailboxesQuery } from "@/lib/queries.ts";
 import { formatRemaining, useNow } from "@/lib/time.ts";
 import { openCompose } from "./compose-dock.tsx";
 import { FoldersNav } from "./folders-nav.tsx";
@@ -66,6 +66,8 @@ export function Sidebar({
 function SidebarBody({ onClose }: { onClose?: () => void }) {
   const { data } = useQuery(mailboxesQuery);
   const mailboxes = data?.mailboxes ?? [];
+  // Subscribe so the gliding indicator re-measures once folders load/change.
+  useQuery(foldersQuery);
   useNow(60_000);
 
   const qc = useQueryClient();
@@ -73,6 +75,27 @@ function SidebarBody({ onClose }: { onClose?: () => void }) {
   const { confirmDelete } = useConfirmHelpers();
   const params = useParams({ strict: false });
   const activeId = (params as { mailboxId?: string }).mailboxId;
+
+  // Gliding active-row indicator (vertical sibling of the tab bar's slider):
+  // measure the active link inside the scroll area each render and slide a single
+  // card to it. Applied imperatively so there's no extra render pass.
+  const navRef = useRef<HTMLElement>(null);
+  const indRef = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const node = navRef.current;
+    const bar = indRef.current;
+    if (!node || !bar) return;
+    const active = node.querySelector<HTMLElement>("[data-active-nav]");
+    if (!active) {
+      bar.style.opacity = "0";
+      return;
+    }
+    const r = active.getBoundingClientRect();
+    const top = r.top - node.getBoundingClientRect().top + node.scrollTop;
+    bar.style.height = `${r.height}px`;
+    bar.style.transform = `translateY(${top}px)`;
+    bar.style.opacity = "1";
+  });
 
   const deleteMailbox = useMutation({
     mutationFn: (id: string) => api(`/api/mailboxes/${id}`, { method: "DELETE" }),
@@ -119,7 +142,12 @@ function SidebarBody({ onClose }: { onClose?: () => void }) {
         <NewTempMailbox />
       </div>
 
-      <nav className="flex flex-1 flex-col gap-4 overflow-y-auto px-2 py-3">
+      <nav ref={navRef} className="relative flex flex-1 flex-col gap-4 overflow-y-auto px-2 py-3">
+        <span
+          ref={indRef}
+          aria-hidden
+          className="pointer-events-none absolute top-0 right-2 left-2 z-0 rounded-md bg-sidebar-accent opacity-0 transition-transform duration-200 ease-out motion-reduce:transition-none"
+        />
         {mailboxes.length > 0 && (
           <ul className="flex flex-col gap-0.5">
             <li>
@@ -128,10 +156,11 @@ function SidebarBody({ onClose }: { onClose?: () => void }) {
                 params={{ mailboxId: ALL_MAILBOXES }}
                 search={{ view: "inbox" }}
                 onClick={() => onClose?.()}
+                data-active-nav={activeId === ALL_MAILBOXES || undefined}
                 className={cn(
-                  "flex items-center justify-between rounded-md px-2 py-1.5 text-[13px] transition-colors",
+                  "relative z-10 flex items-center justify-between rounded-md px-2 py-1.5 text-[13px] transition-colors",
                   activeId === ALL_MAILBOXES
-                    ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                    ? "font-medium text-sidebar-accent-foreground"
                     : "text-sidebar-foreground hover:bg-sidebar-accent/60",
                 )}
               >
@@ -172,10 +201,11 @@ function SidebarBody({ onClose }: { onClose?: () => void }) {
                         params={{ mailboxId: m.id }}
                         search={{ view: "inbox" }}
                         onClick={() => onClose?.()}
+                        data-active-nav={activeId === m.id || undefined}
                         className={cn(
-                          "flex items-center justify-between rounded-md px-2 py-1.5 text-[13px] transition-colors",
+                          "relative z-10 flex items-center justify-between rounded-md px-2 py-1.5 text-[13px] transition-colors",
                           activeId === m.id
-                            ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                            ? "font-medium text-sidebar-accent-foreground"
                             : "text-sidebar-foreground hover:bg-sidebar-accent/60",
                         )}
                       >
