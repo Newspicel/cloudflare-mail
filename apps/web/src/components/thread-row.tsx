@@ -2,7 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { Mails } from "lucide-react";
 import type * as React from "react";
 import { cn } from "@/lib/cn.ts";
-import { setThreadDrag } from "@/lib/dnd.ts";
+import { clearThreadDragGhost, setThreadDrag } from "@/lib/dnd.ts";
 import { useUserPrefs } from "@/lib/prefs.ts";
 import type { MailView, MessageLabel, ThreadRow } from "@/lib/queries.ts";
 import { formatTime } from "@/lib/time.ts";
@@ -111,6 +111,7 @@ export function ThreadRowView({
     <li
       draggable
       onDragStart={onDragStart}
+      onDragEnd={clearThreadDragGhost}
       className={cn(
         "group relative flex items-stretch border-b",
         active

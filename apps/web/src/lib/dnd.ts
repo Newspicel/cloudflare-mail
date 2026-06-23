@@ -12,16 +12,38 @@ export interface ThreadDragData {
   fromFolderId?: string;
 }
 
+const DRAG_GHOST_ATTR = "data-cfmail-drag-ghost";
+
 export function setThreadDrag(e: DragEvent, data: ThreadDragData): void {
   e.dataTransfer.setData(THREAD_MIME, JSON.stringify(data));
   e.dataTransfer.setData("text/plain", data.threadId);
   e.dataTransfer.effectAllowed = "move";
-  // Pin the drag image to the row itself. Without this the browser falls back
-  // to its default ghost, which a transformed ancestor can balloon into a
-  // snapshot of the whole window. Offset keeps the ghost under the cursor.
+
+  // Don't hand the live row to setDragImage: it sits inside a scrolling /
+  // composited ancestor, and Chromium then snapshots that whole layer (the
+  // entire window) instead of the row. Snapshot a detached clone parented
+  // straight to <body> so the ghost is exactly the row. Cleaned up on dragend.
   const row = e.currentTarget as HTMLElement;
   const rect = row.getBoundingClientRect();
-  e.dataTransfer.setDragImage(row, e.clientX - rect.left, e.clientY - rect.top);
+  const ghost = row.cloneNode(true) as HTMLElement;
+  ghost.setAttribute(DRAG_GHOST_ATTR, "");
+  Object.assign(ghost.style, {
+    position: "fixed",
+    top: "-10000px",
+    left: "0",
+    width: `${rect.width}px`,
+    margin: "0",
+    listStyle: "none",
+    pointerEvents: "none",
+    background: "var(--color-card)",
+  });
+  document.body.appendChild(ghost);
+  e.dataTransfer.setDragImage(ghost, e.clientX - rect.left, e.clientY - rect.top);
+}
+
+/** Remove any leftover drag-image clone. Wire to the row's onDragEnd. */
+export function clearThreadDragGhost(): void {
+  for (const n of document.querySelectorAll(`[${DRAG_GHOST_ATTR}]`)) n.remove();
 }
 
 export function readThreadDrag(e: DragEvent): ThreadDragData | null {
