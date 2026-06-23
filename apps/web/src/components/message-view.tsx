@@ -128,7 +128,7 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
   return (
     <TooltipProvider delay={400}>
       <div className="flex h-full flex-col bg-background">
-        <div className="flex items-center gap-1 border-b bg-card px-2 py-2 sm:px-4">
+        <div className="flex h-11 shrink-0 items-center gap-1 border-b bg-card px-2 sm:px-4">
           <Tooltip label="Back">
             <Button variant="ghost" size="icon" onClick={() => history.back()} aria-label="Back">
               <ArrowLeft />

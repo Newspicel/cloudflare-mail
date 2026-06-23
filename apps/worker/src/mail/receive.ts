@@ -12,7 +12,7 @@ import { Flag } from "@cfmail/shared/flags";
 import { and, eq } from "drizzle-orm";
 import type { Env } from "../env.ts";
 import { broadcastToUsers } from "../hub.ts";
-import { parseMime, snippet, streamToArrayBuffer } from "./mime.ts";
+import { addrsToText, bodyForIndex, parseMime, snippet, streamToArrayBuffer } from "./mime.ts";
 import { notifyMailbox } from "./push.ts";
 import { evaluateSpam, type SpamEvaluation } from "./spam.ts";
 import { bumpThread, resolveThreadId } from "./threads.ts";
@@ -148,6 +148,7 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
   const isNewThread = (existingThread?.msgCount ?? 0) === 0;
 
   const receivedAt = new Date();
+  const bodyIndex = bodyForIndex(parsed.text, parsed.html);
 
   await db.insert(message).values({
     id: messageId,
@@ -164,7 +165,9 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
     ccAddrs: ccAddrs.length ? ccAddrs : null,
     bccAddrs: null,
     subject: parsed.subject ?? "",
-    snippet: snippet(parsed.text ?? stripHtml(parsed.html ?? "")),
+    snippet: snippet(bodyIndex),
+    bodyText: bodyIndex,
+    toText: addrsToText([...toAddrs, ...ccAddrs]),
     flags: 0,
     receivedAt,
     sentAt: null,
@@ -247,8 +250,4 @@ function splitAddr(addr: string): [string | null, string | null] {
 
 function sanitizeFilename(name: string): string {
   return name.replace(/[^a-z0-9._-]+/gi, "_").slice(0, 128);
-}
-
-function stripHtml(html: string): string {
-  return html.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ");
 }

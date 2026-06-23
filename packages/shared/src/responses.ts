@@ -47,6 +47,7 @@ export interface SearchResultDto {
   fromAddr: string;
   direction: "in" | "out";
   flags: number;
+  hasAttachments: boolean;
   receivedAt: string | null;
   sentAt: string | null;
 }
@@ -108,6 +109,7 @@ export interface MessageLabelsDto {
 }
 export interface SearchResultsDto {
   results: SearchResultDto[];
+  hasMore: boolean;
 }
 export interface ContactsDto {
   contacts: ContactDto[];
