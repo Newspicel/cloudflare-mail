@@ -19,6 +19,7 @@ export const keys = {
   thread: (threadId: string) => ["thread", threadId] as const,
   messageBody: (messageId: string) => ["message-body", messageId] as const,
   drafts: (mailboxId: string) => ["drafts", mailboxId] as const,
+  draft: (draftId: string) => ["draft", draftId] as const,
   search: (key: string) => ["search", key] as const,
   labels: (mailboxId: string) => ["labels", mailboxId] as const,
   messageLabels: (idsKey: string) => ["message-labels", idsKey] as const,

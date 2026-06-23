@@ -13,6 +13,7 @@ import { Route as TwoFactorRouteImport } from "./routes/two-factor"
 import { Route as ResetPasswordRouteImport } from "./routes/reset-password"
 import { Route as LoginRouteImport } from "./routes/login"
 import { Route as ForgotPasswordRouteImport } from "./routes/forgot-password"
+import { Route as ComposeRouteImport } from "./routes/compose"
 import { Route as AcceptInviteRouteImport } from "./routes/accept-invite"
 import { Route as AppRouteRouteImport } from "./routes/app/route"
 import { Route as IndexRouteImport } from "./routes/index"
@@ -45,6 +46,11 @@ const LoginRoute = LoginRouteImport.update({
 const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
   id: "/forgot-password",
   path: "/forgot-password",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ComposeRoute = ComposeRouteImport.update({
+  id: "/compose",
+  path: "/compose",
   getParentRoute: () => rootRouteImport,
 } as any)
 const AcceptInviteRoute = AcceptInviteRouteImport.update({
@@ -118,6 +124,7 @@ export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
   "/app": typeof AppRouteRouteWithChildren
   "/accept-invite": typeof AcceptInviteRoute
+  "/compose": typeof ComposeRoute
   "/forgot-password": typeof ForgotPasswordRoute
   "/login": typeof LoginRoute
   "/reset-password": typeof ResetPasswordRoute
@@ -136,6 +143,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   "/": typeof IndexRoute
   "/accept-invite": typeof AcceptInviteRoute
+  "/compose": typeof ComposeRoute
   "/forgot-password": typeof ForgotPasswordRoute
   "/login": typeof LoginRoute
   "/reset-password": typeof ResetPasswordRoute
@@ -154,6 +162,7 @@ export interface FileRoutesById {
   "/": typeof IndexRoute
   "/app": typeof AppRouteRouteWithChildren
   "/accept-invite": typeof AcceptInviteRoute
+  "/compose": typeof ComposeRoute
   "/forgot-password": typeof ForgotPasswordRoute
   "/login": typeof LoginRoute
   "/reset-password": typeof ResetPasswordRoute
@@ -175,6 +184,7 @@ export interface FileRouteTypes {
     | "/"
     | "/app"
     | "/accept-invite"
+    | "/compose"
     | "/forgot-password"
     | "/login"
     | "/reset-password"
@@ -193,6 +203,7 @@ export interface FileRouteTypes {
   to:
     | "/"
     | "/accept-invite"
+    | "/compose"
     | "/forgot-password"
     | "/login"
     | "/reset-password"
@@ -210,6 +221,7 @@ export interface FileRouteTypes {
     | "/"
     | "/app"
     | "/accept-invite"
+    | "/compose"
     | "/forgot-password"
     | "/login"
     | "/reset-password"
@@ -230,6 +242,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AppRouteRoute: typeof AppRouteRouteWithChildren
   AcceptInviteRoute: typeof AcceptInviteRoute
+  ComposeRoute: typeof ComposeRoute
   ForgotPasswordRoute: typeof ForgotPasswordRoute
   LoginRoute: typeof LoginRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
@@ -264,6 +277,13 @@ declare module "@tanstack/react-router" {
       path: "/forgot-password"
       fullPath: "/forgot-password"
       preLoaderRoute: typeof ForgotPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/compose": {
+      id: "/compose"
+      path: "/compose"
+      fullPath: "/compose"
+      preLoaderRoute: typeof ComposeRouteImport
       parentRoute: typeof rootRouteImport
     }
     "/accept-invite": {
@@ -413,6 +433,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AppRouteRoute: AppRouteRouteWithChildren,
   AcceptInviteRoute: AcceptInviteRoute,
+  ComposeRoute: ComposeRoute,
   ForgotPasswordRoute: ForgotPasswordRoute,
   LoginRoute: LoginRoute,
   ResetPasswordRoute: ResetPasswordRoute,

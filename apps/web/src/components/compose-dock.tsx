@@ -1,7 +1,7 @@
 import { Dialog } from "@base-ui/react/dialog";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import DOMPurify from "dompurify";
-import { Maximize2, Minimize2, Paperclip, Trash2, X } from "lucide-react";
+import { ExternalLink, Maximize2, Minimize2, Paperclip, Trash2, X } from "lucide-react";
 import { marked } from "marked";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -47,7 +47,7 @@ interface UploadedAttachment {
   sizeBytes: number;
 }
 
-interface ComposeState {
+export interface ComposeState {
   open: boolean;
   replyToMessage: MessageRow | null;
   // Reply-all: also carry over the original To/Cc recipients (minus ourselves).
@@ -102,7 +102,7 @@ export function ComposeDock() {
   if (!s.open) return null;
   // Remount when the target changes so the form re-initializes cleanly.
   return (
-    <ComposePanel
+    <ComposeForm
       key={s.draft?.id ?? s.replyToMessage?.id ?? s.forwardMessage?.id ?? "new"}
       state={s}
     />
@@ -117,7 +117,15 @@ const FIELD_LABEL =
 const FIELD_INPUT =
   "flex-1 bg-transparent py-0.5 text-[13px] leading-5 outline-none placeholder:text-muted-foreground";
 
-function ComposePanel({ state: s }: { state: ComposeState }) {
+export function ComposeForm({
+  state: s,
+  variant = "dock",
+}: {
+  state: ComposeState;
+  // "dock" = the in-app floating panel; "window" = a standalone pop-out window.
+  variant?: "dock" | "window";
+}) {
+  const isWindow = variant === "window";
   const qc = useQueryClient();
   const { data: mailboxes } = useQuery(mailboxesQuery);
   const { data: contactsData } = useQuery(contactsQuery);
@@ -294,9 +302,8 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
     [mailboxId, inReplyTo, references, quoteRef, deleteDraft, invalidateDrafts],
   );
 
-  // Debounced autosave. Skips while the form is untouched (so merely opening a
-  // reply/forward doesn't spawn a draft) and serializes writes via `flush`.
-  useEffect(() => {
+  // The current form state as a draft snapshot + whether it's effectively blank.
+  const currentSnapshot = useCallback((): { snap: DraftSnapshot; isEmpty: boolean } => {
     const toList = collectRecipients(to);
     const ccList = collectRecipients(cc);
     const bccList = collectRecipients(bcc);
@@ -318,12 +325,29 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
       !subject &&
       !bodyText.trim() &&
       attachments.length === 0;
+    return { snap, isEmpty };
+  }, [to, cc, bcc, subject, text, html, mode, attachments]);
+
+  // Debounced autosave. Skips while the form is untouched (so merely opening a
+  // reply/forward doesn't spawn a draft) and serializes writes via `flush`.
+  useEffect(() => {
+    const { snap, isEmpty } = currentSnapshot();
     const key = JSON.stringify(snap);
     if (initialKeyRef.current === null) initialKeyRef.current = key;
     if (key === initialKeyRef.current) return;
     const handle = setTimeout(() => void flush({ snap, isEmpty }), 700);
     return () => clearTimeout(handle);
-  }, [to, cc, bcc, subject, text, html, mode, attachments, flush]);
+  }, [currentSnapshot, flush]);
+
+  // Persist the current state and resolve the draft id — used by the pop-out so
+  // the new window can rehydrate from the server-saved draft. Returns null only
+  // when there is genuinely nothing to carry over.
+  const ensureDraftSaved = useCallback(async (): Promise<string | null> => {
+    const { snap, isEmpty } = currentSnapshot();
+    if (isEmpty) return draftIdRef.current;
+    await flush({ snap, isEmpty: false });
+    return draftIdRef.current;
+  }, [currentSnapshot, flush]);
 
   const previewHtml = useMemo(() => {
     if (mode !== "markdown" || !text.trim()) return "";
@@ -379,16 +403,46 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
       // Keep the combined "All" view's lists/counts in sync with the send.
       qc.invalidateQueries({ queryKey: keys.threadsRoot("all") });
       await deleteDraft().catch(() => {});
-      closeCompose();
+      finish();
     },
     onError: (err: unknown) => {
       toast.error(err instanceof Error ? err.message : "Send failed");
     },
   });
 
+  // Close the dock, or close the OS window when running as a pop-out.
+  function finish() {
+    if (isWindow) window.close();
+    else closeCompose();
+  }
+
   function discard() {
     void deleteDraft().catch(() => {});
-    closeCompose();
+    finish();
+  }
+
+  // Persist the in-progress message and reopen it in a real browser window.
+  // window.open must run synchronously inside the click to dodge popup blockers,
+  // so the window is created first and pointed at the route once the draft id
+  // is known.
+  function popOut() {
+    const w = window.open("about:blank", "_blank", "popup,width=720,height=860");
+    if (!w) {
+      toast.error("Allow pop-ups to open the message in a new window");
+      return;
+    }
+    void (async () => {
+      let url = "/compose";
+      try {
+        const id = await ensureDraftSaved();
+        if (id) url += `?draft=${encodeURIComponent(id)}`;
+        else if (s.initialTo) url += `?to=${encodeURIComponent(s.initialTo)}`;
+      } catch {
+        // Fall back to a blank composer rather than leaving a dead window.
+      }
+      w.location.replace(url);
+      closeCompose();
+    })();
   }
 
   // Guard against the classic "forgot the attachment". Only the body the user
@@ -481,6 +535,291 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
     await Promise.all(toUpload.map(uploadFile));
   }
 
+  const titleText = rep
+    ? s.replyAll
+      ? "Reply all"
+      : "Reply"
+    : fwd
+      ? "Forward"
+      : quoteRef?.kind === "reply"
+        ? "Reply"
+        : quoteRef?.kind === "forward"
+          ? "Forward"
+          : "New message";
+
+  const content = (
+    <>
+      <div className="flex items-center justify-between border-b bg-muted/60 px-4 py-2.5 pt-[max(0.625rem,env(safe-area-inset-top))] sm:pt-2.5">
+        {isWindow ? (
+          <span className="font-semibold text-[13px] text-foreground tracking-tight">
+            {titleText}
+          </span>
+        ) : (
+          <Dialog.Title className="font-semibold text-[13px] text-foreground tracking-tight">
+            {titleText}
+          </Dialog.Title>
+        )}
+        <div className="flex items-center gap-0.5">
+          {!isWindow && (
+            <>
+              <button
+                type="button"
+                onClick={popOut}
+                className="hidden h-6 w-6 place-items-center rounded text-muted-foreground outline-none transition-colors hover:bg-card hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45 sm:grid"
+                aria-label="Open in new window"
+                title="Open in new window"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setExpanded((v) => !v)}
+                className="hidden h-6 w-6 place-items-center rounded text-muted-foreground outline-none transition-colors hover:bg-card hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45 sm:grid"
+                aria-label={expanded ? "Shrink" : "Expand"}
+                aria-pressed={expanded}
+              >
+                {expanded ? (
+                  <Minimize2 className="h-3.5 w-3.5" />
+                ) : (
+                  <Maximize2 className="h-3.5 w-3.5" />
+                )}
+              </button>
+            </>
+          )}
+          {isWindow ? (
+            <button
+              type="button"
+              onClick={() => window.close()}
+              className="grid h-6 w-6 place-items-center rounded text-muted-foreground outline-none transition-colors hover:bg-card hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
+              aria-label="Close"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          ) : (
+            <Dialog.Close
+              className="grid h-6 w-6 place-items-center rounded text-muted-foreground outline-none transition-colors hover:bg-card hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
+              aria-label="Close"
+            >
+              <X className="h-3.5 w-3.5" />
+            </Dialog.Close>
+          )}
+        </div>
+      </div>
+
+      <div className="flex flex-1 flex-col overflow-y-auto px-4 py-1">
+        <div className={FIELD_ROW}>
+          <span className={FIELD_LABEL}>From</span>
+          <Select value={mailboxId} onValueChange={(v) => setMailboxId(v as string)}>
+            <SelectTrigger
+              aria-label="From mailbox"
+              className="h-auto w-auto flex-1 justify-between gap-1 border-0 bg-transparent px-0 py-0.5 text-left text-[13px] leading-5 shadow-none hover:bg-transparent focus-visible:ring-0"
+            >
+              <SelectValue>
+                {(value) => sendable.find((m) => m.id === value)?.address ?? ""}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {sendable.map((m) => (
+                <SelectItem key={m.id} value={m.id}>
+                  {m.address}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <AddressField
+          label="To"
+          value={to}
+          onChange={setTo}
+          placeholder="name@example.com"
+          contacts={contacts}
+          trailing={
+            !showCc && (
+              <button
+                type="button"
+                onClick={() => setShowCc(true)}
+                className="mt-0.5 shrink-0 rounded px-1.5 py-0.5 font-medium text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                Cc/Bcc
+              </button>
+            )
+          }
+        />
+        {showCc && (
+          <>
+            <AddressField
+              label="Cc"
+              value={cc}
+              onChange={setCc}
+              placeholder="cc@example.com"
+              contacts={contacts}
+            />
+            <AddressField
+              label="Bcc"
+              value={bcc}
+              onChange={setBcc}
+              placeholder="bcc@example.com"
+              contacts={contacts}
+            />
+          </>
+        )}
+        <label className={FIELD_ROW}>
+          <span className={FIELD_LABEL}>Subject</span>
+          <input
+            value={subject}
+            onChange={(e) => setSubject(e.target.value)}
+            className={FIELD_INPUT}
+          />
+        </label>
+        <FormatToolbar
+          mode={mode}
+          onExec={runFormat}
+          onToggleMarkdown={toggleMarkdown}
+          preview={preview}
+          onTogglePreview={() => setPreview((v) => !v)}
+          onExitRich={exitRich}
+        />
+        {mode === "html" ? (
+          <RichEditor
+            ref={editorRef}
+            initialHtml={html}
+            pendingCmd={pendingCmdRef.current}
+            onChange={setHtml}
+            placeholder="Write your message…"
+          />
+        ) : mode === "markdown" && preview ? (
+          <div
+            // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized via DOMPurify
+            dangerouslySetInnerHTML={{ __html: previewHtml }}
+            className="prose prose-sm max-w-none flex-1 overflow-y-auto py-2 dark:prose-invert"
+          />
+        ) : (
+          <Textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            className={cn(
+              "min-h-40 flex-1 resize-none border-0 bg-transparent px-0 py-2 shadow-none focus-visible:ring-0",
+              mode === "markdown" && "font-mono",
+            )}
+            placeholder={
+              mode === "markdown" ? "Write your message in markdown…" : "Write your message…"
+            }
+          />
+        )}
+        {attachments.length > 0 && (
+          <ul className="flex flex-wrap gap-1.5 border-t pt-2">
+            {attachments.map((a) => (
+              <li
+                key={a.r2Key}
+                className="flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-0.5 text-[11px]"
+              >
+                <Paperclip className="h-2.5 w-2.5 shrink-0 text-muted-foreground" />
+                <span className="max-w-[16rem] truncate" title={a.filename}>
+                  {a.filename}
+                </span>
+                <span className="text-muted-foreground">{formatBytes(a.sizeBytes)}</span>
+                <button
+                  type="button"
+                  onClick={() => setAttachments((prev) => prev.filter((x) => x.r2Key !== a.r2Key))}
+                  className="ml-0.5 rounded p-0.5 text-muted-foreground hover:bg-card hover:text-foreground"
+                  aria-label={`Remove ${a.filename}`}
+                >
+                  <X className="h-2.5 w-2.5" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {quoteRef && (
+          <div className="mt-2 border-t pt-2">
+            <button
+              type="button"
+              onClick={() => setShowQuote((v) => !v)}
+              className="rounded px-1.5 py-0.5 font-medium text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              {showQuote ? "Hide" : "Show"} quoted message
+            </button>
+            <p className="mt-0.5 px-1.5 text-[11px] text-muted-foreground/70">
+              The original message is included below your{" "}
+              {quoteRef.kind === "forward" ? "forward" : "reply"}.
+            </p>
+            {showQuote && (
+              <div className="mt-2 max-h-64 overflow-y-auto rounded-md border bg-muted/30">
+                {quotedHtml ? (
+                  // Same sandboxed isolation as the message view — the quoted
+                  // body is untrusted mail too.
+                  <EmailFrame html={quotedHtml} />
+                ) : (
+                  <pre className="whitespace-pre-wrap px-3 py-2 font-sans text-[12px] text-muted-foreground">
+                    {origBody.data?.text ?? rep?.snippet ?? fwd?.snippet ?? ""}
+                  </pre>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="flex items-center justify-between gap-3 border-t bg-muted/40 px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:pb-2">
+        <div className="flex items-center gap-1.5">
+          <Button
+            variant="primary"
+            onClick={attemptSend}
+            disabled={send.isPending || uploading > 0 || !mailboxId || !hasRecipients(to)}
+          >
+            {send.isPending ? "Sending…" : "Send"}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={attachments.length >= MAX_ATTACHMENTS}
+            aria-label="Attach files"
+          >
+            <Paperclip />
+          </Button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              void onPickFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-muted-foreground">
+            {uploading > 0
+              ? `Uploading ${uploading}…`
+              : sendable.length === 0
+                ? "No sendable mailboxes"
+                : savedHint
+                  ? "Draft saved"
+                  : null}
+          </span>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={discard}
+            className="hover:bg-destructive/10 hover:text-destructive"
+            aria-label="Discard draft"
+          >
+            <Trash2 />
+          </Button>
+        </div>
+      </div>
+    </>
+  );
+
+  if (isWindow) {
+    return (
+      <div className="flex h-dvh flex-col overflow-hidden bg-card text-card-foreground">
+        {content}
+      </div>
+    );
+  }
   return (
     <Dialog.Root
       open
@@ -499,249 +838,7 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
               : "sm:h-[560px] sm:w-[516px]",
           )}
         >
-          <div className="flex items-center justify-between border-b bg-muted/60 px-4 py-2.5 pt-[max(0.625rem,env(safe-area-inset-top))] sm:pt-2.5">
-            <Dialog.Title className="font-semibold text-[13px] text-foreground tracking-tight">
-              {rep
-                ? s.replyAll
-                  ? "Reply all"
-                  : "Reply"
-                : fwd
-                  ? "Forward"
-                  : quoteRef?.kind === "reply"
-                    ? "Reply"
-                    : quoteRef?.kind === "forward"
-                      ? "Forward"
-                      : "New message"}
-            </Dialog.Title>
-            <div className="flex items-center gap-0.5">
-              <button
-                type="button"
-                onClick={() => setExpanded((v) => !v)}
-                className="hidden h-6 w-6 place-items-center rounded text-muted-foreground outline-none transition-colors hover:bg-card hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45 sm:grid"
-                aria-label={expanded ? "Shrink" : "Expand"}
-                aria-pressed={expanded}
-              >
-                {expanded ? (
-                  <Minimize2 className="h-3.5 w-3.5" />
-                ) : (
-                  <Maximize2 className="h-3.5 w-3.5" />
-                )}
-              </button>
-              <Dialog.Close
-                className="grid h-6 w-6 place-items-center rounded text-muted-foreground outline-none transition-colors hover:bg-card hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
-                aria-label="Close"
-              >
-                <X className="h-3.5 w-3.5" />
-              </Dialog.Close>
-            </div>
-          </div>
-
-          <div className="flex flex-1 flex-col overflow-y-auto px-4 py-1">
-            <div className={FIELD_ROW}>
-              <span className={FIELD_LABEL}>From</span>
-              <Select value={mailboxId} onValueChange={(v) => setMailboxId(v as string)}>
-                <SelectTrigger
-                  aria-label="From mailbox"
-                  className="h-auto w-auto flex-1 justify-between gap-1 border-0 bg-transparent px-0 py-0.5 text-left text-[13px] leading-5 shadow-none hover:bg-transparent focus-visible:ring-0"
-                >
-                  <SelectValue>
-                    {(value) => sendable.find((m) => m.id === value)?.address ?? ""}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {sendable.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>
-                      {m.address}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <AddressField
-              label="To"
-              value={to}
-              onChange={setTo}
-              placeholder="name@example.com"
-              contacts={contacts}
-              trailing={
-                !showCc && (
-                  <button
-                    type="button"
-                    onClick={() => setShowCc(true)}
-                    className="mt-0.5 shrink-0 rounded px-1.5 py-0.5 font-medium text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                  >
-                    Cc/Bcc
-                  </button>
-                )
-              }
-            />
-            {showCc && (
-              <>
-                <AddressField
-                  label="Cc"
-                  value={cc}
-                  onChange={setCc}
-                  placeholder="cc@example.com"
-                  contacts={contacts}
-                />
-                <AddressField
-                  label="Bcc"
-                  value={bcc}
-                  onChange={setBcc}
-                  placeholder="bcc@example.com"
-                  contacts={contacts}
-                />
-              </>
-            )}
-            <label className={FIELD_ROW}>
-              <span className={FIELD_LABEL}>Subject</span>
-              <input
-                value={subject}
-                onChange={(e) => setSubject(e.target.value)}
-                className={FIELD_INPUT}
-              />
-            </label>
-            <FormatToolbar
-              mode={mode}
-              onExec={runFormat}
-              onToggleMarkdown={toggleMarkdown}
-              preview={preview}
-              onTogglePreview={() => setPreview((v) => !v)}
-              onExitRich={exitRich}
-            />
-            {mode === "html" ? (
-              <RichEditor
-                ref={editorRef}
-                initialHtml={html}
-                pendingCmd={pendingCmdRef.current}
-                onChange={setHtml}
-                placeholder="Write your message…"
-              />
-            ) : mode === "markdown" && preview ? (
-              <div
-                // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized via DOMPurify
-                dangerouslySetInnerHTML={{ __html: previewHtml }}
-                className="prose prose-sm max-w-none flex-1 overflow-y-auto py-2 dark:prose-invert"
-              />
-            ) : (
-              <Textarea
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                className={cn(
-                  "min-h-40 flex-1 resize-none border-0 bg-transparent px-0 py-2 shadow-none focus-visible:ring-0",
-                  mode === "markdown" && "font-mono",
-                )}
-                placeholder={
-                  mode === "markdown" ? "Write your message in markdown…" : "Write your message…"
-                }
-              />
-            )}
-            {attachments.length > 0 && (
-              <ul className="flex flex-wrap gap-1.5 border-t pt-2">
-                {attachments.map((a) => (
-                  <li
-                    key={a.r2Key}
-                    className="flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-0.5 text-[11px]"
-                  >
-                    <Paperclip className="h-2.5 w-2.5 shrink-0 text-muted-foreground" />
-                    <span className="max-w-[16rem] truncate" title={a.filename}>
-                      {a.filename}
-                    </span>
-                    <span className="text-muted-foreground">{formatBytes(a.sizeBytes)}</span>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setAttachments((prev) => prev.filter((x) => x.r2Key !== a.r2Key))
-                      }
-                      className="ml-0.5 rounded p-0.5 text-muted-foreground hover:bg-card hover:text-foreground"
-                      aria-label={`Remove ${a.filename}`}
-                    >
-                      <X className="h-2.5 w-2.5" />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {quoteRef && (
-              <div className="mt-2 border-t pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowQuote((v) => !v)}
-                  className="rounded px-1.5 py-0.5 font-medium text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                >
-                  {showQuote ? "Hide" : "Show"} quoted message
-                </button>
-                <p className="mt-0.5 px-1.5 text-[11px] text-muted-foreground/70">
-                  The original message is included below your{" "}
-                  {quoteRef.kind === "forward" ? "forward" : "reply"}.
-                </p>
-                {showQuote && (
-                  <div className="mt-2 max-h-64 overflow-y-auto rounded-md border bg-muted/30">
-                    {quotedHtml ? (
-                      // Same sandboxed isolation as the message view — the quoted
-                      // body is untrusted mail too.
-                      <EmailFrame html={quotedHtml} />
-                    ) : (
-                      <pre className="whitespace-pre-wrap px-3 py-2 font-sans text-[12px] text-muted-foreground">
-                        {origBody.data?.text ?? rep?.snippet ?? fwd?.snippet ?? ""}
-                      </pre>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          <div className="flex items-center justify-between gap-3 border-t bg-muted/40 px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:pb-2">
-            <div className="flex items-center gap-1.5">
-              <Button
-                variant="primary"
-                onClick={attemptSend}
-                disabled={send.isPending || uploading > 0 || !mailboxId || !hasRecipients(to)}
-              >
-                {send.isPending ? "Sending…" : "Send"}
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={attachments.length >= MAX_ATTACHMENTS}
-                aria-label="Attach files"
-              >
-                <Paperclip />
-              </Button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                className="hidden"
-                onChange={(e) => {
-                  void onPickFiles(e.target.files);
-                  e.target.value = "";
-                }}
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] text-muted-foreground">
-                {uploading > 0
-                  ? `Uploading ${uploading}…`
-                  : sendable.length === 0
-                    ? "No sendable mailboxes"
-                    : savedHint
-                      ? "Draft saved"
-                      : null}
-              </span>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={discard}
-                className="hover:bg-destructive/10 hover:text-destructive"
-                aria-label="Discard draft"
-              >
-                <Trash2 />
-              </Button>
-            </div>
-          </div>
+          {content}
         </Dialog.Popup>
       </Dialog.Portal>
     </Dialog.Root>
