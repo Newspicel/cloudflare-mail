@@ -1,3 +1,4 @@
+import { MailboxKind } from "@cfmail/shared/permissions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, Timer } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -12,7 +13,7 @@ interface Domain {
   id: string;
   name: string;
   kind: "primary" | "sub";
-  isTempDomain: boolean;
+  allowedKinds: number;
 }
 
 interface CreatedTemp {
@@ -68,7 +69,9 @@ function TempForm({ onCreated }: { onCreated: (t: CreatedTemp) => void }) {
     queryKey: ["domains"],
     queryFn: () => api<{ domains: Domain[] }>("/api/domains"),
   });
-  const tempDomains = (domainsQ.data?.domains ?? []).filter((d) => d.isTempDomain);
+  const tempDomains = (domainsQ.data?.domains ?? []).filter(
+    (d) => (d.allowedKinds & MailboxKind.TEMP) !== 0,
+  );
 
   const [domainId, setDomainId] = useState("");
   const [ttlSeconds, setTtlSeconds] = useState(TTL_PRESETS[0]!.seconds);
@@ -93,8 +96,8 @@ function TempForm({ onCreated }: { onCreated: (t: CreatedTemp) => void }) {
   if (tempDomains.length === 0) {
     return (
       <p className="text-[11px] text-muted-foreground">
-        No domain is marked as temp. Set{" "}
-        <code className="rounded bg-muted px-1">is_temp_domain</code> on a domain in Admin first.
+        No domain allows temp mailboxes. Enable the{" "}
+        <code className="rounded bg-muted px-1">temp</code> kind on a domain in Admin first.
       </p>
     );
   }
