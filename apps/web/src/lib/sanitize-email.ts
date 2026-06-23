@@ -1,5 +1,18 @@
 import DOMPurify from "dompurify";
 
+// Every link in rendered mail opens in a new tab with the opener severed. The
+// body renders inside a sandboxed, scriptless iframe, so a link must target
+// `_blank` to spawn a tab instead of navigating the frame itself; `noopener`/
+// `noreferrer` also kills reverse-tabnabbing. Registered once on the shared
+// instance, so it covers the body, the quoted-message preview, and the
+// markdown preview alike.
+DOMPurify.addHook("afterSanitizeAttributes", (node) => {
+  if (node.nodeName === "A") {
+    node.setAttribute("target", "_blank");
+    node.setAttribute("rel", "noopener noreferrer");
+  }
+});
+
 // Sanitizes an email HTML body for rendering. The worker has already rewritten
 // every remote-content vector (`<img>`, `background`, CSS `url(…)`) to the
 // signed same-origin proxy, so the only job left here is to strip anything that

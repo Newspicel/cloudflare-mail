@@ -22,6 +22,7 @@ import {
   hasRecipients,
   type RecipientsValue,
 } from "./address-field.tsx";
+import { EmailFrame } from "./email-frame.tsx";
 import { Button } from "./ui/button.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select.tsx";
 import { Textarea } from "./ui/textarea.tsx";
@@ -573,15 +574,13 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
                   {quoteRef.kind === "forward" ? "forward" : "reply"}.
                 </p>
                 {showQuote && (
-                  <div className="mt-2 max-h-64 overflow-y-auto rounded-md border bg-muted/30 px-3 py-2">
+                  <div className="mt-2 max-h-64 overflow-y-auto rounded-md border bg-muted/30">
                     {quotedHtml ? (
-                      <div
-                        className="prose prose-sm max-w-none dark:prose-invert [&_*]:max-w-full"
-                        // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized via sanitizeEmailHtml
-                        dangerouslySetInnerHTML={{ __html: quotedHtml }}
-                      />
+                      // Same sandboxed isolation as the message view — the quoted
+                      // body is untrusted mail too.
+                      <EmailFrame html={quotedHtml} />
                     ) : (
-                      <pre className="whitespace-pre-wrap font-sans text-[12px] text-muted-foreground">
+                      <pre className="whitespace-pre-wrap px-3 py-2 font-sans text-[12px] text-muted-foreground">
                         {origBody.data?.text ?? rep?.snippet ?? fwd?.snippet ?? ""}
                       </pre>
                     )}
