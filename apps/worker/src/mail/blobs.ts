@@ -8,7 +8,7 @@ const R2_DELETE_BATCH = 1000;
 export async function collectThreadBlobKeys(db: DB, threadIds: string[]): Promise<string[]> {
   if (!threadIds.length) return [];
   const msgs = await db
-    .select({ rawR2Key: message.rawR2Key })
+    .select({ rawR2Key: message.rawR2Key, plainR2Key: message.plainR2Key })
     .from(message)
     .where(inArray(message.threadId, threadIds));
 
@@ -20,13 +20,14 @@ export async function collectThreadBlobKeys(db: DB, threadIds: string[]): Promis
 
   return [
     ...msgs.map((m) => m.rawR2Key).filter((k): k is string => Boolean(k)),
+    ...msgs.map((m) => m.plainR2Key).filter((k): k is string => Boolean(k)),
     ...atts.map((a) => a.r2Key),
   ];
 }
 
 export async function collectMailboxBlobKeys(db: DB, mailboxId: string): Promise<string[]> {
   const msgs = await db
-    .select({ rawR2Key: message.rawR2Key })
+    .select({ rawR2Key: message.rawR2Key, plainR2Key: message.plainR2Key })
     .from(message)
     .where(eq(message.mailboxId, mailboxId));
 
@@ -38,6 +39,7 @@ export async function collectMailboxBlobKeys(db: DB, mailboxId: string): Promise
 
   return [
     ...msgs.map((m) => m.rawR2Key).filter((k): k is string => Boolean(k)),
+    ...msgs.map((m) => m.plainR2Key).filter((k): k is string => Boolean(k)),
     ...atts.map((a) => a.r2Key),
   ];
 }

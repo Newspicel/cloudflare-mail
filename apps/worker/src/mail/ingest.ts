@@ -1,4 +1,5 @@
 import type { DB } from "@cfmail/db";
+import type { PgpVerify } from "@cfmail/db/enums";
 import { attachment, message, thread } from "@cfmail/db/schema";
 import { Flag } from "@cfmail/shared/flags";
 import { eq } from "drizzle-orm";
@@ -29,6 +30,16 @@ export interface IngestOptions {
   sentAt: Date | null;
   // Spam evaluation result, or null to skip spam fields and auto-filing (import).
   spam: SpamEvaluation | null;
+  // Gateway PGP (invariant 17). When `raw` is ciphertext we keep it at rawR2Key
+  // as evidence and store the decrypted .eml (`pgp.plainRaw`) at plainR2Key, which
+  // the body endpoint serves. `parsed` should already reflect the plaintext body.
+  pgp?: {
+    encrypted: boolean;
+    signed: boolean;
+    verify: PgpVerify | null;
+    signedBy: string | null;
+    plainRaw?: Uint8Array;
+  };
 }
 
 export interface IngestResult {
@@ -48,6 +59,16 @@ export async function ingestRaw(env: Env, db: DB, opts: IngestOptions): Promise<
 
   const rawKey = `raw/${mailboxId}/${crypto.randomUUID()}.eml`;
   await env.BLOBS.put(rawKey, raw, { httpMetadata: { contentType: "message/rfc822" } });
+
+  // For decrypted inbound mail, archive the plaintext .eml separately; the body
+  // endpoint reads it while the original ciphertext stays at rawKey.
+  let plainKey: string | null = null;
+  if (opts.pgp?.plainRaw) {
+    plainKey = `plain/${mailboxId}/${crypto.randomUUID()}.eml`;
+    await env.BLOBS.put(plainKey, opts.pgp.plainRaw, {
+      httpMetadata: { contentType: "message/rfc822" },
+    });
+  }
 
   const parsed = opts.parsed ?? (await parseMime(raw));
 
@@ -119,6 +140,11 @@ export async function ingestRaw(env: Env, db: DB, opts: IngestOptions): Promise<
     spamAuth: spam ? spam.auth : null,
     listUnsubscribe: unsub.listUnsubscribe,
     listUnsubscribePost: unsub.listUnsubscribePost,
+    pgpEncrypted: opts.pgp?.encrypted ?? false,
+    pgpSigned: opts.pgp?.signed ?? false,
+    pgpVerify: opts.pgp?.verify ?? null,
+    pgpSignedBy: opts.pgp?.signedBy ?? null,
+    plainR2Key: plainKey,
   });
 
   if (fileSpam) {

@@ -30,3 +30,23 @@ export type EditorFormat = (typeof EDITOR_FORMATS)[number];
 
 export const QUOTE_KINDS = ["reply", "forward"] as const;
 export type QuoteKind = (typeof QUOTE_KINDS)[number];
+
+// Per-mailbox PGP policy: off | sign outbound | sign + encrypt outbound.
+export const PGP_MODES = ["off", "sign", "sign_encrypt"] as const;
+export type PgpMode = (typeof PGP_MODES)[number];
+
+// Inbound signature verification outcome stored on a message.
+export const PGP_VERIFY = ["good", "bad", "unknown"] as const;
+export type PgpVerify = (typeof PGP_VERIFY)[number];
+
+// How a stored correspondent public key was obtained.
+export const CONTACT_KEY_SOURCES = ["import", "tofu"] as const;
+export type ContactKeySource = (typeof CONTACT_KEY_SOURCES)[number];
+
+// A manual blocklist entry targets either a single address or a whole domain.
+export const BLOCK_ENTRY_TYPES = ["email", "domain"] as const;
+export type BlockEntryType = (typeof BLOCK_ENTRY_TYPES)[number];
+
+// Lifecycle of a user-submitted block request awaiting admin review.
+export const BLOCK_REQUEST_STATUS = ["pending", "approved", "denied"] as const;
+export type BlockRequestStatus = (typeof BLOCK_REQUEST_STATUS)[number];

@@ -9,7 +9,14 @@
 // typed to return these, so a schema change that breaks the shape is a compile
 // error on both sides.
 
-import type { MailboxType, MessageDirection, SpamFilterLevel, UserRole } from "@cfmail/db/enums";
+import type {
+  ContactKeySource,
+  MailboxType,
+  MessageDirection,
+  PgpMode,
+  SpamFilterLevel,
+  UserRole,
+} from "@cfmail/db/enums";
 import type { draft, folder, label, message, thread } from "@cfmail/db/schema";
 
 /** Map Drizzle `Date` columns to the `string` form `c.json()` actually sends. */
@@ -41,6 +48,7 @@ export interface MailboxSummaryDto {
   role: "owner" | "member";
   perms: number;
   unread: number;
+  pgpMode: PgpMode;
 }
 
 export interface SearchResultDto {
@@ -149,6 +157,28 @@ export interface MailboxSettingsDto {
   spamFilter: SpamFilterLevel;
   spamAiTokenCap: number | null;
   spamUsage: { period: string; calls: number; tokens: number } | null;
+  // Gateway PGP. The private key/passphrase are never sent; `pgpConfigured` says
+  // whether a keypair exists, and the armored public key is shareable.
+  pgpMode: PgpMode;
+  pgpFingerprint: string | null;
+  pgpPublicKey: string | null;
+  pgpConfigured: boolean;
+}
+
+export interface ContactKeyDto {
+  id: string;
+  email: string;
+  fingerprint: string;
+  source: ContactKeySource;
+  createdAt: string;
+}
+export interface ContactKeysDto {
+  keys: ContactKeyDto[];
+}
+/** Returned once when a mailbox keypair is generated or imported. */
+export interface PgpKeyResultDto {
+  fingerprint: string;
+  publicKey: string;
 }
 export interface MailboxMemberDto {
   userId: string;

@@ -91,7 +91,7 @@ interface RedirectRow {
   createdAt: string;
 }
 
-type Tab = "domains" | "users" | "mailboxes" | "service";
+type Tab = "domains" | "users" | "mailboxes" | "service" | "blocking";
 
 interface ServiceMailbox {
   id: string;
@@ -139,12 +139,16 @@ function AdminPage() {
             <TabButton active={tab === "service"} onClick={() => setTab("service")}>
               Service
             </TabButton>
+            <TabButton active={tab === "blocking"} onClick={() => setTab("blocking")}>
+              Blocking
+            </TabButton>
           </div>
         )}
 
         {isAdmin && tab === "domains" && <DomainsSection />}
         {isAdmin && tab === "users" && <UsersSection />}
         {isAdmin && tab === "service" && <ServiceSection />}
+        {isAdmin && tab === "blocking" && <BlockingSection />}
         {(tab === "mailboxes" || !isAdmin) && <MailboxesSection />}
       </div>
     </div>
@@ -2052,5 +2056,305 @@ function PermToggle({
       />
       {label}
     </label>
+  );
+}
+
+// ─── Blocking ─────────────────────────────────────────────────────────────────
+
+interface BlockEntry {
+  id: string;
+  type: "email" | "domain";
+  value: string;
+  reason: string | null;
+  createdAt: string;
+  createdByName: string | null;
+}
+
+interface BlockReq {
+  id: string;
+  type: "email" | "domain";
+  value: string;
+  fromName: string | null;
+  subject: string | null;
+  note: string | null;
+  status: "pending" | "approved" | "denied";
+  createdAt: string;
+  reviewedAt: string | null;
+  requestedByName: string | null;
+  requestedByEmail: string | null;
+}
+
+function BlockingSection() {
+  return (
+    <div className="space-y-5">
+      <BlockRequestsPanel />
+      <BlocklistPanel />
+      <ProtectedDomainsPanel />
+    </div>
+  );
+}
+
+function BlockRequestsPanel() {
+  const qc = useQueryClient();
+  const reqs = useQuery({
+    queryKey: ["admin-block-requests"],
+    queryFn: () => api<{ requests: BlockReq[] }>("/api/admin/block/requests"),
+  });
+  const all = reqs.data?.requests ?? [];
+  const pending = all.filter((r) => r.status === "pending");
+  const reviewed = all.filter((r) => r.status !== "pending");
+
+  const act = (path: string, method: "POST" | "DELETE") =>
+    api(path, { method }).then(() => {
+      qc.invalidateQueries({ queryKey: ["admin-block-requests"] });
+      qc.invalidateQueries({ queryKey: ["admin-blocklist"] });
+    });
+
+  return (
+    <Section
+      title="Block requests"
+      description="Requests from readers to block a sender. Approving adds the address to the blocklist."
+    >
+      {pending.length === 0 && reviewed.length === 0 ? (
+        <p className="text-[12px] text-muted-foreground">No requests yet.</p>
+      ) : (
+        <ul className="divide-y rounded-md border">
+          {[...pending, ...reviewed].map((req) => (
+            <BlockRequestRow key={req.id} req={req} act={act} />
+          ))}
+        </ul>
+      )}
+    </Section>
+  );
+}
+
+function BlockRequestRow({
+  req,
+  act,
+}: {
+  req: BlockReq;
+  act: (path: string, method: "POST" | "DELETE") => Promise<unknown>;
+}) {
+  const run = (path: string, method: "POST" | "DELETE", ok: string) =>
+    act(path, method)
+      .then(() => toast.success(ok))
+      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"));
+
+  return (
+    <li className="px-3 py-2.5 text-[13px]">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="truncate font-medium">{req.value}</span>
+            {req.status !== "pending" && (
+              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                {req.status}
+              </span>
+            )}
+          </div>
+          <div className="truncate text-[11px] text-muted-foreground">
+            {req.subject ? `“${req.subject}” · ` : ""}
+            requested by {req.requestedByName ?? req.requestedByEmail ?? "unknown"}
+            {req.note ? ` · ${req.note}` : ""}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {req.status === "pending" && (
+            <>
+              <GhostBtn
+                onClick={() =>
+                  run(`/api/admin/block/requests/${req.id}/approve`, "POST", "Sender blocked")
+                }
+              >
+                <Check className="h-3.5 w-3.5" /> Approve
+              </GhostBtn>
+              <GhostBtn
+                onClick={() =>
+                  run(`/api/admin/block/requests/${req.id}/deny`, "POST", "Request denied")
+                }
+              >
+                <X className="h-3.5 w-3.5" /> Deny
+              </GhostBtn>
+            </>
+          )}
+          <GhostBtn
+            destructive
+            onClick={() => run(`/api/admin/block/requests/${req.id}`, "DELETE", "Removed")}
+          >
+            Delete
+          </GhostBtn>
+        </div>
+      </div>
+    </li>
+  );
+}
+
+function BlocklistPanel() {
+  const qc = useQueryClient();
+  const entries = useQuery({
+    queryKey: ["admin-blocklist"],
+    queryFn: () => api<{ entries: BlockEntry[] }>("/api/admin/block/entries"),
+  });
+  const [type, setType] = useState<"email" | "domain">("email");
+  const [value, setValue] = useState("");
+  const [reason, setReason] = useState("");
+
+  const add = useMutation({
+    mutationFn: () =>
+      api("/api/admin/block/entries", {
+        method: "POST",
+        body: JSON.stringify({ type, value: value.trim(), reason: reason.trim() || undefined }),
+      }),
+    onSuccess: () => {
+      setValue("");
+      setReason("");
+      qc.invalidateQueries({ queryKey: ["admin-blocklist"] });
+      toast.success("Added to blocklist");
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
+  return (
+    <Section
+      title="Blocklist"
+      description="Senders here are rejected at intake — never delivered. Mail bounces look like an unknown address, so the sender isn't told they're blocked."
+    >
+      <form
+        className="mb-4 flex flex-wrap items-end gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (value.trim()) add.mutate();
+        }}
+      >
+        <Select
+          value={type}
+          onChange={(e) => setType(e.target.value as "email" | "domain")}
+          className="w-28"
+        >
+          <option value="email">email</option>
+          <option value="domain">domain</option>
+        </Select>
+        <Input
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder={type === "email" ? "spammer@example.com" : "example.com"}
+          className="min-w-52 flex-1"
+        />
+        <Input
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="reason (optional)"
+          className="min-w-40 flex-1"
+        />
+        <PrimaryBtn type="submit" disabled={add.isPending || !value.trim()}>
+          Add
+        </PrimaryBtn>
+      </form>
+
+      {(entries.data?.entries.length ?? 0) === 0 ? (
+        <p className="text-[12px] text-muted-foreground">Nothing blocked.</p>
+      ) : (
+        <ul className="divide-y rounded-md border">
+          {(entries.data?.entries ?? []).map((entry) => (
+            <BlockEntryRow key={entry.id} entry={entry} />
+          ))}
+        </ul>
+      )}
+    </Section>
+  );
+}
+
+function BlockEntryRow({ entry }: { entry: BlockEntry }) {
+  const qc = useQueryClient();
+  const confirm = useConfirm();
+  const remove = useMutation({
+    mutationFn: () => api(`/api/admin/block/entries/${entry.id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-blocklist"] });
+      toast.success("Unblocked");
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
+  return (
+    <li className="px-3 py-2.5 text-[13px]">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+              {entry.type}
+            </span>
+            <span className="truncate font-medium">{entry.value}</span>
+          </div>
+          {entry.reason && (
+            <div className="truncate text-[11px] text-muted-foreground">{entry.reason}</div>
+          )}
+        </div>
+        <GhostBtn
+          destructive
+          disabled={remove.isPending}
+          onClick={async () => {
+            if (await confirm({ title: `Unblock ${entry.value}?` })) remove.mutate();
+          }}
+        >
+          Unblock
+        </GhostBtn>
+      </div>
+    </li>
+  );
+}
+
+function ProtectedDomainsPanel() {
+  const qc = useQueryClient();
+  const q = useQuery({
+    queryKey: ["admin-protected-domains"],
+    queryFn: () => api<{ domains: string[] }>("/api/admin/block/protected-domains"),
+  });
+  const [text, setText] = useState<string | null>(null);
+  // Once loaded, seed the editor from the server value (newline-separated).
+  const current = (q.data?.domains ?? []).join("\n");
+  const draft = text ?? current;
+
+  const save = useMutation({
+    mutationFn: () =>
+      api("/api/admin/block/protected-domains", {
+        method: "PUT",
+        body: JSON.stringify({
+          domains: draft
+            .split(/[\s,]+/)
+            .map((d) => d.trim().toLowerCase())
+            .filter(Boolean),
+        }),
+      }),
+    onSuccess: () => {
+      setText(null);
+      qc.invalidateQueries({ queryKey: ["admin-protected-domains"] });
+      toast.success("Protected domains saved");
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
+  return (
+    <Section
+      title="Protected domains"
+      description="These domains can never be blocked at the domain level — only individual addresses on them. One per line."
+    >
+      <textarea
+        value={draft}
+        onChange={(e) => setText(e.target.value)}
+        rows={6}
+        spellCheck={false}
+        className={cn(inputClass, "h-auto w-full resize-y font-mono text-[12px]")}
+        placeholder="gmail.com&#10;proton.me"
+      />
+      <div className="mt-3 flex justify-end gap-2">
+        <GhostBtn disabled={text === null || save.isPending} onClick={() => setText(null)}>
+          Reset
+        </GhostBtn>
+        <PrimaryBtn disabled={text === null || save.isPending} onClick={() => save.mutate()}>
+          Save
+        </PrimaryBtn>
+      </div>
+    </Section>
   );
 }

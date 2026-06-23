@@ -8,10 +8,15 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 import {
+  BLOCK_ENTRY_TYPES,
+  BLOCK_REQUEST_STATUS,
+  CONTACT_KEY_SOURCES,
   DOMAIN_KINDS,
   EDITOR_FORMATS,
   MAILBOX_TYPES,
   MESSAGE_DIRECTIONS,
+  PGP_MODES,
+  PGP_VERIFY,
   QUOTE_KINDS,
   SERVICE_MODES,
   SPAM_FILTER_LEVELS,
@@ -208,6 +213,14 @@ export const mailbox = sqliteTable(
     // service mailboxes only — "duplex" accepts inbound (poll via API);
     // "send" rejects inbound with a hard bounce. Ignored for other types.
     serviceMode: text("service_mode", { enum: SERVICE_MODES }).notNull().default("duplex"),
+    // Gateway PGP policy (invariant 17): off | sign outbound | sign + encrypt.
+    // The keypair below is held server-side; private key + passphrase are wrapped
+    // at rest with the pgp_master_key (config.ts) and never returned via the API.
+    pgpMode: text("pgp_mode", { enum: PGP_MODES }).notNull().default("off"),
+    pgpPublicKey: text("pgp_public_key"),
+    pgpPrivateKeyWrapped: text("pgp_private_key_wrapped"),
+    pgpPassphraseWrapped: text("pgp_passphrase_wrapped"),
+    pgpFingerprint: text("pgp_fingerprint"),
     expiresAt: integer("expires_at", { mode: "timestamp" }),
     createdAt: createdAt(),
   },
@@ -259,6 +272,26 @@ export const mailboxMember = sqliteTable(
     primaryKey({ columns: [t.mailboxId, t.userId] }),
     index("mailbox_member_user_idx").on(t.userId),
   ],
+);
+
+// Per-mailbox correspondent public keys. Used to encrypt outbound mail to a
+// recipient and to verify inbound signatures. `source` records whether a key
+// was imported by the owner or captured opportunistically (TOFU) from inbound
+// signed/attached keys.
+export const contactKey = sqliteTable(
+  "contact_key",
+  {
+    id: text("id").primaryKey(),
+    mailboxId: text("mailbox_id")
+      .notNull()
+      .references(() => mailbox.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    publicKey: text("public_key").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    source: text("source", { enum: CONTACT_KEY_SOURCES }).notNull().default("import"),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("contact_key_mailbox_email_uq").on(t.mailboxId, t.email)],
 );
 
 // ─── Threads, messages, attachments ─────────────────────────────────────────
@@ -347,6 +380,16 @@ export const message = sqliteTable(
     // the sender as supporting one-click POST unsubscribe.
     listUnsubscribe: text("list_unsubscribe"),
     listUnsubscribePost: text("list_unsubscribe_post"),
+    // Gateway PGP (invariant 17). Inbound: whether the message arrived encrypted/
+    // signed and the signature outcome (verify/signedBy). Outbound: whether we
+    // signed/encrypted it. `plainR2Key` points at the decrypted .eml for inbound
+    // encrypted mail — the body endpoint reads it so the reader shows plaintext
+    // while the original ciphertext stays at rawR2Key.
+    pgpEncrypted: integer("pgp_encrypted", { mode: "boolean" }).notNull().default(false),
+    pgpSigned: integer("pgp_signed", { mode: "boolean" }).notNull().default(false),
+    pgpVerify: text("pgp_verify", { enum: PGP_VERIFY }),
+    pgpSignedBy: text("pgp_signed_by"),
+    plainR2Key: text("plain_r2_key"),
     createdAt: createdAt(),
   },
   (t) => [
@@ -567,6 +610,60 @@ export const mailboxNotify = sqliteTable(
   (t) => [
     primaryKey({ columns: [t.mailboxId, t.userId] }),
     index("mailbox_notify_user_idx").on(t.userId),
+  ],
+);
+
+// ─── Manual blocklist ───────────────────────────────────────────────────────
+
+// Deployment-wide hard blocklist. A match (exact address, or the sender domain /
+// any of its parents) makes inbound mail rejected at intake in receive.ts —
+// never parsed, stored or delivered. Admin-managed; `createdByUserId` is kept
+// for audit but nulled if the admin is removed so the block survives.
+export const blocklist = sqliteTable(
+  "blocklist",
+  {
+    id: text("id").primaryKey(),
+    type: text("type", { enum: BLOCK_ENTRY_TYPES }).notNull(),
+    // Lowercased email address (type=email) or domain (type=domain).
+    value: text("value").notNull(),
+    reason: text("reason"),
+    createdByUserId: text("created_by_user_id").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("blocklist_type_value_uq").on(t.type, t.value)],
+);
+
+// A user-submitted request to block a sender, awaiting admin review. The sender
+// identity is snapshotted at request time so it survives the source message
+// being deleted. On approval an admin promotes it into a `blocklist` row.
+export const blockRequest = sqliteTable(
+  "block_request",
+  {
+    id: text("id").primaryKey(),
+    type: text("type", { enum: BLOCK_ENTRY_TYPES }).notNull().default("email"),
+    value: text("value").notNull(),
+    fromName: text("from_name"),
+    subject: text("subject"),
+    note: text("note"),
+    // Context, all best-effort — nulled rather than cascaded so a request stays
+    // reviewable after its message/mailbox is gone.
+    messageId: text("message_id").references(() => message.id, { onDelete: "set null" }),
+    mailboxId: text("mailbox_id").references(() => mailbox.id, { onDelete: "set null" }),
+    requestedByUserId: text("requested_by_user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    status: text("status", { enum: BLOCK_REQUEST_STATUS }).notNull().default("pending"),
+    reviewedByUserId: text("reviewed_by_user_id").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    reviewedAt: integer("reviewed_at", { mode: "timestamp" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("block_request_status_idx").on(t.status),
+    index("block_request_user_idx").on(t.requestedByUserId),
   ],
 );
 

@@ -1,12 +1,21 @@
+import { EmailMessage } from "cloudflare:email";
 import type { DB } from "@cfmail/db";
-import { domain, mailbox, message } from "@cfmail/db/schema";
+import { contactKey, domain, mailbox, message } from "@cfmail/db/schema";
 import { Flag } from "@cfmail/shared/flags";
 import type { SendMessageInput } from "@cfmail/shared/schemas";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
+import { getOrCreatePgpMasterKey } from "../config.ts";
 import type { Env } from "../env.ts";
 import { broadcastToUsers } from "../hub.ts";
 import { addrsToText, bodyForIndex, buildMime, snippet, type ThreadingHeaders } from "./mime.ts";
+import {
+  buildEncryptedMime,
+  buildSignedMime,
+  type MailContent,
+  type PgpHeaders,
+  unwrapSecret,
+} from "./pgp.ts";
 import { bumpThread, resolveThreadId } from "./threads.ts";
 
 export async function sendFromMailbox(
@@ -17,7 +26,7 @@ export async function sendFromMailbox(
   input: SendMessageInput,
   // Reply/forward quote, resolved server-side (see mail/quote.ts).
   quote?: { html: string; text: string },
-): Promise<{ messageId: string; threadId: string }> {
+): Promise<{ messageId: string; threadId: string; pgpWarning?: string }> {
   const mb = await db.query.mailbox.findFirst({
     where: eq(mailbox.id, input.mailboxId),
     columns: {
@@ -27,6 +36,10 @@ export async function sendFromMailbox(
       displayName: true,
       replyTo: true,
       signature: true,
+      pgpMode: true,
+      pgpPublicKey: true,
+      pgpPrivateKeyWrapped: true,
+      pgpPassphraseWrapped: true,
     },
   });
   if (!mb) throw new HTTPException(404, { message: "mailbox not found" });
@@ -76,44 +89,83 @@ export async function sendFromMailbox(
   if (input.inReplyTo) sendHeaders["In-Reply-To"] = input.inReplyTo;
   if (input.references?.length) sendHeaders.References = input.references.join(" ");
 
-  let returnedMessageId: string | undefined;
-  try {
-    const res = await env.EMAIL.send({
-      from: fromField,
-      to: input.to.map((a) => a.address),
-      cc: input.cc?.length ? input.cc.map((a) => a.address) : undefined,
-      bcc: input.bcc?.length ? input.bcc.map((a) => a.address) : undefined,
-      replyTo: replyToAddr,
-      subject: input.subject,
+  const sentAt = new Date();
+  const messageId = crypto.randomUUID();
+
+  // Gateway PGP: when the mailbox has a keypair and PGP is on, sign/encrypt and
+  // send a raw PGP/MIME message per recipient (invariant 4 exception). Otherwise
+  // the normal structured send path. Either way we archive plaintext locally
+  // (below) so search/threading keep working.
+  const pgpEnabled =
+    mb.pgpMode !== "off" &&
+    !!mb.pgpPublicKey &&
+    !!mb.pgpPrivateKeyWrapped &&
+    !!mb.pgpPassphraseWrapped;
+
+  let messageIdHdr: string;
+  let pgpEncrypted = false;
+  let pgpSigned = false;
+  let pgpWarning: string | undefined;
+
+  if (!pgpEnabled) {
+    let returnedMessageId: string | undefined;
+    try {
+      const res = await env.EMAIL.send({
+        from: fromField,
+        to: input.to.map((a) => a.address),
+        cc: input.cc?.length ? input.cc.map((a) => a.address) : undefined,
+        bcc: input.bcc?.length ? input.bcc.map((a) => a.address) : undefined,
+        replyTo: replyToAddr,
+        subject: input.subject,
+        text,
+        html,
+        headers: Object.keys(sendHeaders).length ? sendHeaders : undefined,
+        attachments: attachmentBytes.length
+          ? attachmentBytes.map((a) => ({
+              disposition: "attachment" as const,
+              filename: a.filename,
+              type: a.contentType,
+              content: a.data,
+            }))
+          : undefined,
+      });
+      returnedMessageId = res?.messageId;
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      throw new HTTPException(502, { message: `send failed: ${detail}` });
+    }
+    messageIdHdr = returnedMessageId
+      ? returnedMessageId.startsWith("<")
+        ? returnedMessageId
+        : `<${returnedMessageId}>`
+      : `<${messageId}@${dom.name}>`;
+  } else {
+    messageIdHdr = `<${messageId}@${dom.name}>`;
+    const meta = await sendPgp(env, db, {
+      mailboxId: mb.id,
+      pgpMode: mb.pgpMode,
+      pgpPublicKey: mb.pgpPublicKey!,
+      pgpPrivateKeyWrapped: mb.pgpPrivateKeyWrapped!,
+      pgpPassphraseWrapped: mb.pgpPassphraseWrapped!,
+      fromAddr,
+      fromName,
+      replyToAddr,
+      input,
       text,
       html,
-      headers: Object.keys(sendHeaders).length ? sendHeaders : undefined,
-      attachments: attachmentBytes.length
-        ? attachmentBytes.map((a) => ({
-            disposition: "attachment" as const,
-            filename: a.filename,
-            type: a.contentType,
-            content: a.data,
-          }))
-        : undefined,
+      attachmentBytes,
+      allRecipients,
+      messageIdHdr,
+      date: sentAt,
     });
-    returnedMessageId = res?.messageId;
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    throw new HTTPException(502, { message: `send failed: ${detail}` });
+    pgpEncrypted = meta.encrypted;
+    pgpSigned = meta.signed;
+    pgpWarning = meta.warning;
   }
 
-  const messageIdHdr = returnedMessageId
-    ? returnedMessageId.startsWith("<")
-      ? returnedMessageId
-      : `<${returnedMessageId}>`
-    : `<${crypto.randomUUID()}@${dom.name}>`;
   const threading: ThreadingHeaders = { messageId: messageIdHdr };
   if (input.inReplyTo) threading.inReplyTo = input.inReplyTo;
   if (input.references?.length) threading.references = input.references;
-
-  const sentAt = new Date();
-  const messageId = crypto.randomUUID();
 
   const { threadId } = await resolveThreadId(db, {
     mailboxId: mb.id,
@@ -165,6 +217,8 @@ export async function sendFromMailbox(
       sentAt,
       rawR2Key: rawKey,
       sizeBytes: new TextEncoder().encode(raw).byteLength,
+      pgpEncrypted,
+      pgpSigned,
     }),
   ]);
 
@@ -180,7 +234,95 @@ export async function sendFromMailbox(
       : Promise.resolve(),
   ]);
 
-  return { messageId, threadId };
+  return pgpWarning ? { messageId, threadId, pgpWarning } : { messageId, threadId };
+}
+
+interface PgpSendArgs {
+  mailboxId: string;
+  pgpMode: "off" | "sign" | "sign_encrypt";
+  pgpPublicKey: string;
+  pgpPrivateKeyWrapped: string;
+  pgpPassphraseWrapped: string;
+  fromAddr: string;
+  fromName: string | undefined;
+  replyToAddr: string | undefined;
+  input: SendMessageInput;
+  text: string | undefined;
+  html: string | undefined;
+  attachmentBytes: { filename: string; contentType: string; data: Uint8Array }[];
+  allRecipients: { name?: string; address: string }[];
+  messageIdHdr: string;
+  date: Date;
+}
+
+// Build a signed or sign+encrypted PGP/MIME message and deliver it raw, once per
+// envelope recipient. Encryption needs a public key for every recipient; when one
+// is missing we fall back to signed-only (never block the send) and warn.
+async function sendPgp(
+  env: Env,
+  db: DB,
+  args: PgpSendArgs,
+): Promise<{ encrypted: boolean; signed: boolean; warning?: string }> {
+  const masterKey = await getOrCreatePgpMasterKey(db);
+  const privArmored = await unwrapSecret(masterKey, args.pgpPrivateKeyWrapped);
+  const passphrase = await unwrapSecret(masterKey, args.pgpPassphraseWrapped);
+
+  const uniqAddrs = [...new Set(args.allRecipients.map((a) => a.address.toLowerCase()))];
+  const contacts = uniqAddrs.length
+    ? await db.query.contactKey.findMany({
+        where: and(eq(contactKey.mailboxId, args.mailboxId), inArray(contactKey.email, uniqAddrs)),
+        columns: { email: true, publicKey: true },
+      })
+    : [];
+  const keyByEmail = new Map(contacts.map((c) => [c.email, c.publicKey]));
+  const allHaveKeys = uniqAddrs.length > 0 && uniqAddrs.every((a) => keyByEmail.has(a));
+  const encrypt = args.pgpMode === "sign_encrypt" && allHaveKeys;
+
+  const headers: PgpHeaders = {
+    from: { name: args.fromName, address: args.fromAddr },
+    to: args.input.to,
+    cc: args.input.cc,
+    replyTo: args.replyToAddr,
+    subject: args.input.subject,
+    messageId: args.messageIdHdr,
+    inReplyTo: args.input.inReplyTo,
+    references: args.input.references,
+    date: args.date,
+  };
+  const content: MailContent = {
+    text: args.text,
+    html: args.html,
+    attachments: args.attachmentBytes,
+  };
+
+  let raw: string;
+  let meta: { encrypted: boolean; signed: boolean; warning?: string };
+  if (encrypt) {
+    // Encrypt to every recipient key plus our own, so the sender can read the
+    // archived copy and each recipient can decrypt the same blob.
+    const recipientKeys = [...new Set([...keyByEmail.values(), args.pgpPublicKey])];
+    raw = await buildEncryptedMime(headers, content, privArmored, passphrase, recipientKeys);
+    meta = { encrypted: true, signed: true };
+  } else {
+    raw = await buildSignedMime(headers, content, privArmored, passphrase);
+    meta = { encrypted: false, signed: true };
+    if (args.pgpMode === "sign_encrypt") {
+      meta.warning = "Sent signed-only — no PGP key on file for one or more recipients.";
+    }
+  }
+
+  const envelopeAddrs = [...new Set(args.allRecipients.map((a) => a.address))];
+  await Promise.all(
+    envelopeAddrs.map(async (to) => {
+      try {
+        await env.EMAIL.send(new EmailMessage(args.fromAddr, to, raw));
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        throw new HTTPException(502, { message: `send failed: ${detail}` });
+      }
+    }),
+  );
+  return meta;
 }
 
 // The outbound From address. Defaults to the mailbox's own address; an explicit
