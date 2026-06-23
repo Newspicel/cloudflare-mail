@@ -1,7 +1,7 @@
 import { Dialog } from "@base-ui/react/dialog";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import DOMPurify from "dompurify";
-import { Paperclip, Trash2, X } from "lucide-react";
+import { Maximize2, Minimize2, Paperclip, Trash2, X } from "lucide-react";
 import { marked } from "marked";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -119,6 +119,7 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
   const [attachments, setAttachments] = useState<UploadedAttachment[]>(d?.attachments ?? []);
   const [uploading, setUploading] = useState(0);
   const [savedHint, setSavedHint] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Threading context, carried through from a reopened reply/forward draft.
@@ -314,17 +315,39 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
       }}
     >
       <Dialog.Portal>
-        <Dialog.Popup className="fixed inset-0 z-40 flex flex-col overflow-hidden border bg-card text-card-foreground shadow-black/15 shadow-xl outline-none transition duration-200 data-ending-style:translate-y-3 data-ending-style:opacity-0 data-starting-style:translate-y-3 data-starting-style:opacity-0 sm:inset-auto sm:right-6 sm:bottom-0 sm:h-[540px] sm:w-[520px] sm:rounded-t-xl sm:border-b-0">
+        <Dialog.Popup
+          className={cn(
+            "fixed inset-0 z-40 flex flex-col overflow-hidden border bg-card text-card-foreground shadow-black/15 shadow-xl outline-none transition-all duration-200 data-ending-style:translate-y-3 data-ending-style:opacity-0 data-starting-style:translate-y-3 data-starting-style:opacity-0",
+            expanded
+              ? "sm:inset-auto sm:top-1/2 sm:left-1/2 sm:h-[85vh] sm:max-h-[800px] sm:w-[800px] sm:max-w-[92vw] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-xl"
+              : "sm:inset-auto sm:right-6 sm:bottom-0 sm:h-[540px] sm:w-[520px] sm:rounded-t-xl sm:border-b-0",
+          )}
+        >
           <div className="flex items-center justify-between border-b bg-muted px-3 py-2">
             <Dialog.Title className="font-semibold text-[12px] tracking-tight">
               {s.replyToMessage ? "Reply" : s.forwardMessage ? "Forward" : "New message"}
             </Dialog.Title>
-            <Dialog.Close
-              className="grid h-6 w-6 place-items-center rounded text-muted-foreground outline-none transition-colors hover:bg-card hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
-              aria-label="Close"
-            >
-              <X className="h-3.5 w-3.5" />
-            </Dialog.Close>
+            <div className="flex items-center gap-0.5">
+              <button
+                type="button"
+                onClick={() => setExpanded((v) => !v)}
+                className="hidden h-6 w-6 place-items-center rounded text-muted-foreground outline-none transition-colors hover:bg-card hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45 sm:grid"
+                aria-label={expanded ? "Shrink" : "Expand"}
+                aria-pressed={expanded}
+              >
+                {expanded ? (
+                  <Minimize2 className="h-3.5 w-3.5" />
+                ) : (
+                  <Maximize2 className="h-3.5 w-3.5" />
+                )}
+              </button>
+              <Dialog.Close
+                className="grid h-6 w-6 place-items-center rounded text-muted-foreground outline-none transition-colors hover:bg-card hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
+                aria-label="Close"
+              >
+                <X className="h-3.5 w-3.5" />
+              </Dialog.Close>
+            </div>
           </div>
 
           <div className="flex flex-1 flex-col gap-1 overflow-y-auto px-3 py-2">
@@ -335,7 +358,9 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
                   aria-label="From mailbox"
                   className="h-7 border-0 bg-transparent px-0 shadow-none hover:bg-transparent"
                 >
-                  <SelectValue />
+                  <SelectValue>
+                    {(value) => sendable.find((m) => m.id === value)?.address ?? ""}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {sendable.map((m) => (
