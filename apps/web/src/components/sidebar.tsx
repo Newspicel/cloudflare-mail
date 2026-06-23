@@ -75,7 +75,9 @@ function SidebarBody({ onClose }: { onClose?: () => void }) {
   const deleteMailbox = useMutation({
     mutationFn: (id: string) => api(`/api/mailboxes/${id}`, { method: "DELETE" }),
     onSuccess: (_res, id) => {
-      qc.invalidateQueries({ queryKey: ["mailboxes"] });
+      qc.setQueryData<{ mailboxes: MailboxSummary[] }>(["mailboxes"], (old) =>
+        old ? { mailboxes: old.mailboxes.filter((m) => m.id !== id) } : old,
+      );
       if (activeId === id) nav({ to: "/app" });
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed to delete"),
