@@ -30,7 +30,13 @@ export function buildApi() {
   app.use(
     "/api/*",
     cors({
-      origin: (o) => o ?? "",
+      // Web app and API are one Worker on one origin, so the only legitimate
+      // credentialed caller is the instance's own origin. Reflect the Origin
+      // only when it matches; otherwise send no CORS headers.
+      origin: (o, c) => {
+        const self = new URL(c.req.url).origin;
+        return o === self ? o : null;
+      },
       credentials: true,
       allowHeaders: ["content-type", "authorization"],
       allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
