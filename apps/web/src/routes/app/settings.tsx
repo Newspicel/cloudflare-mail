@@ -7,6 +7,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { MailboxSettingsForm } from "@/components/mailbox-settings-form.tsx";
+import { RulesSection } from "@/components/rules-settings.tsx";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar.tsx";
 import { useConfirmHelpers } from "@/components/ui/confirm.tsx";
 import { Switch } from "@/components/ui/switch.tsx";
@@ -38,6 +39,7 @@ const NAV = [
   ["security", "Security"],
   ["notifications", "Notifications"],
   ["folders", "Folders"],
+  ["rules", "Rules"],
   ["mailboxes", "Mailboxes"],
 ] as const;
 
@@ -84,6 +86,7 @@ function SettingsPage() {
           <TwoFactorSection enabled={!!me.data?.user?.twoFactorEnabled} />
           <NotificationsSection mailboxes={mailboxesQ.data?.mailboxes ?? []} />
           <FoldersSection />
+          <RulesSection mailboxes={editable} />
 
           <div id="mailboxes">
             <h2 className="mb-3 text-[14px] font-semibold tracking-tight">Mailboxes</h2>

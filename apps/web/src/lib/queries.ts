@@ -10,6 +10,7 @@ import type {
   MessageDto,
   MessageLabelDto,
   MeUserDto,
+  RuleDto,
   SearchFilters,
   SearchResultDto,
   SearchResultsDto,
@@ -33,6 +34,7 @@ export type {
   MessageDto as MessageRow,
   MessageLabelDto as MessageLabel,
   MeUserDto as MeUser,
+  RuleDto as RuleRow,
   SearchFilters,
   SearchResultDto as SearchResult,
   ThreadDto as ThreadRow,
@@ -184,6 +186,14 @@ export const labelsQuery = (mailboxId: string) =>
     queryKey: keys.labels(mailboxId),
     queryFn: () =>
       api<{ labels: LabelDto[] }>(`/api/labels?mailboxId=${encodeURIComponent(mailboxId)}`),
+    enabled: Boolean(mailboxId),
+  });
+
+export const rulesQuery = (mailboxId: string) =>
+  queryOptions({
+    queryKey: keys.rules(mailboxId),
+    queryFn: () =>
+      api<{ rules: RuleDto[] }>(`/api/rules?mailboxId=${encodeURIComponent(mailboxId)}`),
     enabled: Boolean(mailboxId),
   });
 

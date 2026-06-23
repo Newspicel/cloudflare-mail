@@ -1,12 +1,23 @@
 import { type DB, makeDB } from "@cfmail/db";
-import { contactKey, domain, mailbox, mailboxMember, redirect } from "@cfmail/db/schema";
-import { and, eq } from "drizzle-orm";
+import {
+  contactKey,
+  domain,
+  folder,
+  label,
+  mailbox,
+  mailboxMember,
+  messageLabel,
+  redirect,
+  threadFolder,
+} from "@cfmail/db/schema";
+import { Flag } from "@cfmail/shared/flags";
+import { and, eq, inArray } from "drizzle-orm";
 import { getOrCreatePgpMasterKey } from "../config.ts";
 import type { Env } from "../env.ts";
 import { broadcastToUsers } from "../hub.ts";
 import { isSenderBlocked } from "./blocklist.ts";
 import { type IngestOptions, ingestRaw, isAuthenticated, MAX_EMAIL_BYTES } from "./ingest.ts";
-import { parseMime, streamToArrayBuffer } from "./mime.ts";
+import { bodyForIndex, parseMime, streamToArrayBuffer } from "./mime.ts";
 import {
   decryptVerify,
   detectPgp,
@@ -15,6 +26,7 @@ import {
   unwrapSecret,
 } from "./pgp.ts";
 import { notifyMailbox } from "./push.ts";
+import { evaluateRules, type RuleOutcome } from "./rules.ts";
 import { evaluateSpam, type SpamEvaluation } from "./spam.ts";
 
 export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Promise<void> {
@@ -182,18 +194,38 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
     });
   }
 
+  // User rules: match the parsed message against this mailbox's filters. A
+  // hardBlock SMTP-rejects before anything is stored; other actions feed into
+  // the insert (flags/spam) and are applied to the message/thread after it.
+  const outcome = await evaluateRules(db, mb.id, {
+    fromAddr: effectiveParsed.from?.address ?? msg.from,
+    fromName: effectiveParsed.from?.name,
+    toAddrs: addrList(effectiveParsed.to),
+    ccAddrs: addrList(effectiveParsed.cc),
+    subject: effectiveParsed.subject ?? "",
+    bodyText: bodyForIndex(effectiveParsed.text, effectiveParsed.html),
+    deliveredTo: msg.to,
+  });
+  if (outcome.reject) {
+    msg.setReject(outcome.reject);
+    return;
+  }
+
   const { messageId, threadId } = await ingestRaw(env, db, {
     mailboxId: mb.id,
     raw,
     parsed: effectiveParsed,
     direction: "in",
     deliveredTo: msg.to,
-    flags: 0,
+    flags: outcome.markRead ? Flag.SEEN : 0,
     receivedAt: new Date(),
     sentAt: null,
     spam,
+    forceSpam: outcome.markSpam,
     pgp,
   });
+
+  await applyRuleActions(db, outcome, mb.id, messageId, threadId);
 
   const memberIds = await db
     .select({ userId: mailboxMember.userId })
@@ -208,8 +240,9 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
     threadId,
   });
 
-  // Don't push-notify mail filed straight into Spam.
-  if (spam?.verdict !== "spam") {
+  // Don't push-notify mail filed straight into Spam, nor mail a rule already
+  // auto-read or auto-filed to spam on the user's behalf.
+  if (spam?.verdict !== "spam" && !outcome.markSpam && !outcome.markRead) {
     // Surface the authentication result so a spoofed From isn't rendered as a
     // trusted sender in the notification.
     const fromAddr = parsed.from?.address ?? msg.from;
@@ -223,6 +256,55 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
       body: parsed.subject?.trim() ? parsed.subject : "(no subject)",
       url: `/app/m/${mb.id}/t/${threadId}`,
     });
+  }
+}
+
+function addrList(
+  addrs: { name?: string; address?: string }[] | undefined,
+): { name?: string; address: string }[] {
+  return (addrs ?? [])
+    .filter((a) => a.address)
+    .map((a) => (a.name ? { name: a.name, address: a.address! } : { address: a.address! }));
+}
+
+// Apply a rule outcome's label + folder actions after the message is stored.
+// Both are re-validated against current state so a since-deleted label/folder (or
+// one that no longer belongs to the rule's creator) is silently skipped rather
+// than failing the FK insert and breaking delivery.
+async function applyRuleActions(
+  db: DB,
+  outcome: RuleOutcome,
+  mailboxId: string,
+  messageId: string,
+  threadId: string,
+): Promise<void> {
+  if (outcome.labelIds.length) {
+    const valid = await db
+      .select({ id: label.id })
+      .from(label)
+      .where(and(eq(label.mailboxId, mailboxId), inArray(label.id, outcome.labelIds)));
+    await Promise.all(
+      valid.map((l) =>
+        db.insert(messageLabel).values({ messageId, labelId: l.id }).onConflictDoNothing(),
+      ),
+    );
+  }
+
+  if (outcome.folder) {
+    const { userId, folderId } = outcome.folder;
+    const owned = await db.query.folder.findFirst({
+      where: and(eq(folder.id, folderId), eq(folder.userId, userId)),
+      columns: { id: true },
+    });
+    if (owned) {
+      await db
+        .insert(threadFolder)
+        .values({ userId, threadId, folderId, filedAt: new Date() })
+        .onConflictDoUpdate({
+          target: [threadFolder.userId, threadFolder.threadId],
+          set: { folderId, filedAt: new Date() },
+        });
+    }
   }
 }
 
