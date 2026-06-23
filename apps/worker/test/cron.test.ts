@@ -38,7 +38,7 @@ async function reset(): Promise<void> {
 
 async function seed(now: Date): Promise<void> {
   await db.insert(user).values({ id: OWNER_ID, name: "Owner", email: "owner@example.com" });
-  await db.insert(domain).values({ id: DOMAIN_ID, name: "example.com", kind: "primary" });
+  await db.insert(domain).values({ id: DOMAIN_ID, name: "example.com" });
   await db.insert(mailbox).values([
     {
       id: EXPIRED_ID,
@@ -276,7 +276,7 @@ describe("runCron — service mailbox retention", () => {
 
   async function seedService(now: Date): Promise<void> {
     await db.insert(user).values({ id: OWNER_ID, name: "Owner", email: "owner@example.com" });
-    await db.insert(domain).values({ id: DOMAIN_ID, name: "example.com", kind: "primary" });
+    await db.insert(domain).values({ id: DOMAIN_ID, name: "example.com" });
     await db.insert(mailbox).values({
       id: SVC_ID,
       domainId: DOMAIN_ID,

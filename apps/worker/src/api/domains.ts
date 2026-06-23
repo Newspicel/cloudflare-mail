@@ -43,7 +43,6 @@ export function domainsRoutes() {
     await db.insert(domain).values({
       id,
       name: body.name.toLowerCase(),
-      kind: body.kind,
       allowedKinds: body.allowedKinds,
     });
     return c.json({ id }, 201);

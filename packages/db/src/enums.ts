@@ -7,9 +7,6 @@
 export const MAILBOX_TYPES = ["personal", "group", "service", "temp"] as const;
 export type MailboxType = (typeof MAILBOX_TYPES)[number];
 
-export const DOMAIN_KINDS = ["primary", "sub"] as const;
-export type DomainKind = (typeof DOMAIN_KINDS)[number];
-
 export const MESSAGE_DIRECTIONS = ["in", "out"] as const;
 export type MessageDirection = (typeof MESSAGE_DIRECTIONS)[number];
 

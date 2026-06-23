@@ -28,7 +28,6 @@ export const Route = createFileRoute("/app/admin")({
 interface Domain {
   id: string;
   name: string;
-  kind: "primary" | "sub";
   allowedKinds: number;
   spfOk: boolean;
   dkimOk: boolean;
@@ -285,14 +284,13 @@ function DomainsSection() {
   });
 
   const [newDomain, setNewDomain] = useState("");
-  const [domainKind, setDomainKind] = useState<"primary" | "sub">("primary");
   const [newKinds, setNewKinds] = useState<number>(MailboxKind.PERSONAL);
 
   const addDomain = useMutation({
     mutationFn: () =>
       api<{ id: string }>("/api/domains", {
         method: "POST",
-        body: JSON.stringify({ name: newDomain, kind: domainKind, allowedKinds: newKinds }),
+        body: JSON.stringify({ name: newDomain, allowedKinds: newKinds }),
       }),
     onSuccess: () => {
       setNewDomain("");
@@ -371,13 +369,6 @@ function DomainsSection() {
             placeholder="example.com"
             className="min-w-[200px] flex-1"
           />
-          <Select
-            value={domainKind}
-            onChange={(e) => setDomainKind(e.target.value as typeof domainKind)}
-          >
-            <option value="primary">primary</option>
-            <option value="sub">sub</option>
-          </Select>
           <KindCheckboxes value={newKinds} onChange={setNewKinds} />
           <PrimaryBtn
             onClick={() => addDomain.mutate()}
@@ -445,9 +436,7 @@ function DomainRow({ domain: d }: { domain: Domain }) {
     <tr>
       <td className="px-3 py-2.5 align-top">
         <div className="font-medium">{d.name}</div>
-        <div className="text-[11px] text-muted-foreground">
-          {d.kind} · {checkedLabel}
-        </div>
+        <div className="text-[11px] text-muted-foreground">{checkedLabel}</div>
       </td>
       <td className="px-3 py-2.5 align-top">
         <div className="flex flex-wrap items-center gap-1">

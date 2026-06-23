@@ -11,7 +11,6 @@ import {
   BLOCK_ENTRY_TYPES,
   BLOCK_REQUEST_STATUS,
   CONTACT_KEY_SOURCES,
-  DOMAIN_KINDS,
   EDITOR_FORMATS,
   MAILBOX_TYPES,
   MESSAGE_DIRECTIONS,
@@ -163,23 +162,18 @@ export const userInvite = sqliteTable(
 
 // ─── Domains & mailboxes ────────────────────────────────────────────────────
 
-export const domain = sqliteTable(
-  "domain",
-  {
-    id: text("id").primaryKey(),
-    name: text("name").notNull().unique(),
-    kind: text("kind", { enum: DOMAIN_KINDS }).notNull(),
-    // Bitfield of MailboxKind (PERSONAL|GROUP|SERVICE|TEMP) — which mailbox
-    // types may be hosted on this domain. 0 means none allowed.
-    allowedKinds: integer("allowed_kinds").notNull().default(0),
-    spfOk: integer("spf_ok", { mode: "boolean" }).notNull().default(false),
-    dkimOk: integer("dkim_ok", { mode: "boolean" }).notNull().default(false),
-    dmarcOk: integer("dmarc_ok", { mode: "boolean" }).notNull().default(false),
-    lastCheckedAt: integer("last_checked_at", { mode: "timestamp" }),
-    createdAt: createdAt(),
-  },
-  (t) => [index("domain_kind_idx").on(t.kind)],
-);
+export const domain = sqliteTable("domain", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  // Bitfield of MailboxKind (PERSONAL|GROUP|SERVICE|TEMP) — which mailbox
+  // types may be hosted on this domain. 0 means none allowed.
+  allowedKinds: integer("allowed_kinds").notNull().default(0),
+  spfOk: integer("spf_ok", { mode: "boolean" }).notNull().default(false),
+  dkimOk: integer("dkim_ok", { mode: "boolean" }).notNull().default(false),
+  dmarcOk: integer("dmarc_ok", { mode: "boolean" }).notNull().default(false),
+  lastCheckedAt: integer("last_checked_at", { mode: "timestamp" }),
+  createdAt: createdAt(),
+});
 
 // Per-user permission to create mailboxes of given kinds on a given domain.
 // Admins bypass this check entirely.

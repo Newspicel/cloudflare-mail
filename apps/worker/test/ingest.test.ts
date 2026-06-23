@@ -30,7 +30,7 @@ async function reset(): Promise<void> {
 
 async function seed(): Promise<void> {
   await db.insert(user).values({ id: OWNER_ID, name: "Owner", email: "owner@example.com" });
-  await db.insert(domain).values({ id: DOMAIN_ID, name: "example.com", kind: "primary" });
+  await db.insert(domain).values({ id: DOMAIN_ID, name: "example.com" });
   await db.insert(mailbox).values({
     id: MAILBOX_ID,
     domainId: DOMAIN_ID,
