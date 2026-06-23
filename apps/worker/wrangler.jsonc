@@ -2,9 +2,10 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "cfmail",
   "main": "src/index.ts",
-  "compatibility_date": "2026-04-01",
+  "compatibility_date": "2026-06-23",
   "compatibility_flags": ["nodejs_compat"],
   "minify": true,
+  "placement": { "mode": "smart" },
   // mimetext only uses mime-types#contentType to validate attachment types;
   // the shim avoids bundling the ~134 KB mime-db table.
   "alias": {
