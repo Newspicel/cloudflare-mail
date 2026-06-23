@@ -26,6 +26,16 @@ import { performUnsubscribe } from "../mail/unsubscribe.ts";
 import { requireUser } from "../middleware.ts";
 import { requireEntityAccess, requirePerm } from "../permissions.ts";
 
+// ASCII-safe, filesystem-safe stem for a downloaded `.eml` (Content-Disposition
+// filename); collapses anything non-alphanumeric to a single dash.
+function slugifyForFile(subject: string | null): string {
+  return (subject ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+}
+
 const patchSchema = z.object({
   seen: z.boolean().optional(),
   starred: z.boolean().optional(),
@@ -163,9 +173,14 @@ export function messagesRoutes() {
     if (!msg.rawR2Key) throw new HTTPException(404, { message: "not found" });
     const obj = await c.env.BLOBS.get(msg.rawR2Key);
     if (!obj) throw new HTTPException(404, { message: "blob missing" });
-    return new Response(obj.body, {
-      headers: { "content-type": "message/rfc822" },
-    });
+    const headers: Record<string, string> = { "content-type": "message/rfc822" };
+    // `?download` forces a save (Export) with a subject-derived filename;
+    // otherwise the bytes are served inline for in-app viewing.
+    if (c.req.query("download") !== undefined) {
+      const name = `${slugifyForFile(msg.subject) || "email"}.eml`;
+      headers["content-disposition"] = `attachment; filename="${name}"`;
+    }
+    return new Response(obj.body, { headers });
   });
 
   return r;
