@@ -37,7 +37,7 @@ export async function sendFromMailbox(
   });
   if (!dom) throw new HTTPException(500, { message: "domain missing" });
 
-  const fromAddr = `${mb.localPart}@${dom.name}`;
+  const fromAddr = resolveFromAddr(input.fromAddress, mb.localPart, dom.name);
   const fromName = mb.displayName ?? undefined;
   const fromField: string | { name: string; email: string } = fromName
     ? { name: fromName, email: fromAddr }
@@ -181,6 +181,27 @@ export async function sendFromMailbox(
   ]);
 
   return { messageId, threadId };
+}
+
+// The outbound From address. Defaults to the mailbox's own address; an explicit
+// override is accepted only when it's a plus-alias of the same mailbox (same
+// base local part + domain), so a WRITE holder can reply from "hi+tag@" but
+// never from another mailbox.
+function resolveFromAddr(
+  override: string | undefined,
+  localPart: string,
+  domainName: string,
+): string {
+  const base = `${localPart}@${domainName}`;
+  if (!override) return base;
+  const [local, dom] = override.split("@");
+  const baseLocal = (local?.split("+")[0] ?? "").toLowerCase();
+  if (dom?.toLowerCase() !== domainName.toLowerCase() || baseLocal !== localPart.toLowerCase()) {
+    throw new HTTPException(400, {
+      message: "from address must be the mailbox or a plus-alias of it",
+    });
+  }
+  return override;
 }
 
 function appendSignatureText(

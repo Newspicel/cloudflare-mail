@@ -62,6 +62,9 @@ export interface ComposeState {
 type BodyFormat = "text" | "markdown" | "html";
 
 interface DraftSnapshot {
+  // Plus-alias sender override (e.g. "hi+tag@"), or null for the mailbox's own
+  // address. Pairs with the snapshot's mailbox (tracked separately).
+  fromAddress: string | null;
   to: { name?: string; address: string }[];
   cc: { name?: string; address: string }[];
   bcc: { name?: string; address: string }[];
@@ -195,6 +198,42 @@ export function ComposeForm({
   const [mailboxId, setMailboxId] = useState(
     d?.mailboxId ?? rep?.mailboxId ?? fwd?.mailboxId ?? sendable[0]?.id ?? "",
   );
+  // Sender override: a plus-alias of the chosen mailbox, or null for its own
+  // address. On reply, default to the sub-address the mail was delivered to
+  // (hi+tag@) so the answer goes out from the same alias.
+  const [fromAddress, setFromAddress] = useState<string | null>(() => {
+    if (d) return d.fromAddress ?? null;
+    const dt = rep?.deliveredTo;
+    const mbAddr = sendable.find((m) => m.id === rep?.mailboxId)?.address;
+    if (
+      dt &&
+      mbAddr &&
+      dt.toLowerCase() !== mbAddr.toLowerCase() &&
+      plusBase(dt) === mbAddr.toLowerCase()
+    )
+      return dt;
+    return null;
+  });
+  const baseAddr = useCallback(
+    (id: string) => sendable.find((m) => m.id === id)?.address ?? "",
+    [sendable],
+  );
+  // Selectable "From" addresses: each sendable mailbox, plus the plus-addressed
+  // envelope recipient when replying to one (so it can be re-picked).
+  const fromOptions = useMemo(() => {
+    const opts = sendable.map((m) => ({ address: m.address, mailboxId: m.id }));
+    const dt = rep?.deliveredTo;
+    const mb = sendable.find((m) => m.id === rep?.mailboxId);
+    if (
+      dt &&
+      mb &&
+      plusBase(dt) === mb.address.toLowerCase() &&
+      !opts.some((o) => o.address.toLowerCase() === dt.toLowerCase())
+    )
+      opts.push({ address: dt, mailboxId: mb.id });
+    return opts;
+  }, [sendable, rep]);
+  const currentFrom = fromAddress ?? baseAddr(mailboxId);
   const [to, setTo] = useState<RecipientsValue>(() => {
     if (d) return { items: d.toAddrs ?? [], input: "" };
     if (rep) {
@@ -346,6 +385,7 @@ export function ComposeForm({
     const bccList = collectRecipients(bcc);
     const body = mode === "html" ? html : text;
     const snap: DraftSnapshot = {
+      fromAddress,
       to: toList,
       cc: ccList,
       bcc: bccList,
@@ -363,7 +403,7 @@ export function ComposeForm({
       !bodyText.trim() &&
       attachments.length === 0;
     return { snap, isEmpty };
-  }, [to, cc, bcc, subject, text, html, mode, attachments]);
+  }, [fromAddress, to, cc, bcc, subject, text, html, mode, attachments]);
 
   // Debounced autosave. Skips while the form is untouched (so merely opening a
   // reply/forward doesn't spawn a draft) and serializes writes via `flush`.
@@ -415,6 +455,7 @@ export function ComposeForm({
         method: "POST",
         body: JSON.stringify({
           mailboxId,
+          fromAddress: fromAddress ?? undefined,
           to: collectRecipients(to),
           cc: ccList.length ? ccList : undefined,
           bcc: bccList.length ? bccList : undefined,
@@ -656,19 +697,30 @@ export function ComposeForm({
       <div className="flex flex-1 flex-col overflow-y-auto px-4 py-1">
         <div className={FIELD_ROW}>
           <span className={FIELD_LABEL}>From</span>
-          <Select value={mailboxId} onValueChange={(v) => setMailboxId(v as string)}>
+          <Select
+            value={currentFrom}
+            onValueChange={(v) => {
+              const opt = fromOptions.find((o) => o.address === v);
+              if (!opt) return;
+              setMailboxId(opt.mailboxId);
+              // Track an override only for a plus-alias; a base address is null.
+              setFromAddress(
+                opt.address.toLowerCase() === baseAddr(opt.mailboxId).toLowerCase()
+                  ? null
+                  : opt.address,
+              );
+            }}
+          >
             <SelectTrigger
-              aria-label="From mailbox"
+              aria-label="From address"
               className="h-auto w-auto flex-1 justify-between gap-1 border-0 bg-transparent px-0 py-0.5 text-left text-[13px] leading-5 shadow-none hover:bg-transparent focus-visible:ring-0"
             >
-              <SelectValue>
-                {(value) => sendable.find((m) => m.id === value)?.address ?? ""}
-              </SelectValue>
+              <SelectValue>{(value) => (value as string) ?? ""}</SelectValue>
             </SelectTrigger>
             <SelectContent>
-              {sendable.map((m) => (
-                <SelectItem key={m.id} value={m.id}>
-                  {m.address}
+              {fromOptions.map((o) => (
+                <SelectItem key={o.address} value={o.address}>
+                  {o.address}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -959,6 +1011,15 @@ function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// The base mailbox address an address belongs to, stripping any "+tag"
+// sub-address. Returns lowercase "<base>@<domain>", or null if not an address.
+function plusBase(addr: string): string | null {
+  const at = addr.lastIndexOf("@");
+  if (at <= 0) return null;
+  const local = addr.slice(0, at).split("+")[0] ?? "";
+  return `${local}@${addr.slice(at + 1)}`.toLowerCase();
 }
 
 function prefixSubject(s: string, prefix: "Re" | "Fwd"): string {

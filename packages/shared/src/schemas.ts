@@ -136,6 +136,7 @@ export const messageQuoteRef = z.object({
 
 export const createDraft = z.object({
   mailboxId: z.string().min(1),
+  fromAddress: emailAddress.optional(),
   to: z.array(addressObject).max(100).default([]),
   cc: z.array(addressObject).max(100).optional(),
   bcc: z.array(addressObject).max(100).optional(),
@@ -151,6 +152,7 @@ export const createDraft = z.object({
 export type CreateDraftInput = z.infer<typeof createDraft>;
 
 export const updateDraft = z.object({
+  fromAddress: emailAddress.nullish(),
   to: z.array(addressObject).max(100).optional(),
   cc: z.array(addressObject).max(100).optional(),
   bcc: z.array(addressObject).max(100).optional(),
@@ -290,6 +292,9 @@ export const grantMember = z.object({
 
 export const sendMessage = z.object({
   mailboxId: z.string().min(1),
+  // Optional sender override. Must be the mailbox's own address or a plus-alias
+  // of it (same base local part + domain); enforced server-side in mail/send.ts.
+  fromAddress: emailAddress.optional(),
   to: z.array(addressObject).min(1).max(100),
   cc: z.array(addressObject).max(100).optional(),
   bcc: z.array(addressObject).max(100).optional(),
