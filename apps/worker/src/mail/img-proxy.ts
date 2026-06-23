@@ -175,31 +175,7 @@ export async function proxyRemoteContent(html: string, secret: string): Promise<
 
 // ─── SSRF guard ─────────────────────────────────────────────────────────────
 
-/** Best-effort block of internal/reserved targets for IP-literal/internal hosts. */
-export function isBlockedHost(hostname: string): boolean {
-  const h = hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (
-    h === "localhost" ||
-    h.endsWith(".localhost") ||
-    h.endsWith(".local") ||
-    h.endsWith(".internal")
-  ) {
-    return true;
-  }
-  if (h.includes(":")) {
-    // IPv6: loopback, link-local, unique-local.
-    return h === "::1" || h.startsWith("fe80") || h.startsWith("fc") || h.startsWith("fd");
-  }
-  const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (!m) return false;
-  const a = Number(m[1]);
-  const b = Number(m[2]);
-  if (a === 0 || a === 10 || a === 127 || a >= 224) return true; // any-net, private, loopback, multicast/reserved
-  if (a === 169 && b === 254) return true; // link-local + cloud metadata
-  if (a === 172 && b >= 16 && b <= 31) return true; // private
-  if (a === 192 && b === 168) return true; // private
-  if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
-  return false;
-}
+// The SSRF host guard lives in `../ssrf.ts` so the push validator shares it.
+export { isBlockedHost, safeRedirectFetch } from "../ssrf.ts";
 
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;

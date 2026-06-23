@@ -13,9 +13,9 @@ import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
 import { assertOwnedAttachmentKeys } from "../mail/attachment-keys.ts";
 import {
-  isBlockedHost,
   MAX_IMAGE_BYTES,
   proxyRemoteContent,
+  safeRedirectFetch,
   verifyProxyUrl,
 } from "../mail/img-proxy.ts";
 import { parseMime } from "../mail/mime.ts";
@@ -115,13 +115,11 @@ export function messagesRoutes() {
     const url = await verifyProxyUrl(secret, encoded, sig);
     if (!url) throw new HTTPException(403, { message: "bad signature" });
 
-    const target = new URL(url);
-    if (isBlockedHost(target.hostname)) throw new HTTPException(403, { message: "blocked host" });
-
-    const upstream = await fetch(target, {
-      headers: { accept: "image/*" },
-      redirect: "follow",
-    });
+    // Manual redirect following: every hop is re-checked against the SSRF
+    // guard, so an attacker host can't 302 us at an internal address.
+    const result = await safeRedirectFetch(new URL(url), { headers: { accept: "image/*" } });
+    if ("blocked" in result) throw new HTTPException(403, { message: result.reason });
+    const upstream = result;
     if (!upstream.ok || !upstream.body) throw new HTTPException(502, { message: "fetch failed" });
     const contentType = upstream.headers.get("content-type") ?? "";
     if (!contentType.startsWith("image/"))
