@@ -4,20 +4,14 @@ import {
   mailboxInvite,
   mailboxMember,
   mailboxSpamUsage,
-  shareToken,
   thread,
   user,
 } from "@cfmail/db/schema";
 import { grant, Perm } from "@cfmail/shared/permissions";
 import type { MailboxListDto } from "@cfmail/shared/responses";
-import {
-  createMailbox,
-  createShareToken,
-  grantMember,
-  updateMailboxSettings,
-} from "@cfmail/shared/schemas";
+import { createMailbox, grantMember, updateMailboxSettings } from "@cfmail/shared/schemas";
 import { zValidator } from "@hono/zod-validator";
-import { and, count, desc, eq, gt, inArray, ne, or } from "drizzle-orm";
+import { and, count, eq, gt, inArray, ne, or } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { dbFromCtx } from "../db.ts";
@@ -326,65 +320,7 @@ export function mailboxesRoutes() {
     return c.body(null, 204);
   });
 
-  r.post("/:id/share-tokens", zValidator("json", createShareToken), async (c) => {
-    const db = dbFromCtx(c);
-    const u = c.get("user")!;
-    const id = c.req.param("id");
-    const body = c.req.valid("json");
-    await requirePerm(db, u.id, id, Perm.MANAGE);
-
-    const tokenId = randomToken(32);
-    const expiresAt = new Date(Date.now() + body.ttlSeconds * 1000);
-    await db.insert(shareToken).values({
-      id: tokenId,
-      mailboxId: id,
-      createdByUserId: u.id,
-      perms: Perm.READ,
-      expiresAt,
-    });
-    const baseUrl = c.get("baseUrl");
-    const url = baseUrl ? `${baseUrl.replace(/\/$/, "")}/t/${tokenId}` : `/t/${tokenId}`;
-    return c.json({ id: tokenId, url, expiresAt: expiresAt.toISOString() }, 201);
-  });
-
-  r.get("/:id/share-tokens", async (c) => {
-    const db = dbFromCtx(c);
-    const u = c.get("user")!;
-    const id = c.req.param("id");
-    await requirePerm(db, u.id, id, Perm.MANAGE);
-    const rows = await db
-      .select({
-        id: shareToken.id,
-        createdAt: shareToken.createdAt,
-        expiresAt: shareToken.expiresAt,
-      })
-      .from(shareToken)
-      .where(eq(shareToken.mailboxId, id))
-      .orderBy(desc(shareToken.createdAt));
-    return c.json({ tokens: rows });
-  });
-
-  r.delete("/:id/share-tokens/:tokenId", async (c) => {
-    const db = dbFromCtx(c);
-    const u = c.get("user")!;
-    const id = c.req.param("id");
-    const tokenId = c.req.param("tokenId");
-    await requirePerm(db, u.id, id, Perm.MANAGE);
-    await db
-      .delete(shareToken)
-      .where(and(eq(shareToken.id, tokenId), eq(shareToken.mailboxId, id)));
-    return c.body(null, 204);
-  });
-
   // Suppress unused-import warning from tree-shaking of `or`.
   void or;
   return r;
-}
-
-function randomToken(byteLen: number): string {
-  const bytes = new Uint8Array(byteLen);
-  crypto.getRandomValues(bytes);
-  let s = "";
-  for (const b of bytes) s += String.fromCharCode(b);
-  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
