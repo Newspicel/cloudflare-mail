@@ -25,6 +25,9 @@ export const keys = {
   messageLabels: (idsKey: string) => ["message-labels", idsKey] as const,
   /** Prefix matching every message-labels query. */
   messageLabelsRoot: () => ["message-labels"] as const,
+  threadLabels: (idsKey: string) => ["thread-labels", idsKey] as const,
+  /** Prefix matching every thread-labels query. */
+  threadLabelsRoot: () => ["thread-labels"] as const,
   /** The user's custom folders (with counts) for the sidebar. */
   folders: () => ["folders"] as const,
   /** Prefix matching every per-folder thread list. */

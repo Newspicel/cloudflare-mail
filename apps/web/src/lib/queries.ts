@@ -208,3 +208,16 @@ export const messageLabelsQuery = (messageIds: string[]) =>
     },
     enabled: messageIds.length > 0,
   });
+
+// Distinct labels per thread, for the chips on list rows. Keyed by the full id
+// set so a list reuses one request instead of one per row.
+export const threadLabelsQuery = (threadIds: string[]) =>
+  queryOptions({
+    queryKey: keys.threadLabels(threadIds.toSorted().join(",")),
+    queryFn: () => {
+      const qs = threadIds.map((id) => `id=${encodeURIComponent(id)}`).join("&");
+      return api<{ labels: Record<string, MessageLabelDto[]> }>(`/api/labels/by-threads?${qs}`);
+    },
+    enabled: threadIds.length > 0,
+    staleTime: 15_000,
+  });

@@ -60,6 +60,7 @@ function LabelsPopover({ mailboxId, messageId }: { mailboxId: string; messageId:
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: keys.labels(mailboxId) });
     qc.invalidateQueries({ queryKey: keys.messageLabelsRoot() });
+    qc.invalidateQueries({ queryKey: keys.threadLabelsRoot() });
   };
 
   const toggle = useMutation({

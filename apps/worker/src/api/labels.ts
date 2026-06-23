@@ -1,6 +1,6 @@
 import { label, message, messageLabel } from "@cfmail/db/schema";
 import { Perm } from "@cfmail/shared/permissions";
-import type { LabelListDto, MessageLabelsDto } from "@cfmail/shared/responses";
+import type { LabelListDto, MessageLabelsDto, ThreadLabelsDto } from "@cfmail/shared/responses";
 import { createLabel, updateLabel } from "@cfmail/shared/schemas";
 import { zValidator } from "@hono/zod-validator";
 import { and, asc, eq, inArray } from "drizzle-orm";
@@ -140,6 +140,54 @@ export function labelsRoutes() {
       list.push({ id: row.labelId, name: row.name, color: row.color });
     }
     return c.json({ labels: out } satisfies MessageLabelsDto);
+  });
+
+  // Distinct labels applied to any message in each thread — powers the chips on
+  // the thread list rows (labels are per-message, but the list shows threads).
+  r.get("/by-threads", async (c) => {
+    const db = dbFromCtx(c);
+    const user = c.get("user")!;
+    const ids = c.req.queries("id") ?? [];
+    if (ids.length === 0) return c.json({ labels: {} } satisfies ThreadLabelsDto);
+
+    const rows = await db
+      .select({
+        threadId: message.threadId,
+        labelId: messageLabel.labelId,
+        name: label.name,
+        color: label.color,
+        mailboxId: label.mailboxId,
+      })
+      .from(messageLabel)
+      .innerJoin(message, eq(message.id, messageLabel.messageId))
+      .innerJoin(label, eq(label.id, messageLabel.labelId))
+      .where(inArray(message.threadId, ids));
+
+    const uniqueMailboxIds = [...new Set(rows.map((row) => row.mailboxId))];
+    const accessEntries = await Promise.all(
+      uniqueMailboxIds.map(async (mid) => {
+        try {
+          await requirePerm(db, user.id, mid, Perm.READ);
+          return [mid, true] as const;
+        } catch {
+          return [mid, false] as const;
+        }
+      }),
+    );
+    const accessCache = new Map<string, boolean>(accessEntries);
+    const out: Record<string, { id: string; name: string; color: string }[]> = {};
+    for (const row of rows) {
+      if (!accessCache.get(row.mailboxId)) continue;
+      let list = out[row.threadId];
+      if (!list) {
+        list = [];
+        out[row.threadId] = list;
+      }
+      // A label can ride on several messages in the thread; show it once.
+      if (list.some((l) => l.id === row.labelId)) continue;
+      list.push({ id: row.labelId, name: row.name, color: row.color });
+    }
+    return c.json({ labels: out } satisfies ThreadLabelsDto);
   });
 
   return r;
