@@ -267,6 +267,11 @@ export const createRedirect = z.object({
   targetMailboxId: z.string().min(1),
 });
 
+// Admin: re-point an existing redirect at a different target mailbox.
+export const updateRedirect = z.object({
+  targetMailboxId: z.string().min(1),
+});
+
 export const spamFilterLevel = z.enum(SPAM_FILTER_LEVELS);
 export type SpamFilterLevel = z.infer<typeof spamFilterLevel>;
 

@@ -1223,7 +1223,12 @@ function AdminMailboxes({ meId }: { meId: string }) {
               invalidate={invalidate}
             />
           ) : (
-            <RedirectRow key={`r:${e.rd.id}`} redirect={e.rd} invalidate={invalidate} />
+            <RedirectRow
+              key={`r:${e.rd.id}`}
+              redirect={e.rd}
+              allMailboxes={mailboxes}
+              invalidate={invalidate}
+            />
           ),
         )}
         {entries.length === 0 && (
@@ -1543,11 +1548,30 @@ function AdminCreateForm({
 
 function RedirectRow({
   redirect: rd,
+  allMailboxes,
   invalidate,
 }: {
   redirect: RedirectRow;
+  allMailboxes: AdminMailbox[];
   invalidate: () => void;
 }) {
+  const [migrateOpen, setMigrateOpen] = useState(false);
+  const [target, setTarget] = useState(rd.targetMailboxId);
+
+  const migrate = useMutation({
+    mutationFn: () =>
+      api(`/api/admin/redirects/${rd.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ targetMailboxId: target }),
+      }),
+    onSuccess: () => {
+      setMigrateOpen(false);
+      invalidate();
+      toast.success("Redirect re-pointed");
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
   const remove = useMutation({
     mutationFn: () => api(`/api/admin/redirects/${rd.id}`, { method: "DELETE" }),
     onSuccess: () => {
@@ -1556,21 +1580,55 @@ function RedirectRow({
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
+
+  const targets = allMailboxes.filter((m) => m.type !== "temp" && m.type !== "service");
+
   return (
-    <li className="flex items-center justify-between gap-3 px-3 py-2.5 text-[13px]">
-      <div className="min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="truncate font-medium">{rd.address}</span>
-          <KindBadge kind="redirect" />
+    <li className="px-3 py-2.5 text-[13px]">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="truncate font-medium">{rd.address}</span>
+            <KindBadge kind="redirect" />
+          </div>
+          <div className="flex items-center gap-1 truncate text-[11px] text-muted-foreground">
+            <ArrowRight className="h-3 w-3 shrink-0" />
+            {rd.targetAddress}
+          </div>
         </div>
-        <div className="flex items-center gap-1 truncate text-[11px] text-muted-foreground">
-          <ArrowRight className="h-3 w-3 shrink-0" />
-          {rd.targetAddress}
+        <div className="flex shrink-0 items-center gap-1">
+          <GhostBtn
+            onClick={() => {
+              setTarget(rd.targetMailboxId);
+              setMigrateOpen((v) => !v);
+            }}
+          >
+            Migrate
+          </GhostBtn>
+          <GhostBtn destructive onClick={() => remove.mutate()}>
+            Remove
+          </GhostBtn>
         </div>
       </div>
-      <GhostBtn destructive onClick={() => remove.mutate()}>
-        Remove
-      </GhostBtn>
+
+      {migrateOpen && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-3">
+          <span className="text-[11px] text-muted-foreground">New target</span>
+          <Select value={target} onChange={(e) => setTarget(e.target.value)} className="flex-1">
+            {targets.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.address}
+              </option>
+            ))}
+          </Select>
+          <PrimaryBtn
+            onClick={() => migrate.mutate()}
+            disabled={target === rd.targetMailboxId || migrate.isPending}
+          >
+            Migrate
+          </PrimaryBtn>
+        </div>
+      )}
     </li>
   );
 }

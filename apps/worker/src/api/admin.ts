@@ -6,6 +6,7 @@ import {
   createServiceMailbox,
   migrateMailbox,
   updateMailboxSettings,
+  updateRedirect,
   updateServiceMailbox,
 } from "@cfmail/shared/schemas";
 import { zValidator } from "@hono/zod-validator";
@@ -421,6 +422,28 @@ export function adminRoutes() {
         set: { targetMailboxId: body.targetMailboxId },
       });
     return c.json({ ok: true }, 201);
+  });
+
+  r.patch("/redirects/:id", zValidator("json", updateRedirect), async (c) => {
+    const db = dbFromCtx(c);
+    const id = c.req.param("id");
+    const body = c.req.valid("json");
+
+    const target = await db.query.mailbox.findFirst({
+      where: eq(mailbox.id, body.targetMailboxId),
+      columns: { id: true, type: true },
+    });
+    if (!target) throw new HTTPException(400, { message: "redirect target not found" });
+    if (target.type === "service") {
+      throw new HTTPException(400, { message: "service mailboxes cannot receive mail" });
+    }
+
+    const res = await db
+      .update(redirect)
+      .set({ targetMailboxId: target.id })
+      .where(eq(redirect.id, id));
+    if (!res.success) throw new HTTPException(404, { message: "not found" });
+    return c.json({ ok: true });
   });
 
   r.delete("/redirects/:id", async (c) => {
