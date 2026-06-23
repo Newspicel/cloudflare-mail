@@ -32,6 +32,7 @@ import { useThreadListMutation } from "@/lib/thread-mutations.ts";
 import { openCompose } from "./compose-dock.tsx";
 import { EmailFrame } from "./email-frame.tsx";
 import { LabelChips, LabelsMenu } from "./labels-menu.tsx";
+import { MessageMenu } from "./message-menu.tsx";
 import { MoveToFolderMenu } from "./move-to-folder-menu.tsx";
 import { Button } from "./ui/button.tsx";
 import { IconButton } from "./ui/icon-button.tsx";
@@ -421,6 +422,7 @@ function MessageCard({
                 <Star className={cn(starred && "fill-current")} />
               </Button>
             )}
+            <MessageMenu msg={msg} body={body.data} />
           </div>
           {!readOnly && <MessageActions msg={msg} />}
         </div>
