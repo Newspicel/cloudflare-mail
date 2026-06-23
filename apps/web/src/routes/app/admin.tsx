@@ -218,11 +218,19 @@ function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return <input {...props} className={cn(inputClass, props.className)} />;
 }
 
+const selectChevron =
+  "bg-[length:11px] bg-[right_0.55rem_center] bg-no-repeat bg-[url(\"data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='12'%20height='12'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%23737373'%20stroke-width='2.5'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='m6%209%206%206%206-6'/%3E%3C/svg%3E\")]";
+
 function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <select
       {...props}
-      className={cn(inputClass, "cursor-pointer appearance-none pr-2", props.className)}
+      className={cn(
+        inputClass,
+        "cursor-pointer appearance-none pr-7",
+        selectChevron,
+        props.className,
+      )}
     />
   );
 }
@@ -341,7 +349,10 @@ function DomainsSection() {
         </div>
       </Section>
 
-      <Section title="Domains" description="Verified mail domains and the mailbox kinds each one allows.">
+      <Section
+        title="Domains"
+        description="Verified mail domains and the mailbox kinds each one allows."
+      >
         <div className="overflow-x-auto rounded-md border">
           <table className="w-full min-w-[36rem] text-[13px]">
             <thead className="bg-muted/50 text-[11px] uppercase tracking-wider text-muted-foreground">
@@ -577,21 +588,19 @@ function UsersSection() {
         </ul>
       </Section>
 
-      <Section
-        title="Send invite"
-        description="User sets their own password via a one-time link."
-      >
-        <div className="flex flex-wrap gap-2">
+      <Section title="Send invite" description="User sets their own password via a one-time link.">
+        <div className="flex flex-wrap items-center gap-2">
           <Input
             type="email"
             value={inviteEmail}
             onChange={(e) => setInviteEmail(e.target.value)}
             placeholder="user@example.com"
-            className="min-w-[240px] flex-1"
+            className="min-w-[200px] flex-1"
           />
           <Select
             value={inviteRole}
             onChange={(e) => setInviteRole(e.target.value as typeof inviteRole)}
+            className="w-auto"
           >
             <option value="user">User</option>
             <option value="admin">Admin</option>
@@ -1099,7 +1108,7 @@ function KindBadge({ kind }: { kind: string }) {
   return (
     <span
       className={cn(
-        "inline-flex shrink-0 items-center rounded border px-1.5 py-0.5 text-[10px] font-medium",
+        "inline-flex shrink-0 items-center rounded border px-1.5 py-0.5 text-[10px] font-medium capitalize",
         TYPE_BADGE[kind] ?? TYPE_BADGE.redirect,
       )}
     >
@@ -1262,7 +1271,7 @@ function AdminMailboxes({ meId }: { meId: string }) {
           <Select
             value={kindFilter}
             onChange={(e) => setKindFilter(e.target.value as typeof kindFilter)}
-            className="h-8 text-[13px]"
+            className="h-8 w-auto text-[13px]"
           >
             <option value="all">All kinds</option>
             <option value="personal">Personal</option>
@@ -1274,7 +1283,7 @@ function AdminMailboxes({ meId }: { meId: string }) {
           <Select
             value={sort}
             onChange={(e) => setSort(e.target.value as typeof sort)}
-            className="h-8 text-[13px]"
+            className="h-8 w-auto text-[13px]"
           >
             <option value="address">Address A–Z</option>
             <option value="address-desc">Address Z–A</option>
@@ -1540,20 +1549,25 @@ function AdminCreateForm({
             value={type}
             onChange={(e) => setType(e.target.value as MailboxSummary["type"])}
             disabled={typeOptions.length === 0}
-            className="min-w-[110px]"
+            className="w-auto min-w-[120px]"
             title="Mailbox kind"
           >
             {typeOptions.length === 0 ? (
-              <option value="">type</option>
+              <option value="">Type…</option>
             ) : (
               typeOptions.map((k) => (
                 <option key={k.label} value={k.type}>
-                  {k.label}
+                  {k.label.charAt(0).toUpperCase() + k.label.slice(1)}
                 </option>
               ))
             )}
           </Select>
-          <Select value={ownerId} onChange={(e) => setOwner(e.target.value)} title="Owner">
+          <Select
+            value={ownerId}
+            onChange={(e) => setOwner(e.target.value)}
+            title="Owner"
+            className="w-auto min-w-[160px]"
+          >
             {users.map((u) => (
               <option key={u.id} value={u.id}>
                 {u.email}
@@ -2230,8 +2244,8 @@ function BlockRequestsPanel() {
       title="Block requests"
       description={
         <>
-          Requests from readers to block a sender. Approving adds the address to the blocklist so its
-          mail is rejected going forward.
+          Requests from readers to block a sender. Approving adds the address to the blocklist so
+          its mail is rejected going forward.
         </>
       }
     >

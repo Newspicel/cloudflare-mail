@@ -41,7 +41,13 @@ import {
   textToHtml,
 } from "./rich-editor.tsx";
 import { Button } from "./ui/button.tsx";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select.tsx";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select.tsx";
 import { Textarea } from "./ui/textarea.tsx";
 
 marked.setOptions({ breaks: true, gfm: true });
@@ -84,7 +90,11 @@ interface DraftSnapshot {
 }
 
 const listeners = new Set<(s: ComposeState) => void>();
-let state: ComposeState = { open: false, replyToMessage: null, forwardMessage: null };
+let state: ComposeState = {
+  open: false,
+  replyToMessage: null,
+  forwardMessage: null,
+};
 
 // Compose-related user prefs, mirrored from the React Query cache by the always-
 // mounted <ComposeDock> so the module-level openCompose() can honor them.
@@ -98,7 +108,8 @@ export function setComposePrefs(p: ComposePrefs): void {
 }
 
 export function openCompose(partial: Partial<ComposeState> = {}): void {
-  const fresh = !partial.replyToMessage && !partial.forwardMessage && !partial.draft;
+  const fresh =
+    !partial.replyToMessage && !partial.forwardMessage && !partial.draft;
   // Pop a brand-new message out to its own window when preferred. Safe from the
   // popup blocker because openCompose runs inside the originating click/keydown.
   if (fresh && composePrefs.composeInNewWindow) {
@@ -177,16 +188,22 @@ export function ComposeForm({
   const { data: mailboxes } = useQuery(mailboxesQuery);
   const { data: contactsData } = useQuery(contactsQuery);
   const contacts = contactsData?.contacts ?? [];
-  const sendable = (mailboxes?.mailboxes ?? []).filter((m) => (m.perms & 2) === 2);
+  const sendable = (mailboxes?.mailboxes ?? []).filter(
+    (m) => (m.perms & 2) === 2,
+  );
   const d = s.draft;
   const rep = s.replyToMessage;
   const fwd = s.forwardMessage;
   // The original message to quote, as a stable {messageId, kind} ref. Works for
   // a live reply/forward and for a reopened draft that persisted its quote.
-  const quoteRef = useMemo<{ messageId: string; kind: "reply" | "forward" } | null>(() => {
+  const quoteRef = useMemo<{
+    messageId: string;
+    kind: "reply" | "forward";
+  } | null>(() => {
     if (rep) return { messageId: rep.id, kind: "reply" };
     if (fwd) return { messageId: fwd.id, kind: "forward" };
-    if (d?.quoteMessageId && d.quoteKind) return { messageId: d.quoteMessageId, kind: d.quoteKind };
+    if (d?.quoteMessageId && d.quoteKind)
+      return { messageId: d.quoteMessageId, kind: d.quoteKind };
     return null;
   }, [rep, fwd, d]);
 
@@ -268,9 +285,16 @@ export function ComposeForm({
     }
     return { items: [], input: "" };
   });
-  const [bcc, setBcc] = useState<RecipientsValue>(() => ({ items: d?.bccAddrs ?? [], input: "" }));
+  const [bcc, setBcc] = useState<RecipientsValue>(() => ({
+    items: d?.bccAddrs ?? [],
+    input: "",
+  }));
   const [showCc, setShowCc] = useState(
-    Boolean((d?.ccAddrs?.length ?? 0) || (d?.bccAddrs?.length ?? 0) || cc.items.length),
+    Boolean(
+      (d?.ccAddrs?.length ?? 0) ||
+      (d?.bccAddrs?.length ?? 0) ||
+      cc.items.length,
+    ),
   );
   const [showQuote, setShowQuote] = useState(false);
   const [subject, setSubject] = useState(
@@ -285,7 +309,8 @@ export function ComposeForm({
   // Body editor format. Default is a plain-text email; it only becomes an HTML
   // mail once rich formatting is actually used (or markdown is rendered).
   const initialFormat: BodyFormat =
-    d?.format ?? (d?.markdown ? "markdown" : (prefs.composeDefaultMode ?? "text"));
+    d?.format ??
+    (d?.markdown ? "markdown" : (prefs.composeDefaultMode ?? "text"));
   const [mode, setMode] = useState<BodyFormat>(initialFormat);
   // `text` holds the plain/markdown source; `html` holds the rich-mode body.
   const [text, setText] = useState(d && initialFormat !== "html" ? d.body : "");
@@ -307,7 +332,9 @@ export function ComposeForm({
     [origBody.data?.html],
   );
   const [preview, setPreview] = useState(false);
-  const [attachments, setAttachments] = useState<UploadedAttachment[]>(d?.attachments ?? []);
+  const [attachments, setAttachments] = useState<UploadedAttachment[]>(
+    d?.attachments ?? [],
+  );
   const [uploading, setUploading] = useState(0);
   const [savedHint, setSavedHint] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -319,7 +346,9 @@ export function ComposeForm({
   const references =
     d?.references ??
     (rep
-      ? [...(rep.references ?? []), rep.messageIdHdr].filter((x): x is string => Boolean(x))
+      ? [...(rep.references ?? []), rep.messageIdHdr].filter((x): x is string =>
+          Boolean(x),
+        )
       : undefined);
 
   // ── Server-persisted drafts ────────────────────────────────────────────
@@ -360,7 +389,12 @@ export function ComposeForm({
         if (data.isEmpty) {
           await deleteDraft();
         } else {
-          const payload = { ...data.snap, inReplyTo, references, quote: quoteRef };
+          const payload = {
+            ...data.snap,
+            inReplyTo,
+            references,
+            quote: quoteRef,
+          };
           if (draftIdRef.current) {
             await api(`/api/drafts/${draftIdRef.current}`, {
               method: "PATCH",
@@ -389,7 +423,10 @@ export function ComposeForm({
   );
 
   // The current form state as a draft snapshot + whether it's effectively blank.
-  const currentSnapshot = useCallback((): { snap: DraftSnapshot; isEmpty: boolean } => {
+  const currentSnapshot = useCallback((): {
+    snap: DraftSnapshot;
+    isEmpty: boolean;
+  } => {
     const toList = collectRecipients(to);
     const ccList = collectRecipients(cc);
     const bccList = collectRecipients(bcc);
@@ -491,7 +528,8 @@ export function ComposeForm({
     onSuccess: async (res) => {
       if (res?.pgpWarning) toast.warning(res.pgpWarning);
       else toast.success("Message sent");
-      if (mailboxId) qc.invalidateQueries({ queryKey: keys.threadsRoot(mailboxId) });
+      if (mailboxId)
+        qc.invalidateQueries({ queryKey: keys.threadsRoot(mailboxId) });
       // Keep the combined "All" view's lists/counts in sync with the send.
       qc.invalidateQueries({ queryKey: keys.threadsRoot("all") });
       await deleteDraft().catch(() => {});
@@ -507,7 +545,9 @@ export function ComposeForm({
   // (not the in-progress input), and the query is keyed by the address set so
   // identical sets are served from cache rather than refetched on every keystroke.
   const recipientAddrs = useMemo(() => {
-    const all = [...to.items, ...cc.items, ...bcc.items].map((a) => a.address.trim().toLowerCase());
+    const all = [...to.items, ...cc.items, ...bcc.items].map((a) =>
+      a.address.trim().toLowerCase(),
+    );
     return [...new Set(all)].filter((a) => a.includes("@"));
   }, [to, cc, bcc]);
   const blockedQ = useQuery({
@@ -520,7 +560,9 @@ export function ComposeForm({
     enabled: recipientAddrs.length > 0,
     staleTime: 30_000,
   });
-  const blockedRecipients = recipientAddrs.length ? (blockedQ.data?.blocked ?? []) : [];
+  const blockedRecipients = recipientAddrs.length
+    ? (blockedQ.data?.blocked ?? [])
+    : [];
 
   // Close the dock, or close the OS window when running as a pop-out.
   function finish() {
@@ -538,7 +580,11 @@ export function ComposeForm({
   // so the window is created first and pointed at the route once the draft id
   // is known.
   function popOut() {
-    const w = window.open("about:blank", "_blank", "popup,width=720,height=860");
+    const w = window.open(
+      "about:blank",
+      "_blank",
+      "popup,width=720,height=860",
+    );
     if (!w) {
       toast.error("Allow pop-ups to open the message in a new window");
       return;
@@ -562,7 +608,11 @@ export function ComposeForm({
   // server-side and never reaches here, so it can't trip a false warning.
   function attemptSend() {
     const composed = mode === "html" ? htmlToText(html) : text;
-    if (attachments.length === 0 && uploading === 0 && mentionsAttachment(composed)) {
+    if (
+      attachments.length === 0 &&
+      uploading === 0 &&
+      mentionsAttachment(composed)
+    ) {
       const ok = window.confirm(
         "It looks like you mentioned an attachment, but nothing is attached.\n\nSend anyway?",
       );
@@ -583,7 +633,8 @@ export function ComposeForm({
     if (!prefs.sendShortcut) return;
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
       e.preventDefault();
-      if (!send.isPending && uploading === 0 && mailboxId && hasRecipients(to)) attemptSend();
+      if (!send.isPending && uploading === 0 && mailboxId && hasRecipients(to))
+        attemptSend();
     }
   }
 
@@ -640,7 +691,9 @@ export function ComposeForm({
     } catch (err) {
       const msg =
         err instanceof ApiError
-          ? typeof err.payload === "object" && err.payload && "message" in err.payload
+          ? typeof err.payload === "object" &&
+            err.payload &&
+            "message" in err.payload
             ? String((err.payload as { message: unknown }).message)
             : `upload failed (${err.status})`
           : err instanceof Error
@@ -745,7 +798,8 @@ export function ComposeForm({
               setMailboxId(opt.mailboxId);
               // Track an override only for a plus-alias; a base address is null.
               setFromAddress(
-                opt.address.toLowerCase() === baseAddr(opt.mailboxId).toLowerCase()
+                opt.address.toLowerCase() ===
+                  baseAddr(opt.mailboxId).toLowerCase()
                   ? null
                   : opt.address,
               );
@@ -814,7 +868,7 @@ export function ComposeForm({
           </div>
         )}
         <label className={FIELD_ROW}>
-          <span className={FIELD_LABEL}>Subject</span>
+          <span className={FIELD_LABEL}>Sub</span>
           <input
             value={subject}
             onChange={(e) => setSubject(e.target.value)}
@@ -852,7 +906,9 @@ export function ComposeForm({
               mode === "markdown" && "font-mono",
             )}
             placeholder={
-              mode === "markdown" ? "Write your message in markdown…" : "Write your message…"
+              mode === "markdown"
+                ? "Write your message in markdown…"
+                : "Write your message…"
             }
           />
         )}
@@ -867,10 +923,16 @@ export function ComposeForm({
                 <span className="max-w-[16rem] truncate" title={a.filename}>
                   {a.filename}
                 </span>
-                <span className="text-muted-foreground">{formatBytes(a.sizeBytes)}</span>
+                <span className="text-muted-foreground">
+                  {formatBytes(a.sizeBytes)}
+                </span>
                 <button
                   type="button"
-                  onClick={() => setAttachments((prev) => prev.filter((x) => x.r2Key !== a.r2Key))}
+                  onClick={() =>
+                    setAttachments((prev) =>
+                      prev.filter((x) => x.r2Key !== a.r2Key),
+                    )
+                  }
                   className="ml-0.5 rounded p-0.5 text-muted-foreground hover:bg-card hover:text-foreground"
                   aria-label={`Remove ${a.filename}`}
                 >
@@ -915,7 +977,12 @@ export function ComposeForm({
           <Button
             variant="primary"
             onClick={attemptSend}
-            disabled={send.isPending || uploading > 0 || !mailboxId || !hasRecipients(to)}
+            disabled={
+              send.isPending ||
+              uploading > 0 ||
+              !mailboxId ||
+              !hasRecipients(to)
+            }
           >
             {send.isPending ? "Sending…" : "Send"}
           </Button>
