@@ -1,6 +1,6 @@
 import { has, Perm } from "@cfmail/shared/permissions";
-import { useQuery } from "@tanstack/react-query";
-import { Link, useParams } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import {
   Inbox,
   Lock,
@@ -9,9 +9,12 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Timer,
+  Trash2,
   Users,
 } from "lucide-react";
 import type { ReactNode } from "react";
+import { toast } from "sonner";
+import { api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
 import { type MailboxSummary, mailboxesQuery } from "@/lib/queries.ts";
 import { formatRemaining, useNow } from "@/lib/time.ts";
@@ -19,6 +22,7 @@ import { openCompose } from "./compose-dock.tsx";
 import { NewTempMailbox } from "./new-temp-mailbox.tsx";
 import { Badge } from "./ui/badge.tsx";
 import { Button } from "./ui/button.tsx";
+import { useConfirmHelpers } from "./ui/confirm.tsx";
 import { Sheet, SheetContent } from "./ui/sheet.tsx";
 
 const GROUP_META: Record<
@@ -62,6 +66,29 @@ function SidebarBody({ onClose }: { onClose?: () => void }) {
   const mailboxes = data?.mailboxes ?? [];
   useNow(60_000);
 
+  const qc = useQueryClient();
+  const nav = useNavigate();
+  const { confirmDelete } = useConfirmHelpers();
+  const params = useParams({ strict: false });
+  const activeId = (params as { mailboxId?: string }).mailboxId;
+
+  const deleteMailbox = useMutation({
+    mutationFn: (id: string) => api(`/api/mailboxes/${id}`, { method: "DELETE" }),
+    onSuccess: (_res, id) => {
+      qc.invalidateQueries({ queryKey: ["mailboxes"] });
+      if (activeId === id) nav({ to: "/app" });
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed to delete"),
+  });
+
+  const onDeleteTemp = async (m: MailboxSummary) => {
+    const ok = await confirmDelete(
+      "temp mailbox",
+      `${m.address} and all its mail will be permanently deleted.`,
+    );
+    if (ok) deleteMailbox.mutate(m.id);
+  };
+
   const grouped: Record<MailboxSummary["type"], MailboxSummary[]> = {
     personal: [],
     group: [],
@@ -69,9 +96,6 @@ function SidebarBody({ onClose }: { onClose?: () => void }) {
     temp: [],
   };
   for (const m of mailboxes) grouped[m.type].push(m);
-
-  const params = useParams({ strict: false });
-  const activeId = (params as { mailboxId?: string }).mailboxId;
 
   return (
     <>
@@ -102,15 +126,16 @@ function SidebarBody({ onClose }: { onClose?: () => void }) {
               <ul className="flex flex-col gap-0.5">
                 {items.map((m) => {
                   const readOnly = m.role === "member" && !has(m.perms, Perm.WRITE);
+                  const canDelete = m.type === "temp" && m.role === "owner";
                   return (
-                    <li key={m.id}>
+                    <li key={m.id} className="group/row relative">
                       <Link
                         to="/app/m/$mailboxId"
                         params={{ mailboxId: m.id }}
                         search={{ view: "inbox" }}
                         onClick={() => onClose?.()}
                         className={cn(
-                          "group flex items-center justify-between rounded-md px-2 py-1.5 text-[13px] transition-colors",
+                          "flex items-center justify-between rounded-md px-2 py-1.5 text-[13px] transition-colors",
                           activeId === m.id
                             ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
                             : "text-sidebar-foreground hover:bg-sidebar-accent/60",
@@ -119,7 +144,12 @@ function SidebarBody({ onClose }: { onClose?: () => void }) {
                         <span className={cn("truncate", m.unread > 0 && "font-medium")}>
                           {m.displayName ?? m.address}
                         </span>
-                        <span className="ml-2 flex shrink-0 items-center gap-1">
+                        <span
+                          className={cn(
+                            "ml-2 flex shrink-0 items-center gap-1",
+                            canDelete && "group-hover/row:invisible",
+                          )}
+                        >
                           {readOnly && (
                             <span role="img" aria-label="Read-only" title="Read-only">
                               <Lock className="h-3 w-3 text-muted-foreground" />
@@ -137,6 +167,18 @@ function SidebarBody({ onClose }: { onClose?: () => void }) {
                           )}
                         </span>
                       </Link>
+                      {canDelete && (
+                        <button
+                          type="button"
+                          aria-label={`Delete ${m.address}`}
+                          title="Delete temp mailbox"
+                          disabled={deleteMailbox.isPending}
+                          onClick={() => onDeleteTemp(m)}
+                          className="absolute inset-y-0 right-1 my-auto hidden h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive group-hover/row:flex"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
                     </li>
                   );
                 })}
