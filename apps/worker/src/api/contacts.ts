@@ -6,10 +6,9 @@ import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
 import { requireUser } from "../middleware.ts";
 
-// Recipient suggestions for the composer: every mailbox address in the system
-// (the internal directory) plus addresses seen in the history of mailboxes the
-// user can access. Past-correspondent harvesting is scoped to accessible
-// mailboxes so one user's history never leaks to another.
+// Recipient suggestions for the composer: addresses of the mailboxes the user
+// can access plus addresses seen in their history. Everything is scoped to
+// accessible mailboxes so one user's addresses/history never leak to another.
 export function contactsRoutes() {
   const r = new Hono<AppBindings>();
 
@@ -39,17 +38,18 @@ export function contactsRoutes() {
       else if (!existing.name && clean) existing.name = clean;
     };
 
-    const dirRows = await db
-      .select({
-        localPart: mailbox.localPart,
-        displayName: mailbox.displayName,
-        domainName: domain.name,
-      })
-      .from(mailbox)
-      .innerJoin(domain, eq(mailbox.domainId, domain.id));
-    for (const m of dirRows) add(`${m.localPart}@${m.domainName}`, m.displayName);
-
     if (accessibleIds.length) {
+      const dirRows = await db
+        .select({
+          localPart: mailbox.localPart,
+          displayName: mailbox.displayName,
+          domainName: domain.name,
+        })
+        .from(mailbox)
+        .innerJoin(domain, eq(mailbox.domainId, domain.id))
+        .where(inArray(mailbox.id, accessibleIds));
+      for (const m of dirRows) add(`${m.localPart}@${m.domainName}`, m.displayName);
+
       const msgs = await db
         .select({
           fromAddr: message.fromAddr,
