@@ -36,9 +36,6 @@ export function DraftList({ mailboxId, view, drafts, loading }: Props) {
       <div className="flex h-full flex-col bg-card">
         <div className="flex h-11 shrink-0 items-center gap-2 border-b px-2">
           <FolderTabs mailboxId={mailboxId} view={view} />
-          <span className="ml-auto pr-1 text-[11px] text-muted-foreground tabular-nums">
-            {drafts.length}
-          </span>
         </div>
         {loading ? (
           <ThreadListSkeleton />
