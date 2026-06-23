@@ -1,13 +1,16 @@
 import { makeDB } from "@cfmail/db";
-import { domain, mailbox } from "@cfmail/db/schema";
-import { and, eq, isNotNull, isNull, lte, or } from "drizzle-orm";
+import { domain, mailbox, thread } from "@cfmail/db/schema";
+import { and, eq, inArray, isNotNull, isNull, lte, or } from "drizzle-orm";
 import type { Env } from "./env.ts";
 import { broadcastToUsers } from "./hub.ts";
-import { collectMailboxBlobKeys, deleteBlobs } from "./mail/blobs.ts";
+import { collectMailboxBlobKeys, collectThreadBlobKeys, deleteBlobs } from "./mail/blobs.ts";
 import { checkDomainHealth } from "./mail/dns.ts";
 
 const DNS_RECHECK_INTERVAL_MS = 60 * 60 * 1000;
 const DNS_BATCH_LIMIT = 10;
+// Threads trashed longer than this are permanently purged by the cron.
+const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const TRASH_PURGE_LIMIT = 500;
 
 export async function runCron(env: Env, now: Date): Promise<void> {
   const db = makeDB(env.DB);
@@ -29,6 +32,23 @@ export async function runCron(env: Env, now: Date): Promise<void> {
       });
     }),
   );
+
+  // Purge threads that have sat in the trash past the retention window.
+  // Deleting the thread cascades to its messages/attachments via FKs; blobs
+  // (R2) have no cascade, so drop those first.
+  const trashCutoff = new Date(now.getTime() - TRASH_RETENTION_MS);
+  const staleTrash = await db
+    .select({ id: thread.id })
+    .from(thread)
+    .where(and(eq(thread.trashed, true), lte(thread.trashedAt, trashCutoff)))
+    .limit(TRASH_PURGE_LIMIT);
+
+  if (staleTrash.length) {
+    const ids = staleTrash.map((t) => t.id);
+    const keys = await collectThreadBlobKeys(db, ids);
+    await deleteBlobs(env, keys);
+    await db.delete(thread).where(inArray(thread.id, ids));
+  }
 
   const stale = new Date(now.getTime() - DNS_RECHECK_INTERVAL_MS);
   const dueDomains = await db

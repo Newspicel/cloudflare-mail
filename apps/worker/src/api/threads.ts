@@ -149,9 +149,10 @@ export function threadsRoutes() {
 
     // Trash and spam are mutually exclusive buckets: entering one clears the
     // other so a thread only ever shows up in a single folder.
-    const patch: Partial<{ trashed: boolean; spam: boolean }> = {};
+    const patch: Partial<{ trashed: boolean; trashedAt: Date | null; spam: boolean }> = {};
     if (body.trashed !== undefined) {
       patch.trashed = body.trashed;
+      patch.trashedAt = body.trashed ? new Date() : null;
       if (body.trashed && body.spam === undefined) patch.spam = false;
     }
     if (body.spam !== undefined) {

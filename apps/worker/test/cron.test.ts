@@ -219,3 +219,51 @@ describe("runCron — temp mailbox GC", () => {
     expect(await e.BLOBS.head(PERSONAL_RAW)).not.toBeNull();
   });
 });
+
+describe("runCron — trash retention purge", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+
+  it("purges threads trashed past the retention window, with their blobs", async () => {
+    const now = new Date();
+    await seed(now);
+
+    // thread-personal trashed 31 days ago → purged.
+    await db
+      .update(thread)
+      .set({ trashed: true, trashedAt: new Date(now.getTime() - 31 * DAY) })
+      .where(eq(thread.id, "thread-personal"));
+    // thread-fresh trashed 5 days ago → kept.
+    await db
+      .update(thread)
+      .set({ trashed: true, trashedAt: new Date(now.getTime() - 5 * DAY) })
+      .where(eq(thread.id, "thread-fresh"));
+
+    await runCron(e, now);
+
+    expect(
+      await db.query.thread.findFirst({ where: eq(thread.id, "thread-personal") }),
+    ).toBeUndefined();
+    expect(await db.query.message.findFirst({ where: eq(message.id, "msg-3") })).toBeUndefined();
+    expect(await e.BLOBS.head(PERSONAL_RAW)).toBeNull();
+
+    expect(await db.query.thread.findFirst({ where: eq(thread.id, "thread-fresh") })).toBeDefined();
+    expect(await e.BLOBS.head(FRESH_RAW)).not.toBeNull();
+  });
+
+  it("leaves trashed threads with a null trashedAt alone", async () => {
+    const now = new Date();
+    await seed(now);
+
+    await db
+      .update(thread)
+      .set({ trashed: true, trashedAt: null })
+      .where(eq(thread.id, "thread-personal"));
+
+    await runCron(e, now);
+
+    expect(
+      await db.query.thread.findFirst({ where: eq(thread.id, "thread-personal") }),
+    ).toBeDefined();
+    expect(await e.BLOBS.head(PERSONAL_RAW)).not.toBeNull();
+  });
+});

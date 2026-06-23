@@ -258,12 +258,16 @@ export const thread = sqliteTable(
       .default(sql`'[]'`),
     unreadCount: integer("unread_count").notNull().default(0),
     trashed: integer("trashed", { mode: "boolean" }).notNull().default(false),
+    // When the thread entered the trash; null unless trashed. The cron purges
+    // threads trashed longer than the retention window.
+    trashedAt: integer("trashed_at", { mode: "timestamp" }),
     spam: integer("spam", { mode: "boolean" }).notNull().default(false),
   },
   (t) => [
     index("thread_mailbox_last_idx").on(t.mailboxId, t.lastMsgAt),
     index("thread_mailbox_subject_idx").on(t.mailboxId, t.subjectNorm),
     index("thread_mailbox_state_idx").on(t.mailboxId, t.trashed, t.spam),
+    index("thread_trashed_at_idx").on(t.trashedAt),
   ],
 );
 
