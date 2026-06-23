@@ -249,10 +249,16 @@ export const adminCreateMailbox = z.object({
   displayName: z.string().max(200).optional(),
 });
 
-// Admin: hand a mailbox to a different owner.
-export const migrateMailbox = z.object({
-  ownerUserId: z.string().min(1),
-});
+// Admin: hand a mailbox to a different owner and/or switch it between the
+// personal and group types. At least one change must be supplied.
+export const migrateMailbox = z
+  .object({
+    ownerUserId: z.string().min(1).optional(),
+    type: z.enum(["personal", "group"]).optional(),
+  })
+  .refine((v) => v.ownerUserId !== undefined || v.type !== undefined, {
+    message: "nothing to change",
+  });
 
 // Admin: delete a mailbox, optionally leaving a redirect at its old address.
 export const adminDeleteMailbox = z.object({

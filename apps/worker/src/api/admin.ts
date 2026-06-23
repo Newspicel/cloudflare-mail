@@ -1,4 +1,12 @@
-import { domain, mailbox, mailboxSpamUsage, message, redirect, user } from "@cfmail/db/schema";
+import {
+  domain,
+  mailbox,
+  mailboxMember,
+  mailboxSpamUsage,
+  message,
+  redirect,
+  user,
+} from "@cfmail/db/schema";
 import {
   adminCreateMailbox,
   adminDeleteMailbox,
@@ -115,14 +123,31 @@ export function adminRoutes() {
     if (mb.type === "temp")
       throw new HTTPException(400, { message: "temp mailboxes cannot be migrated" });
 
-    const owner = await db.query.user.findFirst({
-      where: eq(user.id, body.ownerUserId),
-      columns: { id: true },
-    });
-    if (!owner) throw new HTTPException(400, { message: "owner not found" });
-    if (owner.id === mb.ownerUserId) return c.json({ ok: true });
+    const patch: { ownerUserId?: string; type?: "personal" | "group" } = {};
 
-    await db.update(mailbox).set({ ownerUserId: body.ownerUserId }).where(eq(mailbox.id, id));
+    if (body.ownerUserId !== undefined && body.ownerUserId !== mb.ownerUserId) {
+      const owner = await db.query.user.findFirst({
+        where: eq(user.id, body.ownerUserId),
+        columns: { id: true },
+      });
+      if (!owner) throw new HTTPException(400, { message: "owner not found" });
+      patch.ownerUserId = body.ownerUserId;
+    }
+
+    if (body.type !== undefined && body.type !== mb.type) {
+      // Only the personal⇄group pair is interchangeable; service is key-driven.
+      if (mb.type === "service")
+        throw new HTTPException(400, { message: "service mailboxes cannot change type" });
+      patch.type = body.type;
+    }
+
+    if (patch.ownerUserId === undefined && patch.type === undefined) return c.json({ ok: true });
+
+    // A personal mailbox is single-owner — shed shared members on the way down.
+    if (patch.type === "personal")
+      await db.delete(mailboxMember).where(eq(mailboxMember.mailboxId, id));
+
+    await db.update(mailbox).set(patch).where(eq(mailbox.id, id));
     return c.json({ ok: true });
   });
 
