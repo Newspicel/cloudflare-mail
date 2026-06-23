@@ -7,7 +7,9 @@
     "paths": {
       "@/*": ["./src/*"],
       "@cfmail/shared": ["../../packages/shared/src/index.ts"],
-      "@cfmail/shared/*": ["../../packages/shared/src/*"]
+      "@cfmail/shared/*": ["../../packages/shared/src/*"],
+      "@cfmail/db": ["../../packages/db/src/index.ts"],
+      "@cfmail/db/*": ["../../packages/db/src/*"]
     }
   },
   "include": ["src/**/*", "vite.config.ts", "../../packages/shared/src/**/*"]

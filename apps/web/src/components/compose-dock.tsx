@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { ApiError, api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
 import { contactsQuery, type DraftRow, type MessageRow, mailboxesQuery } from "@/lib/queries.ts";
+import { keys } from "@/lib/query-keys.ts";
 import {
   AddressField,
   collectRecipients,
@@ -154,9 +155,9 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
 
   const invalidateDrafts = useCallback(() => {
     if (!mailboxId) return;
-    qc.invalidateQueries({ queryKey: ["drafts", mailboxId] });
+    qc.invalidateQueries({ queryKey: keys.drafts(mailboxId) });
     // Refresh the Drafts badge count (keyed under the threads prefix).
-    qc.invalidateQueries({ queryKey: ["threads", mailboxId, "counts"] });
+    qc.invalidateQueries({ queryKey: keys.folderCounts(mailboxId) });
   }, [qc, mailboxId]);
 
   const deleteDraft = useCallback(async () => {
@@ -269,7 +270,7 @@ function ComposePanel({ state: s }: { state: ComposeState }) {
     },
     onSuccess: async () => {
       toast.success("Message sent");
-      qc.invalidateQueries({ queryKey: ["threads", mailboxId] });
+      if (mailboxId) qc.invalidateQueries({ queryKey: keys.threadsRoot(mailboxId) });
       await deleteDraft().catch(() => {});
       closeCompose();
     },

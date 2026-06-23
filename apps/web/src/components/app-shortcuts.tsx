@@ -4,6 +4,7 @@ import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api.ts";
+import { invalidateThreadChange } from "@/lib/invalidate.ts";
 import { type MessageRow, parseMailView, threadQuery, threadsQuery } from "@/lib/queries.ts";
 import { useKeyboardShortcuts } from "@/lib/shortcuts.ts";
 import { openCompose } from "./compose-dock.tsx";
@@ -27,9 +28,7 @@ export function AppShortcuts() {
     mutationFn: (input: { id: string; patch: { trashed?: boolean; spam?: boolean } }) =>
       api(`/api/threads/${input.id}`, { method: "PATCH", body: JSON.stringify(input.patch) }),
     onSuccess: () => {
-      if (mailboxId) qc.invalidateQueries({ queryKey: ["threads", mailboxId] });
-      if (threadId) qc.invalidateQueries({ queryKey: ["thread", threadId] });
-      qc.invalidateQueries({ queryKey: ["mailboxes"] });
+      if (mailboxId) invalidateThreadChange(qc, mailboxId, threadId);
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
@@ -133,8 +132,7 @@ export function AppShortcuts() {
           method: "PATCH",
           body: JSON.stringify({ starred: !hasFlag(last.flags, Flag.STARRED) }),
         }).then(() => {
-          qc.invalidateQueries({ queryKey: ["thread", threadId] });
-          if (mailboxId) qc.invalidateQueries({ queryKey: ["threads", mailboxId] });
+          if (mailboxId) invalidateThreadChange(qc, mailboxId, threadId);
         }),
       );
       return;
@@ -146,8 +144,7 @@ export function AppShortcuts() {
           method: "PATCH",
           body: JSON.stringify({ seen: false }),
         }).then(() => {
-          if (mailboxId) qc.invalidateQueries({ queryKey: ["threads", mailboxId] });
-          qc.invalidateQueries({ queryKey: ["mailboxes"] });
+          if (mailboxId) invalidateThreadChange(qc, mailboxId, threadId);
         }),
       );
       return;

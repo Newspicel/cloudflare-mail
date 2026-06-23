@@ -5,7 +5,15 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
+import {
+  invalidateThreadChange,
+  patchThreadsInLists,
+  removeThreadsFromLists,
+  restoreSnapshot,
+  snapshotMailboxThreads,
+} from "@/lib/invalidate.ts";
 import type { MailView, ThreadRow } from "@/lib/queries.ts";
+import { keys } from "@/lib/query-keys.ts";
 import { formatRemaining, useNow } from "@/lib/time.ts";
 import { FOLDER_META, FolderTabs } from "./folder-tabs.tsx";
 import { Button } from "./ui/button.tsx";
@@ -44,12 +52,19 @@ export function ThreadList({
         ),
       );
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["threads", mailboxId] });
-      qc.invalidateQueries({ queryKey: ["mailboxes"] });
+    onMutate: async () => {
+      const ids = [...selected];
+      await qc.cancelQueries({ queryKey: keys.threadsRoot(mailboxId) });
+      const snapshot = snapshotMailboxThreads(qc, mailboxId);
+      removeThreadsFromLists(qc, mailboxId, ids);
       setSelected(new Set());
+      return { snapshot };
     },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+    onError: (e: unknown, _patch, ctx) => {
+      if (ctx) restoreSnapshot(qc, ctx.snapshot);
+      toast.error(e instanceof Error ? e.message : "Failed");
+    },
+    onSettled: () => invalidateThreadChange(qc, mailboxId),
   });
 
   function toggle(id: string) {
@@ -195,11 +210,21 @@ function ThreadRowItem({
   const patch = useMutation({
     mutationFn: (body: { trashed?: boolean; read?: boolean }) =>
       api(`/api/threads/${thread.id}`, { method: "PATCH", body: JSON.stringify(body) }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["threads", mailboxId] });
-      qc.invalidateQueries({ queryKey: ["mailboxes"] });
+    onMutate: async (body) => {
+      await qc.cancelQueries({ queryKey: keys.threadsRoot(mailboxId) });
+      const snapshot = snapshotMailboxThreads(qc, mailboxId);
+      if (body.trashed !== undefined) {
+        removeThreadsFromLists(qc, mailboxId, [thread.id]);
+      } else if (body.read !== undefined) {
+        patchThreadsInLists(qc, mailboxId, [thread.id], { unreadCount: body.read ? 0 : 1 });
+      }
+      return { snapshot };
     },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+    onError: (e: unknown, _body, ctx) => {
+      if (ctx) restoreSnapshot(qc, ctx.snapshot);
+      toast.error(e instanceof Error ? e.message : "Failed");
+    },
+    onSettled: () => invalidateThreadChange(qc, mailboxId, thread.id),
   });
 
   return (

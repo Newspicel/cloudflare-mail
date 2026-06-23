@@ -1,4 +1,5 @@
 import { domain, mailbox, mailboxMember, message } from "@cfmail/db/schema";
+import type { ContactsDto } from "@cfmail/shared/responses";
 import { desc, eq, inArray } from "drizzle-orm";
 import { Hono } from "hono";
 import { dbFromCtx } from "../db.ts";
@@ -69,7 +70,7 @@ export function contactsRoutes() {
       }
     }
 
-    return c.json({ contacts: [...map.values()] });
+    return c.json({ contacts: [...map.values()] } satisfies ContactsDto);
   });
 
   return r;

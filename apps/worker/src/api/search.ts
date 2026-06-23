@@ -1,5 +1,6 @@
 import { domain, mailbox, mailboxMember } from "@cfmail/db/schema";
 import { has, Perm } from "@cfmail/shared/permissions";
+import type { SearchResultsDto } from "@cfmail/shared/responses";
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -19,7 +20,7 @@ export function searchRoutes() {
     const user = c.get("user")!;
     const rawQ = c.req.query("q") ?? "";
     const matchExpr = toFtsMatch(rawQ);
-    if (!matchExpr) return c.json({ results: [] });
+    if (!matchExpr) return c.json({ results: [] } satisfies SearchResultsDto);
 
     const limit = Math.min(Number(c.req.query("limit") ?? DEFAULT_LIMIT), MAX_LIMIT);
     const mailboxFilter = c.req.query("mailboxId")?.trim() || null;
@@ -58,7 +59,7 @@ export function searchRoutes() {
       addressById.clear();
       addressById.set(mailboxFilter, addr);
     }
-    if (addressById.size === 0) return c.json({ results: [] });
+    if (addressById.size === 0) return c.json({ results: [] } satisfies SearchResultsDto);
 
     const ids = [...addressById.keys()];
     const placeholders = ids.map(() => "?").join(",");
@@ -111,7 +112,7 @@ export function searchRoutes() {
       sentAt: row.sentAt ? new Date(row.sentAt * 1000).toISOString() : null,
     }));
 
-    return c.json({ results });
+    return c.json({ results } satisfies SearchResultsDto);
   });
 
   return r;

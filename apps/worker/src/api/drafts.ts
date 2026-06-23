@@ -9,6 +9,7 @@ import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
 import { requireUser } from "../middleware.ts";
 import { requirePerm } from "../permissions.ts";
+import { serializeDraft } from "./serialize.ts";
 
 export function draftsRoutes() {
   const r = new Hono<AppBindings>();
@@ -27,14 +28,14 @@ export function draftsRoutes() {
       .from(draft)
       .where(and(eq(draft.mailboxId, mailboxId), eq(draft.userId, user.id)))
       .orderBy(desc(draft.updatedAt));
-    return c.json({ drafts: rows });
+    return c.json({ drafts: rows.map(serializeDraft) });
   });
 
   r.get("/:id", async (c) => {
     const db = dbFromCtx(c);
     const user = c.get("user")!;
     const row = await loadOwn(db, c.req.param("id"), user.id);
-    return c.json({ draft: row });
+    return c.json({ draft: serializeDraft(row) });
   });
 
   r.post("/", zValidator("json", createDraft), async (c) => {
@@ -59,7 +60,8 @@ export function draftsRoutes() {
       attachments: body.attachments,
     });
     const row = await db.query.draft.findFirst({ where: eq(draft.id, id) });
-    return c.json({ draft: row }, 201);
+    if (!row) throw new HTTPException(500, { message: "draft not found after insert" });
+    return c.json({ draft: serializeDraft(row) }, 201);
   });
 
   r.patch("/:id", zValidator("json", updateDraft), async (c) => {
@@ -82,7 +84,8 @@ export function draftsRoutes() {
 
     await db.update(draft).set(patch).where(eq(draft.id, id));
     const row = await db.query.draft.findFirst({ where: eq(draft.id, id) });
-    return c.json({ draft: row });
+    if (!row) throw new HTTPException(404, { message: "not found" });
+    return c.json({ draft: serializeDraft(row) });
   });
 
   r.delete("/:id", async (c) => {

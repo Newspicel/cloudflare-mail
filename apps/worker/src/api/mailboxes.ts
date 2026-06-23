@@ -9,6 +9,7 @@ import {
   user,
 } from "@cfmail/db/schema";
 import { grant, Perm } from "@cfmail/shared/permissions";
+import type { MailboxListDto } from "@cfmail/shared/responses";
 import {
   createMailbox,
   createShareToken,
@@ -108,8 +109,12 @@ export function mailboxesRoutes() {
     const unreadMap = new Map(unreadRows.map((row) => [row.mailboxId, row.c]));
 
     return c.json({
-      mailboxes: all.map((m) => ({ ...m, unread: unreadMap.get(m.id) ?? 0 })),
-    });
+      mailboxes: all.map((m) => ({
+        ...m,
+        expiresAt: m.expiresAt?.toISOString() ?? null,
+        unread: unreadMap.get(m.id) ?? 0,
+      })),
+    } satisfies MailboxListDto);
   });
 
   r.post("/", zValidator("json", createMailbox), async (c) => {
