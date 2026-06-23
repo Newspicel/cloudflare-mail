@@ -14,6 +14,7 @@ import type { Env } from "../env.ts";
 import { broadcastToUsers } from "../hub.ts";
 import { addrsToText, bodyForIndex, parseMime, snippet, streamToArrayBuffer } from "./mime.ts";
 import { notifyMailbox } from "./push.ts";
+import type { AuthResult } from "./spam.ts";
 import { evaluateSpam, type SpamEvaluation } from "./spam.ts";
 import { bumpThread, resolveThreadId } from "./threads.ts";
 
@@ -131,21 +132,26 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
   if (fromName) fromParticipant.name = fromName;
   const participants = [fromParticipant, ...toAddrs, ...ccAddrs].filter((p) => p.address);
 
-  const threadId = await resolveThreadId(db, {
+  const { threadId, joinedByHeader } = await resolveThreadId(db, {
     mailboxId: mb.id,
     subject: parsed.subject ?? "",
     inReplyTo: parsed.inReplyTo ?? null,
     references: parsed.references ? parsed.references.split(/\s+/).filter(Boolean) : null,
     participants,
+    fromAddr,
   });
 
-  // Only a brand-new thread is auto-filed under Spam — never yank an existing
-  // legitimate conversation into the spam folder over a single message.
+  // A brand-new thread is auto-filed under Spam — never yank an existing
+  // legitimate conversation into the spam folder over a single message. The one
+  // exception is a header-based join of unauthenticated mail: those splices are
+  // attacker-influenced, so we don't let them launder spam into a real thread.
   const existingThread = await db.query.thread.findFirst({
     where: eq(thread.id, threadId),
     columns: { msgCount: true },
   });
   const isNewThread = (existingThread?.msgCount ?? 0) === 0;
+  const fileSpam =
+    !!spam?.folderSpam && (isNewThread || (joinedByHeader && !isAuthenticated(spam.auth)));
 
   const receivedAt = new Date();
   const bodyIndex = bodyForIndex(parsed.text, parsed.html);
@@ -179,7 +185,7 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
     spamAuth: spam ? spam.auth : null,
   });
 
-  if (spam?.folderSpam && isNewThread) {
+  if (fileSpam) {
     await db.update(thread).set({ spam: true }).where(eq(thread.id, threadId));
   }
 
@@ -223,10 +229,14 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
 
   // Don't push-notify mail filed straight into Spam.
   if (spam?.verdict !== "spam") {
+    // Surface the authentication result so a spoofed From isn't rendered as a
+    // trusted sender in the notification.
+    const sender = fromName ? `${fromName} <${fromAddr}>` : fromAddr;
+    const unverified = spam ? !isAuthenticated(spam.auth) : false;
     await notifyMailbox(db, {
       mailboxId: mb.id,
       userIds: [...userIds],
-      title: fromName ? `${fromName} <${fromAddr}>` : fromAddr,
+      title: unverified ? `⚠ Unverified sender: ${sender}` : sender,
       body: parsed.subject?.trim() ? parsed.subject : "(no subject)",
       url: `/app/m/${mb.id}/t/${threadId}`,
     });
@@ -234,6 +244,13 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
 
   // Mark as unseen by default (the Flag.SEEN bit is 0 so nothing to do).
   void Flag;
+}
+
+// The sender is authenticated when DMARC passes, or both SPF and DKIM pass.
+// Unauthenticated mail is treated as potentially forged for spam-filing and
+// notification purposes.
+function isAuthenticated(auth: AuthResult): boolean {
+  return auth.dmarc === "pass" || (auth.spf === "pass" && auth.dkim === "pass");
 }
 
 function normalizeAddr(a: { name?: string; address?: string }): { name?: string; address: string } {

@@ -237,12 +237,35 @@ function showsDeliveredTo(msg: MessageRow): boolean {
   return !msg.toAddrs.some((a) => a.address.trim().toLowerCase() === to);
 }
 
+// Interpret the parsed Authentication-Results summary. "fail" means the sender
+// is likely forged; "unverified" means we couldn't confirm it (no/none auth).
+function authStatus(auth: MessageRow["spamAuth"]): "pass" | "fail" | "unverified" | null {
+  if (!auth) return null;
+  if (auth.dmarc === "pass" || (auth.spf === "pass" && auth.dkim === "pass")) return "pass";
+  if (auth.dmarc === "fail" || (auth.spf === "fail" && auth.dkim === "fail")) return "fail";
+  if (!auth.spf && !auth.dkim && !auth.dmarc) return null;
+  return "unverified";
+}
+
 function SpamBanner({ msg }: { msg: MessageRow }) {
   if (msg.direction !== "in") return null;
   const verdict = msg.spamVerdict;
-  if (verdict !== "spam" && verdict !== "suspicious") return null;
-  const reasons = msg.spamReasons ?? [];
+  const auth = authStatus(msg.spamAuth);
+  const flagged = verdict === "spam" || verdict === "suspicious";
+  // Surface a sender-authentication warning even when the message wasn't
+  // classified as spam — a spoofed From must not be rendered as trusted.
+  if (!flagged && auth !== "fail") return null;
+
+  const reasons = [...(msg.spamReasons ?? [])];
+  if (auth === "fail" && !reasons.length) {
+    reasons.push("The sender's address could not be verified — it may be forged (spoofed).");
+  }
   const isSpam = verdict === "spam";
+  const title = isSpam
+    ? "This message was flagged as spam"
+    : verdict === "suspicious"
+      ? "This message looks suspicious"
+      : "Could not verify this sender";
   return (
     <div
       className={cn(
@@ -254,9 +277,7 @@ function SpamBanner({ msg }: { msg: MessageRow }) {
     >
       <ShieldAlert className="mt-0.5 size-4 shrink-0" />
       <div>
-        <div className="font-semibold">
-          {isSpam ? "This message was flagged as spam" : "This message looks suspicious"}
-        </div>
+        <div className="font-semibold">{title}</div>
         {reasons.length > 0 && (
           <ul className="mt-0.5 list-disc space-y-0.5 pl-4">
             {reasons.map((r) => (

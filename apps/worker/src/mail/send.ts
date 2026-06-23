@@ -115,12 +115,14 @@ export async function sendFromMailbox(
   const sentAt = new Date();
   const messageId = crypto.randomUUID();
 
-  const threadId = await resolveThreadId(db, {
+  const { threadId } = await resolveThreadId(db, {
     mailboxId: mb.id,
     subject: input.subject,
     inReplyTo: input.inReplyTo ?? null,
     references: input.references ?? null,
     participants: [{ name: fromName, address: fromAddr }, ...allRecipients],
+    fromAddr,
+    trustHeaders: true,
   });
 
   const raw = buildMime({
