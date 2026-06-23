@@ -1,8 +1,9 @@
 import { Link } from "@tanstack/react-router";
+import { Mails } from "lucide-react";
 import type * as React from "react";
 import { cn } from "@/lib/cn.ts";
 import { setThreadDrag } from "@/lib/dnd.ts";
-import type { MailView, ThreadRow } from "@/lib/queries.ts";
+import type { MailView, MessageLabel, ThreadRow } from "@/lib/queries.ts";
 import { formatTime } from "@/lib/time.ts";
 
 // Where the row links to. The shape also decides the drag payload (folder rows
@@ -17,13 +18,23 @@ interface Props {
   active: boolean;
   /** Multi-select highlight (mailbox lists only). */
   selected?: boolean;
+  /** Distinct labels across the thread's messages, shown as chips. */
+  labels?: MessageLabel[];
   /** Leading column, e.g. the select checkbox. */
   leading?: React.ReactNode;
   /** Hover action cluster; omit to hide it (e.g. while selecting). */
   actions?: React.ReactNode;
 }
 
-export function ThreadRowView({ thread, link, active, selected = false, leading, actions }: Props) {
+export function ThreadRowView({
+  thread,
+  link,
+  active,
+  selected = false,
+  labels,
+  leading,
+  actions,
+}: Props) {
   const firstParticipant = thread.participants[0];
   const label = firstParticipant?.name ?? firstParticipant?.address ?? "(unknown)";
   const unread = thread.unreadCount > 0;
@@ -66,11 +77,29 @@ export function ThreadRowView({ thread, link, active, selected = false, leading,
           />
         )}
         {thread.msgCount > 1 && (
-          <span className="ml-auto shrink-0 rounded border bg-muted px-1 font-medium text-[10px] text-muted-foreground">
+          <span
+            className="ml-auto inline-flex shrink-0 items-center gap-0.5 rounded border bg-muted px-1 font-medium text-[10px] text-muted-foreground"
+            title={`${thread.msgCount} messages in this thread`}
+          >
+            <Mails className="h-2.5 w-2.5" />
             {thread.msgCount}
           </span>
         )}
       </div>
+      {labels && labels.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {labels.map((l) => (
+            <span
+              key={l.id}
+              className="inline-flex items-center gap-1 rounded-full border px-1.5 py-px font-medium text-[10px]"
+              style={{ borderColor: l.color, color: l.color }}
+            >
+              <span className="h-1.5 w-1.5 rounded-sm" style={{ backgroundColor: l.color }} />
+              {l.name}
+            </span>
+          ))}
+        </div>
+      )}
     </>
   );
 

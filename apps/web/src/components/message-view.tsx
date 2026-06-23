@@ -32,7 +32,6 @@ import { openCompose } from "./compose-dock.tsx";
 import { EmailFrame } from "./email-frame.tsx";
 import { LabelChips, LabelsMenu } from "./labels-menu.tsx";
 import { MoveToFolderMenu } from "./move-to-folder-menu.tsx";
-import { Badge } from "./ui/badge.tsx";
 import { Button } from "./ui/button.tsx";
 import { IconButton } from "./ui/icon-button.tsx";
 import { Tooltip, TooltipProvider } from "./ui/tooltip.tsx";
@@ -206,14 +205,6 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
       </div>
     </TooltipProvider>
   );
-}
-
-// Show the envelope recipient when it isn't already one of the visible To
-// addresses — i.e. mail that arrived via a redirect/alias or Bcc.
-function showsDeliveredTo(msg: MessageRow): boolean {
-  if (msg.direction !== "in" || !msg.deliveredTo) return false;
-  const to = msg.deliveredTo.trim().toLowerCase();
-  return !msg.toAddrs.some((a) => a.address.trim().toLowerCase() === to);
 }
 
 // Interpret the parsed Authentication-Results summary. "fail" means the sender
@@ -403,11 +394,6 @@ function MessageCard({
               </div>
             )}
           </div>
-          {showsDeliveredTo(msg) && (
-            <Badge variant="default" className="mt-1">
-              Delivered to {msg.deliveredTo}
-            </Badge>
-          )}
           <LabelChips messageId={msg.id} className="mt-1.5" />
         </div>
         <div className="flex shrink-0 flex-col items-end gap-2">

@@ -1,9 +1,15 @@
+import { useQuery } from "@tanstack/react-query";
 import { ArchiveRestore, Inbox, Mail, MailOpen, ShieldAlert, Timer, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
 import { patchThreadsInLists, removeThreadsFromLists } from "@/lib/invalidate.ts";
-import type { MailView, ThreadRow } from "@/lib/queries.ts";
+import {
+  type MailView,
+  type MessageLabel,
+  type ThreadRow,
+  threadLabelsQuery,
+} from "@/lib/queries.ts";
 import { useThreadListMutation } from "@/lib/thread-mutations.ts";
 import { formatRemaining, useNow } from "@/lib/time.ts";
 import { FOLDER_META, FolderTabs } from "./folder-tabs.tsx";
@@ -33,6 +39,9 @@ export function ThreadList({
   const meta = FOLDER_META[view];
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const selecting = selected.size > 0;
+
+  const labelsQ = useQuery(threadLabelsQuery(threads.map((t) => t.id)));
+  const labelsByThread = labelsQ.data?.labels;
 
   const bulk = useThreadListMutation<{ trashed?: boolean; spam?: boolean }>({
     mailboxId,
@@ -122,6 +131,7 @@ export function ThreadList({
                 mailboxId={mailboxId}
                 view={view}
                 thread={t}
+                labels={labelsByThread?.[t.id]}
                 active={t.id === selectedThreadId}
                 selected={selected.has(t.id)}
                 selecting={selecting}
@@ -139,6 +149,7 @@ function ThreadRowItem({
   mailboxId,
   view,
   thread,
+  labels,
   active,
   selected,
   selecting,
@@ -147,6 +158,7 @@ function ThreadRowItem({
   mailboxId: string;
   view: MailView;
   thread: ThreadRow;
+  labels?: MessageLabel[];
   active: boolean;
   selected: boolean;
   selecting: boolean;
@@ -172,6 +184,7 @@ function ThreadRowItem({
       link={{ kind: "mailbox", mailboxId, view }}
       active={active}
       selected={selected}
+      labels={labels}
       leading={
         <div
           className={cn(

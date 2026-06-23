@@ -1,6 +1,12 @@
+import { useQuery } from "@tanstack/react-query";
 import { Folder as FolderIcon, FolderInput, Mail, MailOpen } from "lucide-react";
 import { api } from "@/lib/api.ts";
-import type { FolderRow, ThreadRow } from "@/lib/queries.ts";
+import {
+  type FolderRow,
+  type MessageLabel,
+  type ThreadRow,
+  threadLabelsQuery,
+} from "@/lib/queries.ts";
 import { useThreadListMutation } from "@/lib/thread-mutations.ts";
 import { useUnfileThread } from "@/lib/use-folder-mutations.ts";
 import { ThreadRowView } from "./thread-row.tsx";
@@ -17,6 +23,8 @@ interface Props {
 }
 
 export function FolderThreadList({ folder, folderId, threads, loading, selectedThreadId }: Props) {
+  const labelsQ = useQuery(threadLabelsQuery(threads.map((t) => t.id)));
+  const labelsByThread = labelsQ.data?.labels;
   return (
     <TooltipProvider delay={400}>
       <div className="flex h-full flex-col bg-card">
@@ -46,6 +54,7 @@ export function FolderThreadList({ folder, folderId, threads, loading, selectedT
                 key={t.id}
                 folderId={folderId}
                 thread={t}
+                labels={labelsByThread?.[t.id]}
                 active={t.id === selectedThreadId}
               />
             ))}
@@ -59,10 +68,12 @@ export function FolderThreadList({ folder, folderId, threads, loading, selectedT
 function FolderRowItem({
   folderId,
   thread,
+  labels,
   active,
 }: {
   folderId: string;
   thread: ThreadRow;
+  labels?: MessageLabel[];
   active: boolean;
 }) {
   const unfile = useUnfileThread();
@@ -80,6 +91,7 @@ function FolderRowItem({
       thread={thread}
       link={{ kind: "folder", folderId }}
       active={active}
+      labels={labels}
       actions={
         <>
           <IconButton

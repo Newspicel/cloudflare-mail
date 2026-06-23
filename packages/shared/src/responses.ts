@@ -156,6 +156,10 @@ export interface FolderListDto {
 export interface MessageLabelsDto {
   labels: Record<string, MessageLabelDto[]>;
 }
+/** Distinct labels per thread id (aggregated across the thread's messages). */
+export interface ThreadLabelsDto {
+  labels: Record<string, MessageLabelDto[]>;
+}
 export interface SearchResultsDto {
   results: SearchResultDto[];
   hasMore: boolean;
