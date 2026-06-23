@@ -24,7 +24,7 @@ async function seed(): Promise<void> {
     { id: MEMBER_ID, name: "Member", email: "member@example.com" },
     { id: OUTSIDER_ID, name: "Outsider", email: "outsider@example.com" },
   ]);
-  await db.insert(domain).values({ id: DOMAIN_ID, name: "example.com", kind: "primary" });
+  await db.insert(domain).values({ id: DOMAIN_ID, name: "example.com" });
   await db.insert(mailbox).values([
     {
       id: MAILBOX_ID,

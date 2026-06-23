@@ -1,6 +1,5 @@
 import {
   BLOCK_ENTRY_TYPES,
-  DOMAIN_KINDS,
   EDITOR_FORMATS,
   MAILBOX_TYPES,
   MESSAGE_DIRECTIONS,
@@ -19,9 +18,6 @@ import { z } from "zod";
 // Zod input contracts can never drift from the DB columns.
 export const MailboxType = z.enum(MAILBOX_TYPES);
 export type MailboxType = z.infer<typeof MailboxType>;
-
-export const DomainKind = z.enum(DOMAIN_KINDS);
-export type DomainKind = z.infer<typeof DomainKind>;
 
 export const MessageDirection = z.enum(MESSAGE_DIRECTIONS);
 export type MessageDirection = z.infer<typeof MessageDirection>;
@@ -73,7 +69,6 @@ const allowedKinds = z.number().int().min(0).max(15); // 4 bits
 
 export const createDomain = z.object({
   name: domainName,
-  kind: DomainKind,
   allowedKinds: allowedKinds.default(0),
 });
 

@@ -27,7 +27,7 @@ async function reset(): Promise<void> {
 
 async function seed(): Promise<{ rawKey: string; attKey: string; otherRawKey: string }> {
   await db.insert(user).values({ id: USER_ID, name: "U", email: "u@example.com" });
-  await db.insert(domain).values({ id: DOMAIN_ID, name: "example.com", kind: "primary" });
+  await db.insert(domain).values({ id: DOMAIN_ID, name: "example.com" });
   await db.insert(mailbox).values([
     { id: MAILBOX_A, domainId: DOMAIN_ID, localPart: "a", type: "personal", ownerUserId: USER_ID },
     { id: MAILBOX_B, domainId: DOMAIN_ID, localPart: "b", type: "personal", ownerUserId: USER_ID },
