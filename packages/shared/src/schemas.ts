@@ -9,11 +9,14 @@ export type DomainKind = z.infer<typeof DomainKind>;
 export const MessageDirection = z.enum(["in", "out"]);
 export type MessageDirection = z.infer<typeof MessageDirection>;
 
+// No "+" — it is reserved for plus/sub-addressing, which routes to the base
+// mailbox (see mail/receive.ts). Allowing it in a real local part would shadow
+// every "<base>+anything@" alias of an existing mailbox.
 const localPart = z
   .string()
   .min(1)
   .max(64)
-  .regex(/^[a-z0-9](?:[a-z0-9._+-]*[a-z0-9])?$/i, "invalid local part");
+  .regex(/^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/i, "invalid local part");
 
 const domainName = z
   .string()
@@ -92,6 +95,13 @@ const draftAttachment = z.object({
   sizeBytes: z.number().int().min(0),
 });
 
+// Reference to an original message to quote in a reply/forward. The server
+// resolves the quoted body from the raw `.eml` at send time (mail/quote.ts).
+export const messageQuoteRef = z.object({
+  messageId: z.string().min(1),
+  kind: z.enum(["reply", "forward"]),
+});
+
 export const createDraft = z.object({
   mailboxId: z.string().min(1),
   to: z.array(addressObject).max(100).default([]),
@@ -102,6 +112,7 @@ export const createDraft = z.object({
   markdown: z.boolean().default(false),
   inReplyTo: z.string().optional(),
   references: z.array(z.string()).optional(),
+  quote: messageQuoteRef.nullish(),
   attachments: z.array(draftAttachment).max(20).default([]),
 });
 export type CreateDraftInput = z.infer<typeof createDraft>;
@@ -115,6 +126,7 @@ export const updateDraft = z.object({
   markdown: z.boolean().optional(),
   inReplyTo: z.string().optional(),
   references: z.array(z.string()).optional(),
+  quote: messageQuoteRef.nullish(),
   attachments: z.array(draftAttachment).max(20).optional(),
 });
 export type UpdateDraftInput = z.infer<typeof updateDraft>;
@@ -235,6 +247,9 @@ export const sendMessage = z.object({
   html: z.string().max(5_000_000).optional(),
   inReplyTo: z.string().optional(),
   references: z.array(z.string()).optional(),
+  // Reply/forward: the original message to quote below the composed body. The
+  // server fetches its raw `.eml` and appends a formatted quote at send time.
+  quote: messageQuoteRef.optional(),
   attachments: z
     .array(
       z.object({
@@ -249,8 +264,13 @@ export const sendMessage = z.object({
 export type SendMessageInput = z.infer<typeof sendMessage>;
 
 // Key-authed send from a service mailbox — the mailbox is resolved from the
-// bearer key, and attachments (which require pre-uploaded R2 keys) are omitted.
-export const serviceSend = sendMessage.omit({ mailboxId: true, attachments: true });
+// bearer key; attachments (pre-uploaded R2 keys) and reply/forward quoting
+// (resolved from a stored message the key holder can't reference) are omitted.
+export const serviceSend = sendMessage.omit({
+  mailboxId: true,
+  attachments: true,
+  quote: true,
+});
 export type ServiceSendInput = z.infer<typeof serviceSend>;
 
 export const createTempMailbox = z.object({
