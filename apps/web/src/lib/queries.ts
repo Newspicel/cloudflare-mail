@@ -9,6 +9,7 @@ export interface MailboxSummary {
   expiresAt: string | null;
   role: "owner" | "member";
   perms: number;
+  unread: number;
 }
 
 export interface ThreadRow {

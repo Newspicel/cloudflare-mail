@@ -15,6 +15,7 @@ export function connectStream(qc: QueryClient, navigate?: Navigate): () => void 
         case "new_message": {
           qc.invalidateQueries({ queryKey: ["threads", evt.mailboxId] });
           qc.invalidateQueries({ queryKey: ["thread", evt.threadId] });
+          qc.invalidateQueries({ queryKey: ["mailboxes"] });
           notifyNewMessage(qc, evt.mailboxId, evt.threadId, navigate);
           break;
         }

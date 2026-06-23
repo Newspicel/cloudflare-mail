@@ -32,11 +32,9 @@ export function FolderTabs({ mailboxId, view }: { mailboxId: string; view: MailV
         const m = FOLDER_META[v];
         const active = v === view;
         const c = data?.counts[v];
-        // Elevate to the unread count (accent) where it's meaningful, else the
-        // bucket total (muted). No badge for empty folders.
+        // Only surface a badge for unread mail — totals stay out of the tab bar.
         const unread = c?.unread ?? 0;
-        const n = unread > 0 ? unread : (c?.total ?? 0);
-        const label = unread > 0 ? `${m.label} · ${unread} unread` : `${m.label} · ${n}`;
+        const label = unread > 0 ? `${m.label} · ${unread} unread` : m.label;
         return (
           <Tooltip key={v} label={label}>
             <Link
@@ -53,16 +51,9 @@ export function FolderTabs({ mailboxId, view }: { mailboxId: string; view: MailV
               )}
             >
               <m.icon className="h-3.5 w-3.5" />
-              {n > 0 && (
-                <span
-                  className={cn(
-                    "-top-1 -right-1 absolute flex h-3.5 min-w-3.5 items-center justify-center rounded-full px-1 font-medium text-[9px] tabular-nums leading-none",
-                    unread > 0
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted-foreground/25 text-muted-foreground",
-                  )}
-                >
-                  {n > 99 ? "99+" : n}
+              {unread > 0 && (
+                <span className="-top-1 -right-1 absolute flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-1 font-medium text-[9px] text-primary-foreground tabular-nums leading-none">
+                  {unread > 99 ? "99+" : unread}
                 </span>
               )}
             </Link>
