@@ -48,12 +48,7 @@ export function attachmentsRoutes() {
     await requirePerm(db, user.id, row.mailboxId, Perm.READ);
     const obj = await c.env.BLOBS.get(row.r2Key);
     if (!obj) throw new HTTPException(404, { message: "blob missing" });
-    return new Response(obj.body, {
-      headers: {
-        "content-type": row.contentType,
-        "content-disposition": `attachment; filename="${row.filename.replace(/"/g, "_")}"`,
-      },
-    });
+    return new Response(obj.body, { headers: attachmentHeaders(row.contentType, row.filename) });
   });
 
   return r;
@@ -61,4 +56,22 @@ export function attachmentsRoutes() {
 
 function sanitize(name: string): string {
   return name.replace(/[^a-z0-9._-]+/gi, "_").slice(0, 128);
+}
+
+// Content-types that browsers may execute/render inline if sniffed. Serve them
+// as opaque downloads so a malicious email-supplied attachment can't run script
+// in our origin even if a client ignores content-disposition.
+const RENDERABLE =
+  /^(text\/html|text\/xml|application\/xhtml\+xml|image\/svg\+xml|application\/xml)/i;
+
+export function attachmentHeaders(contentType: string, filename: string): Record<string, string> {
+  const safeType =
+    !contentType || RENDERABLE.test(contentType) ? "application/octet-stream" : contentType;
+  return {
+    "content-type": safeType,
+    "content-disposition": `attachment; filename="${filename.replace(/"/g, "_")}"`,
+    // Mirror the image proxy: never sniff, never let the bytes act as anything.
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; sandbox",
+  };
 }
