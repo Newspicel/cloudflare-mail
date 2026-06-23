@@ -83,7 +83,7 @@ export function buildMime(input: BuildMimeInput): string {
 
   for (const att of input.attachments ?? []) {
     msg.addAttachment({
-      filename: att.filename,
+      filename: sanitizeFilename(att.filename),
       contentType: att.contentType,
       data: uint8ToBase64(att.data),
       encoding: "base64",
@@ -91,6 +91,18 @@ export function buildMime(input: BuildMimeInput): string {
   }
 
   return msg.asRaw();
+}
+
+// Strip control chars (incl. CR/LF) so a crafted attachment name can't inject
+// MIME headers into the archived .eml. Quotes/backslashes break param encoding.
+function sanitizeFilename(name: string): string {
+  let clean = "";
+  for (const ch of name) {
+    const c = ch.codePointAt(0)!;
+    if (c < 0x20 || c === 0x7f || ch === '"' || ch === "\\") continue;
+    clean += ch;
+  }
+  return clean.trim().slice(0, 200) || "attachment";
 }
 
 function uint8ToBase64(bytes: Uint8Array): string {

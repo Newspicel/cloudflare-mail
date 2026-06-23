@@ -294,7 +294,7 @@ export function adminRoutes() {
     await authorizeMailboxCreate(db, me, body.domainId, "service");
 
     const id = crypto.randomUUID();
-    const key = crypto.randomUUID();
+    const key = randomToken(32);
     try {
       await db.insert(mailbox).values({
         id,
@@ -321,7 +321,7 @@ export function adminRoutes() {
       columns: { id: true },
     });
     if (!mb) throw new HTTPException(404, { message: "not found" });
-    const key = crypto.randomUUID();
+    const key = randomToken(32);
     await db
       .update(mailbox)
       .set({ serviceKeyHash: await sha256Hex(key) })
@@ -437,4 +437,13 @@ export function adminRoutes() {
   });
 
   return r;
+}
+
+// URL-safe base64 token from `byteLen` random bytes (32 = 256 bits).
+function randomToken(byteLen: number): string {
+  const bytes = new Uint8Array(byteLen);
+  crypto.getRandomValues(bytes);
+  let s = "";
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
