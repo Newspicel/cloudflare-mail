@@ -29,21 +29,12 @@ const CSP = [
   "frame-ancestors 'none'",
 ].join("; ");
 
-// Report-Only ships the policy without enforcing it, so a wrong directive can't
-// break the live app. Flip to `false` once the app has been verified to load
-// clean under the policy (watch the console / violation reports for breakage) —
-// especially that message bodies still render in their srcdoc iframe.
-const CSP_REPORT_ONLY = true;
-
 // The app shell carries no security headers of its own; attach them as the
 // asset response streams back. Headers from `ASSETS.fetch` are immutable, so
 // re-wrap before mutating.
 function withSecurityHeaders(res: Response): Response {
   const out = new Response(res.body, res);
-  out.headers.set(
-    CSP_REPORT_ONLY ? "Content-Security-Policy-Report-Only" : "Content-Security-Policy",
-    CSP,
-  );
+  out.headers.set("Content-Security-Policy", CSP);
   out.headers.set("X-Content-Type-Options", "nosniff");
   out.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   out.headers.set("X-Frame-Options", "DENY");
