@@ -64,6 +64,13 @@
       "when": 1782147483191,
       "tag": "0008_two_factor_verified",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1782213904447,
+      "tag": "0009_friendly_toad",
+      "breakpoints": true
     }
   ]
 }
