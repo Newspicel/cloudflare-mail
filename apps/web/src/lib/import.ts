@@ -17,6 +17,9 @@ export interface ImportProgress {
   done: number;
   duplicate: number;
   failed: number;
+  // Transient failures we retried (network blips, rate-limits, 5xx). Surfaced so
+  // a slow-but-recovering import doesn't look stuck.
+  retried: number;
 }
 
 // Per-message state recovered from an export's sidecar metadata.
@@ -96,7 +99,26 @@ function toArrayBuffer(u: Uint8Array): ArrayBuffer {
   return u.slice().buffer as ArrayBuffer;
 }
 
-async function uploadOne(mailboxId: string, item: ImportItem): Promise<{ duplicate: boolean }> {
+// A failure that's worth retrying (transient network/server condition) vs. one
+// that won't change on a retry (e.g. 400/413 — malformed or too large).
+class ImportError extends Error {
+  constructor(
+    message: string,
+    readonly retryable: boolean,
+    readonly retryAfterMs?: number,
+  ) {
+    super(message);
+  }
+}
+
+// 408 timeout, 425 too-early, 429 rate-limit, and 5xx are all transient.
+const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function postOne(mailboxId: string, item: ImportItem): Promise<{ duplicate: boolean }> {
   const q = new URLSearchParams();
   const s = item.state;
   if (s) {
@@ -106,14 +128,51 @@ async function uploadOne(mailboxId: string, item: ImportItem): Promise<{ duplica
     if (s.spam) q.set("spam", "1");
   }
   const qs = q.toString();
-  const res = await fetch(`/api/mailboxes/${mailboxId}/import${qs ? `?${qs}` : ""}`, {
-    method: "POST",
-    credentials: "include",
-    headers: { "content-type": "message/rfc822" },
-    body: toArrayBuffer(item.raw),
-  });
-  if (!res.ok) throw new Error(`import failed (${res.status})`);
-  return (await res.json()) as { duplicate: boolean };
+  let res: Response;
+  try {
+    res = await fetch(`/api/mailboxes/${mailboxId}/import${qs ? `?${qs}` : ""}`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "message/rfc822" },
+      body: toArrayBuffer(item.raw),
+    });
+  } catch (e) {
+    // Network error / connection reset — always worth a retry.
+    throw new ImportError(`import failed (network: ${e})`, true);
+  }
+  if (res.ok) return (await res.json()) as { duplicate: boolean };
+  const retryAfter = Number(res.headers.get("retry-after"));
+  throw new ImportError(
+    `import failed (${res.status})`,
+    RETRYABLE_STATUS.has(res.status),
+    Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : undefined,
+  );
+}
+
+// Upload one message, retrying transient failures with exponential backoff +
+// jitter. Imports are idempotent (deduped by Message-ID server-side), so a retry
+// after an ambiguous failure can't create duplicates. `onRetry` fires once per
+// retried attempt so the UI can show progress isn't stalled.
+async function uploadOne(
+  mailboxId: string,
+  item: ImportItem,
+  onRetry: () => void,
+  maxRetries = 5,
+): Promise<{ duplicate: boolean }> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      // eslint-disable-next-line no-await-in-loop -- retry loop is sequential by design
+      return await postOne(mailboxId, item);
+    } catch (e) {
+      const retryable = e instanceof ImportError ? e.retryable : true;
+      if (!retryable || attempt >= maxRetries) throw e;
+      onRetry();
+      const hinted = e instanceof ImportError ? e.retryAfterMs : undefined;
+      const backoff = hinted ?? Math.min(8000, 250 * 2 ** attempt) + Math.random() * 250;
+      // eslint-disable-next-line no-await-in-loop -- intentional backoff between attempts
+      await sleep(backoff);
+    }
+  }
 }
 
 // Lazily-evaluated unit of work: produces a single message to upload. Bodies are
@@ -187,12 +246,31 @@ export async function runImport(
   mailboxId: string,
   files: File[],
   onProgress: (p: ImportProgress) => void,
-  concurrency = 3,
+  concurrency = 25,
 ): Promise<ImportProgress> {
   const tasks = await plan(files);
 
-  const progress: ImportProgress = { total: tasks.length, done: 0, duplicate: 0, failed: 0 };
+  const progress: ImportProgress = {
+    total: tasks.length,
+    done: 0,
+    duplicate: 0,
+    failed: 0,
+    retried: 0,
+  };
   onProgress({ ...progress });
+
+  // Coalesce progress callbacks: at high concurrency a per-message setState storm
+  // bogs the UI down. Flush at most ~every 100ms (and once at the end).
+  let dirty = false;
+  let lastFlush = 0;
+  const flush = (force: boolean) => {
+    if (!dirty && !force) return;
+    const now = performance.now();
+    if (!force && now - lastFlush < 100) return;
+    lastFlush = now;
+    dirty = false;
+    onProgress({ ...progress });
+  };
 
   let next = 0;
   async function worker(): Promise<void> {
@@ -201,16 +279,22 @@ export async function runImport(
       if (i >= tasks.length) return;
       try {
         // eslint-disable-next-line no-await-in-loop -- a worker drains items sequentially; parallelism is across workers
-        const res = await uploadOne(mailboxId, await tasks[i]!());
+        const item = await tasks[i]!();
+        // eslint-disable-next-line no-await-in-loop -- same as above
+        const res = await uploadOne(mailboxId, item, () => {
+          progress.retried++;
+        });
         if (res.duplicate) progress.duplicate++;
       } catch {
         progress.failed++;
       }
       progress.done++;
-      onProgress({ ...progress });
+      dirty = true;
+      flush(false);
     }
   }
 
   await Promise.all(Array.from({ length: Math.min(concurrency, tasks.length) }, worker));
+  flush(true);
   return progress;
 }
