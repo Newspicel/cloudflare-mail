@@ -120,11 +120,23 @@ export const updateThread = z.object({
   read: z.boolean().optional(),
 });
 
+// Bare Content-ID token (no angle brackets) for an inline image referenced from
+// the HTML body as `cid:<token>`. The server wraps it in <…> for the MIME
+// header; the charset is restricted so it can't inject header syntax.
+const contentId = z
+  .string()
+  .min(1)
+  .max(255)
+  .regex(/^[A-Za-z0-9._@+-]+$/, "invalid content id");
+
 const draftAttachment = z.object({
   r2Key: z.string().min(1),
   filename: attachmentFilename,
   contentType: z.string().min(1).max(127),
   sizeBytes: z.number().int().min(0),
+  // Inline (embedded in the HTML body via cid:) vs a regular attachment.
+  inline: z.boolean().optional(),
+  contentId: contentId.optional(),
 });
 
 // Reference to an original message to quote in a reply/forward. The server
@@ -453,6 +465,9 @@ export const sendMessage = z.object({
         r2Key: z.string().min(1),
         filename: attachmentFilename,
         contentType: z.string().min(1).max(127),
+        // Inline image embedded in the HTML body via `cid:<contentId>`.
+        inline: z.boolean().optional(),
+        contentId: contentId.optional(),
       }),
     )
     .max(20)

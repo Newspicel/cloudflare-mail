@@ -79,6 +79,8 @@ export async function sendFromMailbox(
         filename: att.filename,
         contentType: att.contentType,
         data: new Uint8Array(buf),
+        inline: att.inline ?? false,
+        contentId: att.contentId,
       };
     }),
   );
@@ -121,12 +123,22 @@ export async function sendFromMailbox(
         html,
         headers: Object.keys(sendHeaders).length ? sendHeaders : undefined,
         attachments: attachmentBytes.length
-          ? attachmentBytes.map((a) => ({
-              disposition: "attachment" as const,
-              filename: a.filename,
-              type: a.contentType,
-              content: a.data,
-            }))
+          ? attachmentBytes.map((a) =>
+              a.inline && a.contentId
+                ? {
+                    disposition: "inline" as const,
+                    contentId: a.contentId,
+                    filename: a.filename,
+                    type: a.contentType,
+                    content: a.data,
+                  }
+                : {
+                    disposition: "attachment" as const,
+                    filename: a.filename,
+                    type: a.contentType,
+                    content: a.data,
+                  },
+            )
           : undefined,
       });
       returnedMessageId = res?.messageId;
@@ -256,7 +268,13 @@ interface PgpSendArgs {
   input: SendMessageInput;
   text: string | undefined;
   html: string | undefined;
-  attachmentBytes: { filename: string; contentType: string; data: Uint8Array }[];
+  attachmentBytes: {
+    filename: string;
+    contentType: string;
+    data: Uint8Array;
+    inline?: boolean;
+    contentId?: string;
+  }[];
   allRecipients: { name?: string; address: string }[];
   messageIdHdr: string;
   date: Date;

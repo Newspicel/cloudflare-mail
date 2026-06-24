@@ -700,7 +700,16 @@ export const draft = sqliteTable(
     // for back-compat; new code reads `format`.
     format: text("format", { enum: EDITOR_FORMATS }).notNull().default("text"),
     attachments: text("attachments", { mode: "json" })
-      .$type<{ r2Key: string; filename: string; contentType: string; sizeBytes: number }[]>()
+      .$type<
+        {
+          r2Key: string;
+          filename: string;
+          contentType: string;
+          sizeBytes: number;
+          inline?: boolean;
+          contentId?: string;
+        }[]
+      >()
       .notNull()
       .default(sql`'[]'`),
     // Scheduled send: when set, the cron dispatches `scheduledPayload` at this
@@ -739,7 +748,13 @@ export type ScheduledSendPayload = {
   inReplyTo?: string;
   references?: string[];
   quote?: { messageId: string; kind: (typeof QUOTE_KINDS)[number] };
-  attachments?: { r2Key: string; filename: string; contentType: string }[];
+  attachments?: {
+    r2Key: string;
+    filename: string;
+    contentType: string;
+    inline?: boolean;
+    contentId?: string;
+  }[];
 };
 
 // ─── Web Push notifications ─────────────────────────────────────────────────

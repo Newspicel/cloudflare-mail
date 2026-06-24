@@ -7,6 +7,7 @@ import {
   Clock,
   ExternalLink,
   FileText,
+  ImageIcon,
   Maximize2,
   Minimize2,
   Paperclip,
@@ -30,6 +31,7 @@ import {
 } from "@/lib/queries.ts";
 import { keys } from "@/lib/query-keys.ts";
 import { sanitizeEmailHtml } from "@/lib/sanitize-email.ts";
+import { canStripMetadata, stripImageMetadata } from "@/lib/strip-image-metadata.ts";
 import { fillTemplate, type TemplateContext } from "@/lib/templates.ts";
 import {
   AddressField,
@@ -48,9 +50,20 @@ import {
 } from "./rich-editor.tsx";
 import { Button } from "./ui/button.tsx";
 import { Calendar } from "./ui/calendar.tsx";
+import { Checkbox } from "./ui/checkbox.tsx";
+import {
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Dialog as ImageChoiceDialog,
+} from "./ui/dialog.tsx";
+import { Label } from "./ui/label.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select.tsx";
 import { Textarea } from "./ui/textarea.tsx";
+import { ToggleGroup, ToggleItem } from "./ui/toggle-group.tsx";
 
 marked.setOptions({ breaks: true, gfm: true });
 
@@ -108,6 +121,42 @@ interface UploadedAttachment {
   filename: string;
   contentType: string;
   sizeBytes: number;
+  // Inline image embedded in the HTML body; `contentId` is its bare cid token,
+  // referenced from the body as `cid:<contentId>` and rewritten at send time.
+  inline?: boolean;
+  contentId?: string;
+}
+
+// Marks an <img> in the rich editor as an inline attachment. The preview src
+// points at the draft blob; buildBody swaps it for `cid:<contentId>` on send.
+const CID_ATTR = "data-cfmail-cid";
+
+function escapeAttr(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+// Rewrite inline-image <img> tags (those carrying CID_ATTR) so their src points
+// at `cid:<contentId>` for the outbound HTML, and report which content ids are
+// actually still referenced (the user may have deleted an embedded image).
+function resolveInlineImages(html: string): { html: string; usedCids: Set<string> } {
+  const usedCids = new Set<string>();
+  if (typeof document === "undefined" || !html.includes(CID_ATTR)) {
+    return { html, usedCids };
+  }
+  const doc = document.implementation.createHTMLDocument("");
+  doc.body.innerHTML = html;
+  for (const img of doc.querySelectorAll(`img[${CID_ATTR}]`)) {
+    const cid = img.getAttribute(CID_ATTR);
+    if (!cid) continue;
+    usedCids.add(cid);
+    img.setAttribute("src", `cid:${cid}`);
+    img.removeAttribute(CID_ATTR);
+  }
+  return { html: doc.body.innerHTML, usedCids };
 }
 
 export interface ComposeState {
@@ -232,6 +281,17 @@ const FIELD_LABEL =
   "w-12 shrink-0 pt-1 text-[11px] text-muted-foreground uppercase tracking-wider leading-5";
 const FIELD_INPUT =
   "flex-1 bg-transparent py-0.5 text-[13px] leading-5 outline-none placeholder:text-muted-foreground";
+
+// Preview URL for an inline image still held under a draft R2 key.
+function draftBlobUrl(r2Key: string): string {
+  return `/api/attachments/draft-blob?key=${encodeURIComponent(r2Key)}`;
+}
+
+// Only OS file drags carry the "Files" type, so other drag types never trip
+// the attach overlay.
+function isFileDrag(e: React.DragEvent): boolean {
+  return Array.from(e.dataTransfer.types).includes("Files");
+}
 
 export function ComposeForm({
   state: s,
@@ -427,6 +487,13 @@ export function ComposeForm({
   const [customDate, setCustomDate] = useState<Date | undefined>(undefined);
   const [customTime, setCustomTime] = useState("09:00");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Files being dragged over the composer (overlay) and the pending batch of
+  // dropped/picked images awaiting an attach-vs-inline + strip-metadata choice.
+  const [dragActive, setDragActive] = useState(false);
+  const dragDepth = useRef(0);
+  const [pendingImages, setPendingImages] = useState<File[]>([]);
+  const [stripMeta, setStripMeta] = useState(true);
+  const [placement, setPlacement] = useState<"attachment" | "inline">("inline");
 
   // Threading context: a reopened draft carries it; a fresh reply derives it
   // from the message being answered.
@@ -609,8 +676,9 @@ export function ComposeForm({
     html: string | undefined;
   } => {
     if (mode === "html") {
-      const htmlBody = html.trim()
-        ? DOMPurify.sanitize(html, { USE_PROFILES: { html: true } })
+      const { html: resolved } = resolveInlineImages(html);
+      const htmlBody = resolved.trim()
+        ? DOMPurify.sanitize(resolved, { USE_PROFILES: { html: true } })
         : undefined;
       return { html: htmlBody, text: htmlBody ? htmlToText(html) || undefined : undefined };
     }
@@ -625,6 +693,12 @@ export function ComposeForm({
     const body = buildBody();
     const ccList = collectRecipients(cc);
     const bccList = collectRecipients(bcc);
+    // Drop inline images whose <img> was removed from the body; they're dead
+    // weight that would arrive as orphaned, never-rendered attachments.
+    const usedCids = mode === "html" ? resolveInlineImages(html).usedCids : new Set<string>();
+    const outAttachments = attachments.filter(
+      (a) => !a.inline || (a.contentId ? usedCids.has(a.contentId) : false),
+    );
     return {
       mailboxId,
       fromAddress: fromAddress ?? undefined,
@@ -637,11 +711,12 @@ export function ComposeForm({
       inReplyTo,
       references,
       quote: quoteRef ?? undefined,
-      attachments: attachments.length
-        ? attachments.map((a) => ({
+      attachments: outAttachments.length
+        ? outAttachments.map((a) => ({
             r2Key: a.r2Key,
             filename: a.filename,
             contentType: a.contentType,
+            ...(a.inline ? { inline: true, contentId: a.contentId } : {}),
           }))
         : undefined,
     };
@@ -657,6 +732,8 @@ export function ComposeForm({
     references,
     quoteRef,
     attachments,
+    mode,
+    html,
   ]);
 
   const send = useMutation({
@@ -871,14 +948,20 @@ export function ComposeForm({
     setTemplatesOpen(false);
   }
 
-  async function uploadFile(file: File): Promise<void> {
+  // Upload one file to draft storage and return the stored attachment (with any
+  // inline/contentId flags merged in), or null on failure. Does not touch the
+  // attachments list — callers decide how the result is surfaced.
+  async function uploadBlob(
+    file: File,
+    extra?: { inline?: boolean; contentId?: string },
+  ): Promise<UploadedAttachment | null> {
     if (file.size === 0) {
       toast.error(`${file.name}: empty file`);
-      return;
+      return null;
     }
     if (file.size > MAX_ATTACHMENT_BYTES) {
       toast.error(`${file.name}: exceeds 25 MB limit`);
-      return;
+      return null;
     }
     setUploading((n) => n + 1);
     try {
@@ -890,7 +973,7 @@ export function ComposeForm({
         },
         body: await file.arrayBuffer(),
       });
-      setAttachments((prev) => [...prev, { ...up, filename: file.name }]);
+      return { ...up, filename: file.name, ...extra };
     } catch (err) {
       const msg =
         err instanceof ApiError
@@ -901,21 +984,108 @@ export function ComposeForm({
             ? err.message
             : "upload failed";
       toast.error(`${file.name}: ${msg}`);
+      return null;
     } finally {
       setUploading((n) => n - 1);
     }
   }
 
-  async function onPickFiles(fileList: FileList | null): Promise<void> {
-    if (!fileList || fileList.length === 0) return;
-    const picked = Array.from(fileList);
+  // Upload a plain (non-inline) attachment and append it to the list.
+  async function uploadAttachment(file: File): Promise<void> {
+    const up = await uploadBlob(file);
+    if (up) setAttachments((prev) => [...prev, up]);
+  }
+
+  // Entry point for both the file picker and drag-and-drop. Non-image files go
+  // straight to attachments; images are held for the attach-vs-inline choice.
+  async function handleIncomingFiles(files: File[]): Promise<void> {
+    if (!files.length) return;
     const remaining = MAX_ATTACHMENTS - attachments.length;
-    const toUpload = picked.slice(0, Math.max(0, remaining));
-    if (picked.length > toUpload.length) {
+    const accepted = files.slice(0, Math.max(0, remaining));
+    if (files.length > accepted.length) {
       toast.error(`Only ${MAX_ATTACHMENTS} attachments per message`);
     }
-    await Promise.all(toUpload.map(uploadFile));
+    const images = accepted.filter((f) => f.type.startsWith("image/"));
+    const others = accepted.filter((f) => !f.type.startsWith("image/"));
+    await Promise.all(others.map(uploadAttachment));
+    if (images.length) setPendingImages((prev) => [...prev, ...images]);
   }
+
+  // Resolve the pending images per the dialog choice: optionally strip metadata,
+  // upload, then either attach or embed them inline in the (rich) body.
+  async function commitPendingImages(): Promise<void> {
+    const images = pendingImages;
+    setPendingImages([]);
+    if (!images.length) return;
+
+    const prepared = await Promise.all(
+      images.map((file) =>
+        stripMeta && canStripMetadata(file.type) ? stripImageMetadata(file) : Promise.resolve(file),
+      ),
+    );
+
+    if (placement === "attachment") {
+      const ups = await Promise.all(prepared.map((f) => uploadBlob(f)));
+      const ok = ups.filter((u): u is UploadedAttachment => u !== null);
+      if (ok.length) setAttachments((prev) => [...prev, ...ok]);
+      return;
+    }
+
+    // Inline: upload each with a generated content id, collect the <img> tags,
+    // then embed them in the HTML body (promoting from plain text if needed).
+    const ups = await Promise.all(
+      prepared.map(async (f) => {
+        const contentId = `${crypto.randomUUID()}@cfmail`;
+        const up = await uploadBlob(f, { inline: true, contentId });
+        return up ? { up, contentId } : null;
+      }),
+    );
+    const ok = ups.filter((x): x is { up: UploadedAttachment; contentId: string } => x !== null);
+    if (!ok.length) return;
+
+    setAttachments((prev) => [...prev, ...ok.map((x) => x.up)]);
+    const imgHtml = ok
+      .map(
+        (x) =>
+          `<img src="${draftBlobUrl(x.up.r2Key)}" ${CID_ATTR}="${x.contentId}" alt="${escapeAttr(
+            x.up.filename,
+          )}" style="max-width:100%;height:auto" />`,
+      )
+      .join("");
+    if (mode === "html") {
+      editorRef.current?.insertHtml(imgHtml);
+    } else {
+      setHtml(`${textToHtml(text)}${imgHtml}`);
+      pendingCmdRef.current = null;
+      setMode("html");
+    }
+  }
+
+  // ── Drag-and-drop ──────────────────────────────────────────────────────
+  function onDragEnter(e: React.DragEvent) {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    dragDepth.current += 1;
+    setDragActive(true);
+  }
+  function onDragOver(e: React.DragEvent) {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  }
+  function onDragLeave(e: React.DragEvent) {
+    if (!isFileDrag(e)) return;
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDragActive(false);
+  }
+  function onDrop(e: React.DragEvent) {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    dragDepth.current = 0;
+    setDragActive(false);
+    void handleIncomingFiles(Array.from(e.dataTransfer.files));
+  }
+  const dragHandlers = { onDragEnter, onDragOver, onDragLeave, onDrop };
 
   const titleText = rep
     ? s.replyAll
@@ -931,6 +1101,60 @@ export function ComposeForm({
 
   const content = (
     <>
+      {dragActive && (
+        <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-2 rounded-xl border-2 border-primary border-dashed px-8 py-6 text-primary">
+            <Paperclip className="size-7" />
+            <span className="font-medium text-[13px]">Drop files to attach</span>
+          </div>
+        </div>
+      )}
+      <ImageChoiceDialog
+        open={pendingImages.length > 0}
+        onOpenChange={(next) => {
+          if (!next) setPendingImages([]);
+        }}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>
+              {pendingImages.length > 1 ? `Add ${pendingImages.length} images` : "Add image"}
+            </DialogTitle>
+            <DialogDescription>
+              Embed {pendingImages.length > 1 ? "them" : "it"} in the message or attach as
+              {pendingImages.length > 1 ? " files" : " a file"}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-3">
+            <ToggleGroup
+              value={placement}
+              onValueChange={(v) => setPlacement(v)}
+              className="w-full [&>*]:flex-1"
+            >
+              <ToggleItem value="inline">
+                <ImageIcon />
+                In message
+              </ToggleItem>
+              <ToggleItem value="attachment">
+                <Paperclip />
+                As attachment
+              </ToggleItem>
+            </ToggleGroup>
+            <Label className="flex cursor-pointer items-center gap-2 text-[13px]">
+              <Checkbox checked={stripMeta} onCheckedChange={(v) => setStripMeta(v === true)} />
+              Remove image metadata (EXIF, GPS)
+            </Label>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setPendingImages([])}>
+              Cancel
+            </Button>
+            <Button variant="primary" onClick={() => void commitPendingImages()}>
+              Add
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </ImageChoiceDialog>
       <div className="flex items-center justify-between border-b bg-muted/60 px-4 py-2.5 pt-[max(0.625rem,env(safe-area-inset-top))] sm:pt-2.5">
         {isWindow ? (
           <span className="font-semibold text-[13px] text-foreground tracking-tight">
@@ -1179,28 +1403,32 @@ export function ComposeForm({
             }
           />
         )}
-        {attachments.length > 0 && (
+        {attachments.some((a) => !a.inline) && (
           <ul className="flex flex-wrap gap-1.5 border-t pt-2">
-            {attachments.map((a) => (
-              <li
-                key={a.r2Key}
-                className="flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-0.5 text-[11px]"
-              >
-                <Paperclip className="h-2.5 w-2.5 shrink-0 text-muted-foreground" />
-                <span className="max-w-[16rem] truncate" title={a.filename}>
-                  {a.filename}
-                </span>
-                <span className="text-muted-foreground">{formatBytes(a.sizeBytes)}</span>
-                <button
-                  type="button"
-                  onClick={() => setAttachments((prev) => prev.filter((x) => x.r2Key !== a.r2Key))}
-                  className="ml-0.5 rounded p-0.5 text-muted-foreground hover:bg-card hover:text-foreground"
-                  aria-label={`Remove ${a.filename}`}
+            {attachments
+              .filter((a) => !a.inline)
+              .map((a) => (
+                <li
+                  key={a.r2Key}
+                  className="flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-0.5 text-[11px]"
                 >
-                  <X className="h-2.5 w-2.5" />
-                </button>
-              </li>
-            ))}
+                  <Paperclip className="h-2.5 w-2.5 shrink-0 text-muted-foreground" />
+                  <span className="max-w-[16rem] truncate" title={a.filename}>
+                    {a.filename}
+                  </span>
+                  <span className="text-muted-foreground">{formatBytes(a.sizeBytes)}</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setAttachments((prev) => prev.filter((x) => x.r2Key !== a.r2Key))
+                    }
+                    className="ml-0.5 rounded p-0.5 text-muted-foreground hover:bg-card hover:text-foreground"
+                    aria-label={`Remove ${a.filename}`}
+                  >
+                    <X className="h-2.5 w-2.5" />
+                  </button>
+                </li>
+              ))}
           </ul>
         )}
         {quoteRef && (
@@ -1336,7 +1564,7 @@ export function ComposeForm({
             multiple
             className="hidden"
             onChange={(e) => {
-              void onPickFiles(e.target.files);
+              void handleIncomingFiles(Array.from(e.target.files ?? []));
               e.target.value = "";
             }}
           />
@@ -1406,7 +1634,8 @@ export function ComposeForm({
       // biome-ignore lint/a11y/noStaticElementInteractions: container-level ⌘/Ctrl+Enter send shortcut; inner fields stay the focus targets
       <div
         onKeyDown={onContainerKeyDown}
-        className="flex h-dvh flex-col overflow-hidden bg-card text-card-foreground"
+        {...dragHandlers}
+        className="relative flex h-dvh flex-col overflow-hidden bg-card text-card-foreground"
       >
         {content}
       </div>
@@ -1424,6 +1653,7 @@ export function ComposeForm({
       <Dialog.Portal>
         <Dialog.Popup
           onKeyDown={onContainerKeyDown}
+          {...dragHandlers}
           className={cn(
             "fixed inset-0 z-40 flex flex-col overflow-hidden border bg-card text-card-foreground shadow-black/20 shadow-2xl outline-none transition-all duration-200 data-ending-style:translate-y-3 data-ending-style:opacity-0 data-starting-style:translate-y-3 data-starting-style:opacity-0 sm:inset-auto sm:right-6 sm:bottom-0 sm:rounded-t-xl sm:border-b-0",
             expanded
