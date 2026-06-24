@@ -4,6 +4,7 @@ import DOMPurify from "dompurify";
 import {
   AlertTriangle,
   ChevronDown,
+  Clock,
   ExternalLink,
   Maximize2,
   Minimize2,
@@ -42,6 +43,7 @@ import {
   textToHtml,
 } from "./rich-editor.tsx";
 import { Button } from "./ui/button.tsx";
+import { Calendar } from "./ui/calendar.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select.tsx";
 import { Textarea } from "./ui/textarea.tsx";
@@ -52,12 +54,12 @@ const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const MAX_ATTACHMENTS = 20;
 
 // ── Scheduled-send time helpers ──────────────────────────────────────────────
-const pad2 = (n: number) => String(n).padStart(2, "0");
-
-// `datetime-local` carries no timezone, so format/parse in the user's local
-// wall-clock and stamp seconds to zero (the input has minute resolution).
-function toLocalInput(d: Date): string {
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+// Stamp a "HH:mm" wall-clock time onto a calendar day, in the user's local zone.
+function combineDateTime(day: Date, time: string): Date {
+  const [h, m] = time.split(":").map(Number);
+  const out = new Date(day);
+  out.setHours(h ?? 0, m ?? 0, 0, 0);
+  return out;
 }
 
 function atHour(d: Date, hour: number): Date {
@@ -386,7 +388,8 @@ export function ComposeForm({
   const [savedHint, setSavedHint] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
-  const [customWhen, setCustomWhen] = useState("");
+  const [customDate, setCustomDate] = useState<Date | undefined>(undefined);
+  const [customTime, setCustomTime] = useState("09:00");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Threading context: a reopened draft carries it; a fresh reply derives it
@@ -1159,23 +1162,34 @@ export function ComposeForm({
                   </button>
                 ))}
                 <div className="my-1 h-px bg-border" />
-                <div className="px-1.5 pt-0.5 pb-1">
-                  <span className="mb-1 block text-[11px] text-muted-foreground">
+                <div className="px-0.5 pt-0.5 pb-1">
+                  <span className="mb-1 block px-1 text-[11px] text-muted-foreground">
                     Custom date &amp; time
                   </span>
-                  <input
-                    type="datetime-local"
-                    value={customWhen}
-                    min={toLocalInput(new Date())}
-                    onChange={(e) => setCustomWhen(e.target.value)}
-                    className="w-full rounded-md border bg-card px-2 py-1 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                  <Calendar
+                    mode="single"
+                    selected={customDate}
+                    onSelect={setCustomDate}
+                    disabled={{ before: new Date() }}
+                    className="p-0"
                   />
+                  <div className="mt-1 flex items-center gap-2 px-1">
+                    <Clock className="size-3.5 text-muted-foreground" />
+                    <input
+                      type="time"
+                      value={customTime}
+                      onChange={(e) => setCustomTime(e.target.value)}
+                      className="flex-1 rounded-md border bg-card px-2 py-1 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                    />
+                  </div>
                   <Button
                     variant="primary"
                     size="sm"
                     className="mt-2 w-full"
-                    disabled={!customWhen || schedule.isPending}
-                    onClick={() => scheduleSend(new Date(customWhen))}
+                    disabled={!customDate || schedule.isPending}
+                    onClick={() =>
+                      customDate && scheduleSend(combineDateTime(customDate, customTime))
+                    }
                   >
                     Schedule
                   </Button>
