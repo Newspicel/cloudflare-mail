@@ -11,6 +11,7 @@ import { ColorPicker } from "./ui/color-picker.tsx";
 import { useConfirm } from "./ui/confirm.tsx";
 import { Input } from "./ui/input.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
+import { Tooltip } from "./ui/tooltip.tsx";
 import { LabelChip } from "./ui.tsx";
 
 const DEFAULT_COLOR = "#64748b";
@@ -33,7 +34,15 @@ function invalidateLabels(qc: QueryClient, mailboxId: string) {
 }
 
 // Apply labels to the most recent message in a thread (single-message view).
-export function LabelsMenu({ mailboxId, messageId }: { mailboxId: string; messageId: string }) {
+export function LabelsMenu({
+  mailboxId,
+  messageId,
+  tooltip,
+}: {
+  mailboxId: string;
+  messageId: string;
+  tooltip?: string;
+}) {
   const qc = useQueryClient();
   const appliedQ = useQuery(messageLabelsQuery([messageId]));
   const applied = new Set((appliedQ.data?.labels[messageId] ?? []).map((l) => l.id));
@@ -52,6 +61,7 @@ export function LabelsMenu({ mailboxId, messageId }: { mailboxId: string; messag
       mailboxId={mailboxId}
       applied={applied}
       busy={toggle.isPending}
+      tooltip={tooltip}
       onToggle={(labelId, on) => toggle.mutate({ labelId, on })}
     />
   );
@@ -111,19 +121,23 @@ interface ShellProps {
   partial?: Set<string>;
   busy?: boolean;
   size?: "icon" | "icon-sm";
+  tooltip?: string;
   onToggle: (labelId: string, on: boolean) => void;
 }
 
-function LabelsMenuShell({ size = "icon", ...rest }: ShellProps) {
+function LabelsMenuShell({ size = "icon", tooltip, ...rest }: ShellProps) {
+  const trigger = (
+    <PopoverTrigger
+      render={
+        <Button variant="ghost" size={size} aria-label="Labels">
+          <Tag />
+        </Button>
+      }
+    />
+  );
   return (
     <Popover>
-      <PopoverTrigger
-        render={
-          <Button variant="ghost" size={size} aria-label="Labels">
-            <Tag />
-          </Button>
-        }
-      />
+      {tooltip ? <Tooltip label={tooltip}>{trigger}</Tooltip> : trigger}
       <PopoverContent align="end" className="w-72 p-2">
         <LabelsPopover {...rest} />
       </PopoverContent>
