@@ -21,7 +21,7 @@ import { useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Checkbox } from "@/components/ui/checkbox.tsx";
-import { inputClass } from "@/components/ui/input.tsx";
+import { Input } from "@/components/ui/input.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover.tsx";
 import {
   Select,
@@ -369,32 +369,28 @@ function AdvancedPanel({ form, set }: { form: SearchParams; set: SetFn }) {
       </Field>
       <div className="grid grid-cols-2 gap-2.5">
         <Field label="From">
-          <input
-            className={inputClass}
+          <Input
             value={form.from ?? ""}
             onChange={(e) => set("from", e.target.value)}
             placeholder="name or email"
           />
         </Field>
         <Field label="To">
-          <input
-            className={inputClass}
+          <Input
             value={form.to ?? ""}
             onChange={(e) => set("to", e.target.value)}
             placeholder="recipient"
           />
         </Field>
         <Field label="Subject">
-          <input
-            className={inputClass}
+          <Input
             value={form.subject ?? ""}
             onChange={(e) => set("subject", e.target.value)}
             placeholder="words in subject"
           />
         </Field>
         <Field label="Exclude">
-          <input
-            className={inputClass}
+          <Input
             value={form.exclude ?? ""}
             onChange={(e) => set("exclude", e.target.value)}
             placeholder="words to omit"
@@ -403,17 +399,15 @@ function AdvancedPanel({ form, set }: { form: SearchParams; set: SetFn }) {
       </div>
       <div className="grid grid-cols-2 gap-2.5">
         <Field label="After">
-          <input
+          <Input
             type="date"
-            className={inputClass}
             value={form.after ?? ""}
             onChange={(e) => set("after", e.target.value || undefined)}
           />
         </Field>
         <Field label="Before">
-          <input
+          <Input
             type="date"
-            className={inputClass}
             value={form.before ?? ""}
             onChange={(e) => set("before", e.target.value || undefined)}
           />

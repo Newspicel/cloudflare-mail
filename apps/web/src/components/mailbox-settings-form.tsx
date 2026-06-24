@@ -8,13 +8,19 @@ import {
   fieldClass,
   GroupLabel,
   Input,
-  NativeSelect,
   Region,
   Section,
   Textarea,
 } from "@/components/settings-ui.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
 import { Button } from "@/components/ui/button.tsx";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select.tsx";
 import { api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
 import { type ImportProgress, runImport } from "@/lib/import.ts";
@@ -184,16 +190,18 @@ export function MailboxSettingsForm({
             </Field>
             {type !== "service" && admin && (
               <Field label="Spam filter" hint={spamLabel?.hint}>
-                <NativeSelect
-                  value={spamFilter}
-                  onChange={(e) => setSpamFilter(e.target.value as SpamLevel)}
-                >
-                  {SPAM_LEVELS.map((l) => (
-                    <option key={l.value} value={l.value}>
-                      {l.label}
-                    </option>
-                  ))}
-                </NativeSelect>
+                <Select value={spamFilter} onValueChange={(v) => setSpamFilter(v as SpamLevel)}>
+                  <SelectTrigger aria-label="Spam filter">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SPAM_LEVELS.map((l) => (
+                      <SelectItem key={l.value} value={l.value}>
+                        {l.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </Field>
             )}
             {type !== "service" && !admin && (
@@ -351,17 +359,22 @@ function MailboxPgpCard({ mailboxId, settingsKey }: { mailboxId: string; setting
               : "Generate or import a keypair below to enable signing or encryption."
           }
         >
-          <NativeSelect
+          <Select
             value={s?.pgpMode ?? "off"}
             disabled={!configured || setMode.isPending || settingsQ.isLoading}
-            onChange={(e) => setMode.mutate(e.target.value as PgpMode)}
+            onValueChange={(v) => setMode.mutate(v as PgpMode)}
           >
-            {PGP_MODES.map((m) => (
-              <option key={m.value} value={m.value}>
-                {m.label}
-              </option>
-            ))}
-          </NativeSelect>
+            <SelectTrigger aria-label="PGP mode">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PGP_MODES.map((m) => (
+                <SelectItem key={m.value} value={m.value}>
+                  {m.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </Field>
 
         {configured ? (
@@ -562,17 +575,22 @@ export function MailboxImportSection({ mailboxes }: { mailboxes: ImportTarget[] 
       contentClassName="space-y-3"
     >
       <Field label="Import into">
-        <NativeSelect
+        <Select
           value={mailboxId}
           disabled={running}
-          onChange={(e) => setMailboxId(e.target.value)}
+          onValueChange={(v) => setMailboxId(v as string)}
         >
-          {mailboxes.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.displayName ? `${m.displayName} (${m.address})` : m.address}
-            </option>
-          ))}
-        </NativeSelect>
+          <SelectTrigger aria-label="Import into">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {mailboxes.map((m) => (
+              <SelectItem key={m.id} value={m.id}>
+                {m.displayName ? `${m.displayName} (${m.address})` : m.address}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </Field>
       <input
         ref={inputRef}

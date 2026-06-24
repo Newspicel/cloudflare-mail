@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Copy } from "lucide-react";
+import { Check, Copy } from "lucide-react";
 import type * as React from "react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -169,23 +169,6 @@ export function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
 export function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return (
     <textarea {...props} className={cn(fieldClass, "h-auto leading-normal", props.className)} />
-  );
-}
-
-/** Native select styled to match the field controls, with a chevron affordance. */
-export function NativeSelect(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
-  return (
-    <div className="relative">
-      <select
-        {...props}
-        className={cn(
-          fieldClass,
-          "cursor-pointer appearance-none pr-8 disabled:cursor-not-allowed",
-          props.className,
-        )}
-      />
-      <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-    </div>
   );
 }
 

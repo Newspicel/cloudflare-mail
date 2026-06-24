@@ -2,10 +2,11 @@ import { has, MailboxKind, Perm, type PermBit } from "@cfmail/shared/permissions
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { ArrowRight, Check, X } from "lucide-react";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { toast } from "sonner";
 import { MailboxSettingsForm } from "@/components/mailbox-settings-form.tsx";
 import { Button } from "@/components/ui/button.tsx";
+import { Checkbox } from "@/components/ui/checkbox.tsx";
 import { useConfirm } from "@/components/ui/confirm.tsx";
 import {
   Dialog,
@@ -17,6 +18,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog.tsx";
 import { inputClass } from "@/components/ui/input.tsx";
+import {
+  SelectContent,
+  SelectItem,
+  Select as SelectRoot,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select.tsx";
+import { Textarea } from "@/components/ui/textarea.tsx";
 import { api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
 import { type MailboxSummary, mailboxesQuery, meQuery } from "@/lib/queries.ts";
@@ -218,20 +227,46 @@ function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return <input {...props} className={cn(inputClass, props.className)} />;
 }
 
-const selectChevron =
-  "bg-[length:11px] bg-[right_0.55rem_center] bg-no-repeat bg-[url(\"data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='12'%20height='12'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%23737373'%20stroke-width='2.5'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='m6%209%206%206%206-6'/%3E%3C/svg%3E\")]";
+type SelectOption = { value: string; label: string; disabled?: boolean };
 
-function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
+// Thin wrapper over the shared styled Select so admin call sites stay compact:
+// pass `options` instead of composing the trigger/content by hand.
+function Select({
+  value,
+  onValueChange,
+  options,
+  placeholder,
+  disabled,
+  className,
+  ariaLabel,
+  title,
+}: {
+  value: string;
+  onValueChange: (value: string) => void;
+  options: readonly SelectOption[];
+  placeholder?: string;
+  disabled?: boolean;
+  className?: string;
+  ariaLabel?: string;
+  title?: string;
+}) {
   return (
-    <select
-      {...props}
-      className={cn(
-        inputClass,
-        "cursor-pointer appearance-none pr-7",
-        selectChevron,
-        props.className,
-      )}
-    />
+    <SelectRoot
+      value={value}
+      onValueChange={(v) => onValueChange((v ?? "") as string)}
+      disabled={disabled}
+    >
+      <SelectTrigger className={className} aria-label={ariaLabel} title={title}>
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((o) => (
+          <SelectItem key={o.value} value={o.value} disabled={o.disabled}>
+            {o.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </SelectRoot>
   );
 }
 
@@ -402,20 +437,28 @@ function DomainsSection() {
 }
 
 function KindCheckboxes({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const baseId = useId();
   const toggle = (bit: number) => onChange((value & bit) === bit ? value & ~bit : value | bit);
   return (
     <div className="flex items-center gap-2 text-[11px]">
-      {KIND_CHECKBOXES.map((k) => (
-        <label key={k.label} className="flex cursor-pointer items-center gap-1 select-none">
-          <input
-            type="checkbox"
-            checked={(value & k.bit) === k.bit}
-            onChange={() => toggle(k.bit)}
-            className="h-3 w-3 accent-primary"
-          />
-          {k.label}
-        </label>
-      ))}
+      {KIND_CHECKBOXES.map((k) => {
+        const id = `${baseId}-${k.bit}`;
+        return (
+          <label
+            key={k.label}
+            htmlFor={id}
+            className="flex cursor-pointer items-center gap-1.5 select-none"
+          >
+            <Checkbox
+              id={id}
+              checked={(value & k.bit) === k.bit}
+              onCheckedChange={() => toggle(k.bit)}
+              className="size-3.5"
+            />
+            {k.label}
+          </label>
+        );
+      })}
     </div>
   );
 }
@@ -599,12 +642,14 @@ function UsersSection() {
           />
           <Select
             value={inviteRole}
-            onChange={(e) => setInviteRole(e.target.value as typeof inviteRole)}
+            onValueChange={(v) => setInviteRole(v as typeof inviteRole)}
             className="w-auto"
-          >
-            <option value="user">User</option>
-            <option value="admin">Admin</option>
-          </Select>
+            ariaLabel="Invite role"
+            options={[
+              { value: "user", label: "User" },
+              { value: "admin", label: "Admin" },
+            ]}
+          />
           <PrimaryBtn
             onClick={() => sendInvite.mutate()}
             disabled={!inviteEmail || sendInvite.isPending}
@@ -648,11 +693,13 @@ function UsersSection() {
           />
           <Select
             value={createRole}
-            onChange={(e) => setCreateRole(e.target.value as typeof createRole)}
-          >
-            <option value="user">User</option>
-            <option value="admin">Admin</option>
-          </Select>
+            onValueChange={(v) => setCreateRole(v as typeof createRole)}
+            ariaLabel="Role"
+            options={[
+              { value: "user", label: "User" },
+              { value: "admin", label: "Admin" },
+            ]}
+          />
         </div>
         <div className="mt-3 flex justify-end">
           <PrimaryBtn
@@ -712,13 +759,15 @@ function UserRow({ user }: { user: AdminUser }) {
         <div className="flex items-center gap-2">
           <Select
             value={user.role}
-            onChange={(e) => setRole.mutate(e.target.value as "admin" | "user")}
+            onValueChange={(v) => setRole.mutate(v as "admin" | "user")}
             disabled={isMe || setRole.isPending}
             className="h-7 text-[11px]"
-          >
-            <option value="user">User</option>
-            <option value="admin">Admin</option>
-          </Select>
+            ariaLabel="Role"
+            options={[
+              { value: "user", label: "User" },
+              { value: "admin", label: "Admin" },
+            ]}
+          />
           <GhostBtn onClick={() => setOpen((v) => !v)}>{open ? "Hide" : "Grants"}</GhostBtn>
           {!isMe && (
             <GhostBtn
@@ -937,25 +986,23 @@ function ServiceCreateForm({
       <span className="text-[13px] text-muted-foreground">@</span>
       <Select
         value={domainId}
-        onChange={(e) => setDomainId(e.target.value)}
+        onValueChange={setDomainId}
         className="min-w-[160px] flex-1"
-      >
-        <option value="">Select domain…</option>
-        {eligibleDomains.map((d) => (
-          <option key={d.id} value={d.id}>
-            {d.name}
-          </option>
-        ))}
-      </Select>
+        placeholder="Select domain…"
+        ariaLabel="Domain"
+        options={eligibleDomains.map((d) => ({ value: d.id, label: d.name }))}
+      />
       <Select
         value={mode}
-        onChange={(e) => setMode(e.target.value as "duplex" | "send")}
+        onValueChange={(v) => setMode(v as "duplex" | "send")}
         title="Direction"
+        ariaLabel="Direction"
         className="min-w-[130px]"
-      >
-        <option value="duplex">send + receive</option>
-        <option value="send">send-only</option>
-      </Select>
+        options={[
+          { value: "duplex", label: "send + receive" },
+          { value: "send", label: "send-only" },
+        ]}
+      />
       <PrimaryBtn
         onClick={() => create.mutate()}
         disabled={!domainId || !local || create.isPending}
@@ -1018,14 +1065,16 @@ function ServiceRow({
         <div className="flex items-center gap-2">
           <Select
             value={s.mode}
-            onChange={(e) => setMode.mutate(e.target.value as "duplex" | "send")}
+            onValueChange={(v) => setMode.mutate(v as "duplex" | "send")}
             disabled={setMode.isPending}
             className="h-7 text-[11px]"
             title="Direction"
-          >
-            <option value="duplex">send + receive</option>
-            <option value="send">send-only</option>
-          </Select>
+            ariaLabel="Direction"
+            options={[
+              { value: "duplex", label: "send + receive" },
+              { value: "send", label: "send-only" },
+            ]}
+          />
           <GhostBtn onClick={() => rotate.mutate()} disabled={rotate.isPending}>
             {rotate.isPending ? "Rotating…" : "Rotate key"}
           </GhostBtn>
@@ -1270,25 +1319,29 @@ function AdminMailboxes({ meId }: { meId: string }) {
           />
           <Select
             value={kindFilter}
-            onChange={(e) => setKindFilter(e.target.value as typeof kindFilter)}
+            onValueChange={(v) => setKindFilter(v as typeof kindFilter)}
             className="h-8 w-auto text-[13px]"
-          >
-            <option value="all">All kinds</option>
-            <option value="personal">Personal</option>
-            <option value="group">Group</option>
-            <option value="service">Service</option>
-            <option value="temp">Temp</option>
-            <option value="redirect">Redirect</option>
-          </Select>
+            ariaLabel="Filter by kind"
+            options={[
+              { value: "all", label: "All kinds" },
+              { value: "personal", label: "Personal" },
+              { value: "group", label: "Group" },
+              { value: "service", label: "Service" },
+              { value: "temp", label: "Temp" },
+              { value: "redirect", label: "Redirect" },
+            ]}
+          />
           <Select
             value={sort}
-            onChange={(e) => setSort(e.target.value as typeof sort)}
+            onValueChange={(v) => setSort(v as typeof sort)}
             className="h-8 w-auto text-[13px]"
-          >
-            <option value="address">Address A–Z</option>
-            <option value="address-desc">Address Z–A</option>
-            <option value="type">Kind</option>
-          </Select>
+            ariaLabel="Sort"
+            options={[
+              { value: "address", label: "Address A–Z" },
+              { value: "address-desc", label: "Address Z–A" },
+              { value: "type", label: "Kind" },
+            ]}
+          />
           <span className="text-[12px] text-muted-foreground">
             {entries.length === total ? total : `${entries.length} / ${total}`}
           </span>
@@ -1387,37 +1440,26 @@ function CreateMailboxForm({
       <span className="text-[13px] text-muted-foreground">@</span>
       <Select
         value={domain}
-        onChange={(e) => {
-          setDomain(e.target.value);
-          const d = eligibleDomains.find((x) => x.id === e.target.value);
+        onValueChange={(v) => {
+          setDomain(v);
+          const d = eligibleDomains.find((x) => x.id === v);
           const first = d && KIND_CHECKBOXES.find((k) => (allowedKindsFor(d) & k.bit) === k.bit);
           if (first) setType(first.type);
         }}
         className="min-w-[160px] flex-1"
-      >
-        <option value="">Select domain…</option>
-        {eligibleDomains.map((d) => (
-          <option key={d.id} value={d.id}>
-            {d.name}
-          </option>
-        ))}
-      </Select>
+        placeholder="Select domain…"
+        ariaLabel="Domain"
+        options={eligibleDomains.map((d) => ({ value: d.id, label: d.name }))}
+      />
       <Select
-        value={type}
-        onChange={(e) => setType(e.target.value as MailboxSummary["type"])}
+        value={typeOptions.length === 0 ? "" : type}
+        onValueChange={(v) => setType(v as MailboxSummary["type"])}
         disabled={typeOptions.length === 0}
         className="min-w-[110px]"
-      >
-        {typeOptions.length === 0 ? (
-          <option value="">type</option>
-        ) : (
-          typeOptions.map((k) => (
-            <option key={k.label} value={k.type}>
-              {k.label}
-            </option>
-          ))
-        )}
-      </Select>
+        placeholder="type"
+        ariaLabel="Mailbox kind"
+        options={typeOptions.map((k) => ({ value: k.type, label: k.label }))}
+      />
       <PrimaryBtn onClick={() => create.mutate()} disabled={!domain || !local || create.isPending}>
         Add mailbox
       </PrimaryBtn>
@@ -1455,6 +1497,7 @@ function AdminCreateForm({
   const [rDomain, setRDomain] = useState("");
   const [target, setTarget] = useState("");
   const [rCatchAll, setRCatchAll] = useState(false);
+  const catchAllId = useId();
   const effLocal = rCatchAll ? "*" : rLocal;
 
   const dom = eligibleDomains.find((d) => d.id === domain);
@@ -1530,51 +1573,41 @@ function AdminCreateForm({
           <span className="text-[13px] text-muted-foreground">@</span>
           <Select
             value={domain}
-            onChange={(e) => {
-              setDomain(e.target.value);
-              const d = eligibleDomains.find((x) => x.id === e.target.value);
+            onValueChange={(v) => {
+              setDomain(v);
+              const d = eligibleDomains.find((x) => x.id === v);
               const first = d && KIND_CHECKBOXES.find((k) => (d.allowedKinds & k.bit) === k.bit);
               if (first) setType(first.type);
             }}
             className="min-w-[160px] flex-1"
-          >
-            <option value="">Select domain…</option>
-            {eligibleDomains.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
-          </Select>
+            placeholder="Select domain…"
+            ariaLabel="Domain"
+            options={eligibleDomains.map((d) => ({ value: d.id, label: d.name }))}
+          />
           <Select
-            value={type}
-            onChange={(e) => setType(e.target.value as MailboxSummary["type"])}
+            value={typeOptions.length === 0 ? "" : type}
+            onValueChange={(v) => setType(v as MailboxSummary["type"])}
             disabled={typeOptions.length === 0}
             className="w-auto min-w-[120px]"
             title="Mailbox kind"
-          >
-            {typeOptions.length === 0 ? (
-              <option value="">Type…</option>
-            ) : (
-              typeOptions.map((k) => (
-                <option key={k.label} value={k.type}>
-                  {k.label.charAt(0).toUpperCase() + k.label.slice(1)}
-                </option>
-              ))
-            )}
-          </Select>
+            ariaLabel="Mailbox kind"
+            placeholder="Type…"
+            options={typeOptions.map((k) => ({
+              value: k.type,
+              label: k.label.charAt(0).toUpperCase() + k.label.slice(1),
+            }))}
+          />
           <Select
             value={ownerId}
-            onChange={(e) => setOwner(e.target.value)}
+            onValueChange={setOwner}
             title="Owner"
+            ariaLabel="Owner"
             className="w-auto min-w-[160px]"
-          >
-            {users.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.email}
-                {u.id === meId ? " (you)" : ""}
-              </option>
-            ))}
-          </Select>
+            options={users.map((u) => ({
+              value: u.id,
+              label: `${u.email}${u.id === meId ? " (you)" : ""}`,
+            }))}
+          />
           <PrimaryBtn
             onClick={() => createMailbox.mutate()}
             disabled={!domain || !local || !ownerId || createMailbox.isPending}
@@ -1591,40 +1624,36 @@ function AdminCreateForm({
             disabled={rCatchAll}
             className="min-w-[120px] flex-1"
           />
-          <label className="flex items-center gap-1 text-[13px] text-muted-foreground">
-            <input
-              type="checkbox"
+          <label
+            htmlFor={catchAllId}
+            className="flex cursor-pointer items-center gap-1.5 text-[13px] text-muted-foreground select-none"
+          >
+            <Checkbox
+              id={catchAllId}
               checked={rCatchAll}
-              onChange={(e) => setRCatchAll(e.target.checked)}
+              onCheckedChange={setRCatchAll}
+              className="size-3.5"
             />
             catch-all
           </label>
           <span className="text-[13px] text-muted-foreground">@</span>
           <Select
             value={rDomain}
-            onChange={(e) => setRDomain(e.target.value)}
+            onValueChange={setRDomain}
             className="min-w-[150px] flex-1"
-          >
-            <option value="">Select domain…</option>
-            {allDomains.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
-          </Select>
+            placeholder="Select domain…"
+            ariaLabel="Domain"
+            options={allDomains.map((d) => ({ value: d.id, label: d.name }))}
+          />
           <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           <Select
             value={target}
-            onChange={(e) => setTarget(e.target.value)}
+            onValueChange={setTarget}
             className="min-w-[150px] flex-1"
-          >
-            <option value="">Target mailbox…</option>
-            {redirectTargets.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.address}
-              </option>
-            ))}
-          </Select>
+            placeholder="Target mailbox…"
+            ariaLabel="Target mailbox"
+            options={redirectTargets.map((m) => ({ value: m.id, label: m.address }))}
+          />
           <PrimaryBtn
             onClick={() => createRedirect.mutate()}
             disabled={!rDomain || !effLocal || !target || createRedirect.isPending}
@@ -1705,13 +1734,13 @@ function RedirectRow({
       {migrateOpen && (
         <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-3">
           <span className="text-[11px] text-muted-foreground">New target</span>
-          <Select value={target} onChange={(e) => setTarget(e.target.value)} className="flex-1">
-            {targets.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.address}
-              </option>
-            ))}
-          </Select>
+          <Select
+            value={target}
+            onValueChange={setTarget}
+            className="flex-1"
+            ariaLabel="New target"
+            options={targets.map((t) => ({ value: t.id, label: t.address }))}
+          />
           <PrimaryBtn
             onClick={() => migrate.mutate()}
             disabled={target === rd.targetMailboxId || migrate.isPending}
@@ -1867,27 +1896,25 @@ function AdminMailboxRow({
             <span className="w-16 text-[11px] text-muted-foreground">Owner</span>
             <Select
               value={newOwner}
-              onChange={(e) => setNewOwner(e.target.value)}
+              onValueChange={setNewOwner}
               className="flex-1"
-            >
-              {users.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.email}
-                </option>
-              ))}
-            </Select>
+              ariaLabel="Owner"
+              options={users.map((u) => ({ value: u.id, label: u.email }))}
+            />
           </div>
           {canRetype && (
             <div className="flex flex-wrap items-center gap-2">
               <span className="w-16 text-[11px] text-muted-foreground">Type</span>
               <Select
                 value={newType}
-                onChange={(e) => setNewType(e.target.value as AdminMailbox["type"])}
+                onValueChange={(v) => setNewType(v as AdminMailbox["type"])}
                 className="flex-1"
-              >
-                <option value="personal">personal</option>
-                <option value="group">group</option>
-              </Select>
+                ariaLabel="Type"
+                options={[
+                  { value: "personal", label: "personal" },
+                  { value: "group", label: "group" },
+                ]}
+              />
             </div>
           )}
           <div className="flex items-center justify-between gap-2">
@@ -1918,17 +1945,14 @@ function AdminMailboxRow({
           <div className="flex flex-col gap-1 text-[11px]">
             <span className="text-muted-foreground">Redirect inbound mail</span>
             <Select
-              aria-label="Redirect inbound mail"
+              ariaLabel="Redirect inbound mail"
               value={redirectTo}
-              onChange={(e) => setRedirectTo(e.target.value)}
-            >
-              <option value="">No redirect — delete permanently</option>
-              {redirectTargets.map((t) => (
-                <option key={t.id} value={t.id}>
-                  → {t.address}
-                </option>
-              ))}
-            </Select>
+              onValueChange={setRedirectTo}
+              options={[
+                { value: "", label: "No redirect — delete permanently" },
+                ...redirectTargets.map((t) => ({ value: t.id, label: `→ ${t.address}` })),
+              ]}
+            />
           </div>
           <DialogFooter>
             <DialogClose render={<Button variant="outline">Cancel</Button>} />
@@ -2129,19 +2153,16 @@ function MembersPanel({ mailboxId }: { mailboxId: string }) {
       <div className="flex flex-wrap items-center gap-2">
         <Select
           value={selectedUserId}
-          onChange={(e) => setSelectedUserId(e.target.value)}
+          onValueChange={setSelectedUserId}
           className="min-w-[200px] flex-1"
           disabled={directoryQ.isLoading}
-        >
-          <option value="">
-            {candidates.length === 0 ? "No users available" : "Select a user…"}
-          </option>
-          {candidates.map((u) => (
-            <option key={u.id} value={u.id}>
-              {u.name ? `${u.name} (${u.email})` : u.email}
-            </option>
-          ))}
-        </Select>
+          ariaLabel="User"
+          placeholder={candidates.length === 0 ? "No users available" : "Select a user…"}
+          options={candidates.map((u) => ({
+            value: u.id,
+            label: u.name ? `${u.name} (${u.email})` : u.email,
+          }))}
+        />
         <div className="flex items-center gap-2 text-[11px]">
           <PermToggle label="read" checked={read} onChange={() => setRead((v) => !v)} />
           <PermToggle label="write" checked={write} onChange={() => setWrite((v) => !v)} />
@@ -2175,14 +2196,10 @@ function PermToggle({
   checked: boolean;
   onChange: () => void;
 }) {
+  const id = useId();
   return (
-    <label className="flex cursor-pointer items-center gap-1 select-none">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={onChange}
-        className="h-3 w-3 accent-primary"
-      />
+    <label htmlFor={id} className="flex cursor-pointer items-center gap-1.5 select-none">
+      <Checkbox id={id} checked={checked} onCheckedChange={onChange} className="size-3.5" />
       {label}
     </label>
   );
@@ -2362,12 +2379,14 @@ function BlocklistPanel() {
       >
         <Select
           value={type}
-          onChange={(e) => setType(e.target.value as "email" | "domain")}
+          onValueChange={(v) => setType(v as "email" | "domain")}
           className="w-28"
-        >
-          <option value="email">email</option>
-          <option value="domain">domain</option>
-        </Select>
+          ariaLabel="Block type"
+          options={[
+            { value: "email", label: "email" },
+            { value: "domain", label: "domain" },
+          ]}
+        />
         <Input
           value={value}
           onChange={(e) => setValue(e.target.value)}
@@ -2473,12 +2492,12 @@ function ProtectedDomainsPanel() {
       title="Protected domains"
       description="These domains can never be blocked wholesale — only individual addresses on them. One domain per line."
     >
-      <textarea
+      <Textarea
         value={draft}
         onChange={(e) => setText(e.target.value)}
         rows={6}
         spellCheck={false}
-        className={cn(inputClass, "h-auto w-full resize-y font-mono text-[12px]")}
+        className="resize-y font-mono text-[12px]"
         placeholder="gmail.com&#10;proton.me"
       />
       <div className="mt-3 flex justify-end gap-2">

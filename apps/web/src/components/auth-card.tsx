@@ -1,7 +1,8 @@
 import type React from "react";
+import { useId } from "react";
 import { Logo } from "./logo.tsx";
 import { Button } from "./ui/button.tsx";
-import { inputClass } from "./ui/input.tsx";
+import { Input } from "./ui/input.tsx";
 
 export function CardShell({ title, children }: { title: string; children?: React.ReactNode }) {
   return (
@@ -38,11 +39,14 @@ export function Field({
   minLength?: number;
   autoComplete?: string;
 }) {
+  const id = useId();
   return (
-    <label className="mb-3 block">
-      <span className="mb-1.5 block font-medium text-[12px] text-foreground">{label}</span>
-      <input
-        className={inputClass}
+    <div className="mb-3">
+      <label htmlFor={id} className="mb-1.5 block font-medium text-[12px] text-foreground">
+        {label}
+      </label>
+      <Input
+        id={id}
         required={required}
         type={type}
         minLength={minLength}
@@ -50,7 +54,7 @@ export function Field({
         value={value}
         onChange={(e) => onChange(e.target.value)}
       />
-    </label>
+    </div>
   );
 }
 
