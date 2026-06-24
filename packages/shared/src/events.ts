@@ -24,6 +24,14 @@ export const hubEvent = z.discriminatedUnion("type", [
     type: z.literal("mailbox_expired"),
     mailboxId: z.string(),
   }),
+  // A deferred (scheduled) send failed at dispatch time. The draft was reverted
+  // to an editable draft so the user can retry; the client refreshes + warns.
+  z.object({
+    type: z.literal("scheduled_send_failed"),
+    mailboxId: z.string(),
+    draftId: z.string(),
+    error: z.string(),
+  }),
   z.object({
     type: z.literal("ping"),
     ts: z.number(),

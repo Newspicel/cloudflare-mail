@@ -460,6 +460,20 @@ export const sendMessage = z.object({
 });
 export type SendMessageInput = z.infer<typeof sendMessage>;
 
+// Defer a draft's send. `sendAt` is epoch ms; bounded to the future and within a
+// year so a typo can't park mail indefinitely. `payload` is the same resolved
+// body a normal send posts — the cron replays it verbatim at the chosen time.
+const MAX_SCHEDULE_AHEAD_MS = 365 * 24 * 60 * 60 * 1000;
+export const scheduleDraft = z.object({
+  sendAt: z
+    .number()
+    .int()
+    .refine((ms) => ms > Date.now() + 30_000, "must be at least a minute in the future")
+    .refine((ms) => ms < Date.now() + MAX_SCHEDULE_AHEAD_MS, "too far in the future"),
+  payload: sendMessage,
+});
+export type ScheduleDraftInput = z.infer<typeof scheduleDraft>;
+
 // Key-authed send from a service mailbox — the mailbox is resolved from the
 // bearer key; attachments (pre-uploaded R2 keys) and reply/forward quoting
 // (resolved from a stored message the key holder can't reference) are omitted.

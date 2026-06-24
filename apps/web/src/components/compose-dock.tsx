@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import DOMPurify from "dompurify";
 import {
   AlertTriangle,
+  ChevronDown,
   ExternalLink,
   Maximize2,
   Minimize2,
@@ -41,6 +42,7 @@ import {
   textToHtml,
 } from "./rich-editor.tsx";
 import { Button } from "./ui/button.tsx";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select.tsx";
 import { Textarea } from "./ui/textarea.tsx";
 
@@ -48,6 +50,52 @@ marked.setOptions({ breaks: true, gfm: true });
 
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const MAX_ATTACHMENTS = 20;
+
+// ── Scheduled-send time helpers ──────────────────────────────────────────────
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+// `datetime-local` carries no timezone, so format/parse in the user's local
+// wall-clock and stamp seconds to zero (the input has minute resolution).
+function toLocalInput(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+function atHour(d: Date, hour: number): Date {
+  const out = new Date(d);
+  out.setHours(hour, 0, 0, 0);
+  return out;
+}
+
+// The next occurrence of `weekday` (0=Sun..6=Sat) at `hour`, always in the
+// future — today counts only if `hour` hasn't passed yet.
+function nextWeekday(weekday: number, hour: number): Date {
+  const now = new Date();
+  let delta = (weekday - now.getDay() + 7) % 7;
+  if (delta === 0 && atHour(now, hour).getTime() <= now.getTime()) delta = 7;
+  const d = new Date(now);
+  d.setDate(d.getDate() + delta);
+  return atHour(d, hour);
+}
+
+function schedulePresets(): { label: string; when: Date }[] {
+  const now = new Date();
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  return [
+    { label: "In 1 hour", when: new Date(now.getTime() + 60 * 60 * 1000) },
+    { label: "In 3 hours", when: new Date(now.getTime() + 3 * 60 * 60 * 1000) },
+    { label: "Tomorrow morning", when: atHour(tomorrow, 8) },
+    { label: "Monday morning", when: nextWeekday(1, 8) },
+  ];
+}
+
+function formatWhen(d: Date): string {
+  return d.toLocaleString(undefined, {
+    weekday: "short",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
 
 interface UploadedAttachment {
   r2Key: string;
@@ -337,6 +385,8 @@ export function ComposeForm({
   const [uploading, setUploading] = useState(0);
   const [savedHint, setSavedHint] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [customWhen, setCustomWhen] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Threading context: a reopened draft carries it; a fresh reply derives it
@@ -512,52 +562,70 @@ export function ComposeForm({
     return DOMPurify.sanitize(rendered, { USE_PROFILES: { html: true } });
   }, [mode, text]);
 
+  // Resolve the editor state into the wire body: plain text → text only;
+  // markdown → text source + rendered html; rich → sanitized html plus a derived
+  // text alternative for non-HTML clients. Shared by immediate + scheduled send.
+  const buildBody = useCallback((): {
+    text: string | undefined;
+    html: string | undefined;
+  } => {
+    if (mode === "html") {
+      const htmlBody = html.trim()
+        ? DOMPurify.sanitize(html, { USE_PROFILES: { html: true } })
+        : undefined;
+      return { html: htmlBody, text: htmlBody ? htmlToText(html) || undefined : undefined };
+    }
+    if (mode === "markdown") {
+      return { text, html: text.trim() ? previewHtml : undefined };
+    }
+    return { text, html: undefined };
+  }, [mode, html, text, previewHtml]);
+
+  // The full outbound payload — identical whether the send fires now or later.
+  const buildSendPayload = useCallback(() => {
+    const body = buildBody();
+    const ccList = collectRecipients(cc);
+    const bccList = collectRecipients(bcc);
+    return {
+      mailboxId,
+      fromAddress: fromAddress ?? undefined,
+      to: collectRecipients(to),
+      cc: ccList.length ? ccList : undefined,
+      bcc: bccList.length ? bccList : undefined,
+      subject,
+      text: body.text,
+      html: body.html,
+      inReplyTo,
+      references,
+      quote: quoteRef ?? undefined,
+      attachments: attachments.length
+        ? attachments.map((a) => ({
+            r2Key: a.r2Key,
+            filename: a.filename,
+            contentType: a.contentType,
+          }))
+        : undefined,
+    };
+  }, [
+    buildBody,
+    cc,
+    bcc,
+    to,
+    mailboxId,
+    fromAddress,
+    subject,
+    inReplyTo,
+    references,
+    quoteRef,
+    attachments,
+  ]);
+
   const send = useMutation({
-    mutationFn: async () => {
-      // Plain text → text only. Markdown → text source + rendered html. Rich →
-      // sanitized html + a derived text alternative for non-HTML clients.
-      let textBody: string | undefined;
-      let htmlBody: string | undefined;
-      if (mode === "html") {
-        htmlBody = html.trim()
-          ? DOMPurify.sanitize(html, { USE_PROFILES: { html: true } })
-          : undefined;
-        textBody = htmlBody ? htmlToText(html) || undefined : undefined;
-      } else if (mode === "markdown") {
-        textBody = text;
-        htmlBody = text.trim() ? previewHtml : undefined;
-      } else {
-        textBody = text;
-      }
-      const ccList = collectRecipients(cc);
-      const bccList = collectRecipients(bcc);
-      return api<{ messageId: string; threadId: string; pgpWarning?: string }>(
-        "/api/messages/send",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            mailboxId,
-            fromAddress: fromAddress ?? undefined,
-            to: collectRecipients(to),
-            cc: ccList.length ? ccList : undefined,
-            bcc: bccList.length ? bccList : undefined,
-            subject,
-            text: textBody,
-            html: htmlBody,
-            inReplyTo,
-            references,
-            quote: quoteRef ?? undefined,
-            attachments: attachments.length
-              ? attachments.map((a) => ({
-                  r2Key: a.r2Key,
-                  filename: a.filename,
-                  contentType: a.contentType,
-                }))
-              : undefined,
-          }),
-        },
-      );
-    },
+    mutationFn: async () =>
+      api<{ messageId: string; threadId: string; pgpWarning?: string }>("/api/messages/send", {
+        method: "POST",
+        body: JSON.stringify(buildSendPayload()),
+      }),
     onSuccess: async (res) => {
       if (res?.pgpWarning) toast.warning(res.pgpWarning);
       else toast.success("Message sent");
@@ -572,6 +640,31 @@ export function ComposeForm({
     },
     onError: (err: unknown) => {
       toast.error(err instanceof Error ? err.message : "Send failed");
+    },
+  });
+
+  // Defer the send: persist the draft, then hand the server the resolved payload
+  // + target time. The draft becomes the scheduled record (visible/cancelable in
+  // Drafts) rather than being deleted.
+  const schedule = useMutation({
+    mutationFn: async (sendAt: number) => {
+      const id = await ensureDraftSaved();
+      if (!id) throw new Error("Nothing to schedule");
+      return api(`/api/drafts/${id}/schedule`, {
+        method: "POST",
+        body: JSON.stringify({ sendAt, payload: buildSendPayload() }),
+      });
+    },
+    onSuccess: (_res, sendAt) => {
+      toast.success(`Send scheduled for ${new Date(sendAt).toLocaleString()}`);
+      invalidateDrafts();
+      // The draft now holds the scheduled payload — suppress the close-flush so
+      // unmount doesn't PATCH a stale edit over it.
+      latestRef.current = null;
+      finish();
+    },
+    onError: (err: unknown) => {
+      toast.error(err instanceof Error ? err.message : "Failed to schedule");
     },
   });
 
@@ -635,21 +728,40 @@ export function ComposeForm({
   // Guard against the classic "forgot the attachment". Only the body the user
   // actually composed is scanned — the quoted reply/forward original lives
   // server-side and never reaches here, so it can't trip a false warning.
-  function attemptSend() {
+  function passesSendGuards(): boolean {
     const composed = mode === "html" ? htmlToText(html) : text;
     if (attachments.length === 0 && uploading === 0 && mentionsAttachment(composed)) {
       const ok = window.confirm(
         "It looks like you mentioned an attachment, but nothing is attached.\n\nSend anyway?",
       );
-      if (!ok) return;
+      if (!ok) return false;
     }
     if (blockedRecipients.length > 0) {
       const ok = window.confirm(
         `You've blocked ${blockedRecipients.join(", ")}. They can't reach this server, so you won't receive any reply.\n\nSend anyway?`,
       );
-      if (!ok) return;
+      if (!ok) return false;
     }
-    send.mutate();
+    return true;
+  }
+
+  function attemptSend() {
+    if (passesSendGuards()) send.mutate();
+  }
+
+  // Schedule the send for `when`, applying the same pre-send guards.
+  function scheduleSend(when: Date) {
+    if (Number.isNaN(when.getTime())) {
+      toast.error("Pick a valid date and time");
+      return;
+    }
+    if (when.getTime() < Date.now() + 60_000) {
+      toast.error("Pick a time at least a minute from now");
+      return;
+    }
+    if (!passesSendGuards()) return;
+    setScheduleOpen(false);
+    schedule.mutate(when.getTime());
   }
 
   // ⌘/Ctrl+Enter sends, when enabled in preferences. Bound on the compose
@@ -996,13 +1108,81 @@ export function ComposeForm({
 
       <div className="flex items-center justify-between gap-3 border-t bg-muted/40 px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:pb-2">
         <div className="flex items-center gap-1.5">
-          <Button
-            variant="primary"
-            onClick={attemptSend}
-            disabled={send.isPending || uploading > 0 || !mailboxId || !hasRecipients(to)}
-          >
-            {send.isPending ? "Sending…" : "Send"}
-          </Button>
+          <div className="flex items-center">
+            <Button
+              variant="primary"
+              onClick={attemptSend}
+              disabled={
+                send.isPending ||
+                schedule.isPending ||
+                uploading > 0 ||
+                !mailboxId ||
+                !hasRecipients(to)
+              }
+              className="rounded-r-none"
+            >
+              {send.isPending ? "Sending…" : "Send"}
+            </Button>
+            <Popover open={scheduleOpen} onOpenChange={setScheduleOpen}>
+              <PopoverTrigger
+                render={
+                  <Button
+                    variant="primary"
+                    size="icon"
+                    aria-label="Schedule send"
+                    disabled={
+                      send.isPending ||
+                      schedule.isPending ||
+                      uploading > 0 ||
+                      !mailboxId ||
+                      !hasRecipients(to)
+                    }
+                    className="ml-px w-7 rounded-l-none border-primary-foreground/20 border-l"
+                  >
+                    <ChevronDown />
+                  </Button>
+                }
+              />
+              <PopoverContent side="top" align="start" className="w-64 p-1.5">
+                <div className="px-1.5 py-1 font-medium text-[11px] text-muted-foreground">
+                  Schedule send
+                </div>
+                {schedulePresets().map((p) => (
+                  <button
+                    key={p.label}
+                    type="button"
+                    onClick={() => scheduleSend(p.when)}
+                    className="flex w-full items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors hover:bg-accent"
+                  >
+                    <span>{p.label}</span>
+                    <span className="text-[11px] text-muted-foreground">{formatWhen(p.when)}</span>
+                  </button>
+                ))}
+                <div className="my-1 h-px bg-border" />
+                <div className="px-1.5 pt-0.5 pb-1">
+                  <span className="mb-1 block text-[11px] text-muted-foreground">
+                    Custom date &amp; time
+                  </span>
+                  <input
+                    type="datetime-local"
+                    value={customWhen}
+                    min={toLocalInput(new Date())}
+                    onChange={(e) => setCustomWhen(e.target.value)}
+                    className="w-full rounded-md border bg-card px-2 py-1 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                  />
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="mt-2 w-full"
+                    disabled={!customWhen || schedule.isPending}
+                    onClick={() => scheduleSend(new Date(customWhen))}
+                  >
+                    Schedule
+                  </Button>
+                </div>
+              </PopoverContent>
+            </Popover>
+          </div>
           <Button
             variant="ghost"
             size="icon"

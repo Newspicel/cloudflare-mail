@@ -26,6 +26,11 @@ export function connectStream(qc: QueryClient, navigate?: Navigate): () => void 
           const nowIso = new Date().toISOString();
           bumpThreadToTop(qc, evt.mailboxId, evt.threadId, nowIso, false);
           invalidateThreadChange(qc, evt.mailboxId, evt.threadId);
+          // A scheduled send the cron just dispatched deletes its draft — drop it
+          // from the Drafts list too (harmless for ordinary sends, which already
+          // clear their own draft client-side).
+          qc.invalidateQueries({ queryKey: keys.drafts(evt.mailboxId) });
+          qc.invalidateQueries({ queryKey: keys.drafts("all") });
           break;
         }
         case "thread_updated": {
@@ -38,6 +43,14 @@ export function connectStream(qc: QueryClient, navigate?: Navigate): () => void 
           qc.invalidateQueries({ queryKey: keys.mailboxes() });
           break;
         }
+        case "scheduled_send_failed": {
+          // The send was reverted to a draft — refresh the drafts list and warn.
+          qc.invalidateQueries({ queryKey: keys.drafts(evt.mailboxId) });
+          qc.invalidateQueries({ queryKey: keys.drafts("all") });
+          qc.invalidateQueries({ queryKey: keys.folderCounts(evt.mailboxId) });
+          toast.error(`Scheduled send failed: ${evt.error}`);
+          break;
+        }
         case "ping":
           break;
       }
@@ -46,7 +59,14 @@ export function connectStream(qc: QueryClient, navigate?: Navigate): () => void 
     }
   };
 
-  for (const t of ["new_message", "message_sent", "thread_updated", "mailbox_expired", "ping"]) {
+  for (const t of [
+    "new_message",
+    "message_sent",
+    "thread_updated",
+    "mailbox_expired",
+    "scheduled_send_failed",
+    "ping",
+  ]) {
     es.addEventListener(t, onEvent);
   }
   return () => es.close();
