@@ -1,4 +1,4 @@
-import { draft, message, thread, threadFolder } from "@cfmail/db/schema";
+import { draft, message, thread, threadFolder, threadSummary } from "@cfmail/db/schema";
 import { Flag } from "@cfmail/shared/flags";
 import { Perm } from "@cfmail/shared/permissions";
 import type { FolderCountsResponseDto, ThreadSummaryDto } from "@cfmail/shared/responses";
@@ -194,6 +194,15 @@ export function threadsRoutes() {
     });
     if (!mb?.aiFeatures) throw new HTTPException(403, { message: "AI features are off" });
 
+    // Reuse a cached summary while the thread is unchanged. `msgCount` moves on
+    // any add/remove, so a stale cache is simply ignored and regenerated.
+    const cached = await db.query.threadSummary.findFirst({
+      where: (s, { eq }) => eq(s.threadId, id),
+    });
+    if (cached && cached.msgCount === th.msgCount) {
+      return c.json({ bullets: cached.bullets } satisfies ThreadSummaryDto);
+    }
+
     // Cap how many messages feed the model so a long thread can't blow the
     // budget; keep the most recent ones, oldest-first for chronological context.
     const msgs = await db
@@ -220,6 +229,17 @@ export function threadsRoutes() {
         body: m.bodyText ?? "",
       })),
     );
+    // Only cache a real result — an empty list means generation failed or the
+    // budget was exhausted, so leave it uncached to retry next time.
+    if (bullets.length > 0) {
+      await db
+        .insert(threadSummary)
+        .values({ threadId: id, bullets, msgCount: th.msgCount, updatedAt: new Date() })
+        .onConflictDoUpdate({
+          target: threadSummary.threadId,
+          set: { bullets, msgCount: th.msgCount, updatedAt: new Date() },
+        });
+    }
     return c.json({ bullets } satisfies ThreadSummaryDto);
   });
 

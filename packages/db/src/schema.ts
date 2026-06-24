@@ -466,6 +466,20 @@ export const attachment = sqliteTable(
   (t) => [index("attachment_message_idx").on(t.messageId)],
 );
 
+// Cached AI catch-up summary for a thread (on-demand). Kept in its own table so
+// the bullets don't bloat every thread-list row. `msgCount` is the thread's
+// message count when generated; the endpoint regenerates when it no longer
+// matches (i.e. a message was added or removed), so an unchanged thread reuses
+// the cached bullets instead of paying for the model again.
+export const threadSummary = sqliteTable("thread_summary", {
+  threadId: text("thread_id")
+    .primaryKey()
+    .references(() => thread.id, { onDelete: "cascade" }),
+  bullets: text("bullets", { mode: "json" }).$type<string[]>().notNull(),
+  msgCount: integer("msg_count").notNull(),
+  updatedAt: updatedAt(),
+});
+
 // Cumulative Workers AI spam-classification usage per mailbox. `period`
 // (YYYY-MM) lets the monthly cap reset without deleting rows.
 export const mailboxSpamUsage = sqliteTable("mailbox_spam_usage", {
