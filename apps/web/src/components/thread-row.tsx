@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { Mails } from "lucide-react";
-import type * as React from "react";
+import * as React from "react";
+import { useCallback, useLayoutEffect, useRef } from "react";
 import { cn } from "@/lib/cn.ts";
 import { clearThreadDragGhost, setThreadDrag } from "@/lib/dnd.ts";
 import { useDateTimeFmt, useUserPrefs } from "@/lib/prefs.ts";
@@ -42,6 +43,8 @@ interface Props {
   rowRef?: (el: HTMLLIElement | null) => void;
   style?: React.CSSProperties;
   dataIndex?: number;
+  /** Force a fresh height re-measure for this row (async content changed it). */
+  remeasure?: (index: number, el: HTMLLIElement) => void;
 }
 
 export function ThreadRowView({
@@ -55,6 +58,7 @@ export function ThreadRowView({
   rowRef,
   style,
   dataIndex,
+  remeasure,
 }: Props) {
   const { prefs } = useUserPrefs();
   const fmt = useDateTimeFmt();
@@ -64,6 +68,26 @@ export function ThreadRowView({
   const unread = thread.unreadCount > 0;
   const showSummary = prefs.aiSummaries !== false && !!thread.aiSummary;
   const category = thread.aiCategory && thread.aiCategory !== "other" ? thread.aiCategory : null;
+
+  // Label chips come from a separate query that resolves after the row first
+  // measures, growing it a line taller. The virtualizer's ResizeObserver doesn't
+  // reliably catch that late change, leaving the rows below overlapped until a
+  // re-render. Force a fresh height read when the row's line count can change.
+  const node = useRef<HTMLLIElement | null>(null);
+  const setRow = useCallback(
+    (el: HTMLLIElement | null) => {
+      node.current = el;
+      rowRef?.(el);
+    },
+    [rowRef],
+  );
+  // Anything that adds/removes a line and can land after the first measure:
+  // label chips (async query) plus summary/category (can stream in over SSE).
+  const heightKey = `${labels?.map((l) => l.id).join(",") ?? ""}|${category ?? ""}|${showSummary ? 1 : 0}|${compact ? 1 : 0}`;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure on height change
+  useLayoutEffect(() => {
+    if (node.current && dataIndex !== undefined) remeasure?.(dataIndex, node.current);
+  }, [heightKey, dataIndex, remeasure]);
 
   const onDragStart = (e: React.DragEvent) =>
     setThreadDrag(e, {
@@ -147,7 +171,7 @@ export function ThreadRowView({
 
   return (
     <li
-      ref={rowRef}
+      ref={setRow}
       data-index={dataIndex}
       style={style}
       draggable
