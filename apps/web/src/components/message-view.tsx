@@ -227,6 +227,40 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
     if (last) setMsg.mutate({ id: last.id, patch: { seen: false } });
   }
 
+  // Open a thread positioned at the newest message's header, and keep it pinned
+  // there while older messages' bodies stream in (their height changes shift the
+  // anchor) — until the user scrolls, after which we leave the position alone.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const lastCardRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+    let pinned = true;
+    const align = () => {
+      const card = lastCardRef.current;
+      if (!pinned || !card) return;
+      container.scrollTop +=
+        card.getBoundingClientRect().top - container.getBoundingClientRect().top;
+    };
+    align();
+    const ro = new ResizeObserver(align);
+    for (const child of Array.from(container.children)) ro.observe(child);
+    const release = () => {
+      pinned = false;
+      ro.disconnect();
+    };
+    const opts: AddEventListenerOptions = { passive: true };
+    container.addEventListener("wheel", release, opts);
+    container.addEventListener("touchstart", release, opts);
+    container.addEventListener("keydown", release);
+    return () => {
+      ro.disconnect();
+      container.removeEventListener("wheel", release, opts);
+      container.removeEventListener("touchstart", release, opts);
+      container.removeEventListener("keydown", release);
+    };
+  }, [thread.id]);
+
   // Individually-trashed messages are hidden from the active folders. The Trash
   // view shows the whole conversation when the thread itself is trashed, else
   // only its deleted messages; "All" shows everything.
@@ -325,13 +359,14 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
           )}
         </div>
 
-        <div className="flex-1 space-y-3 overflow-y-auto p-3 sm:p-4">
+        <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-3 sm:p-4">
           {!readOnly && (
             <ThreadAiPanel key={thread.id} thread={thread} messages={visibleMessages} />
           )}
-          {visibleMessages.map((m) => (
+          {visibleMessages.map((m, i) => (
             <MessageCard
               key={m.id}
+              cardRef={i === visibleMessages.length - 1 ? lastCardRef : undefined}
               msg={m}
               readOnly={readOnly}
               busy={setMsg.isPending || delMsg.isPending}
@@ -850,6 +885,7 @@ function CalendarBanner({ event }: { event: CalendarEventDto }) {
 
 function MessageCard({
   msg,
+  cardRef,
   readOnly,
   onTrash,
   onRestore,
@@ -858,6 +894,7 @@ function MessageCard({
   onToggleStar,
 }: {
   msg: MessageRow;
+  cardRef?: React.Ref<HTMLElement>;
   readOnly: boolean;
   onTrash?: () => void;
   onRestore?: () => void;
@@ -877,7 +914,10 @@ function MessageCard({
   const when = new Date(msg.sentAt ?? msg.receivedAt ?? msg.createdAt);
 
   return (
-    <article className="overflow-hidden rounded-lg border bg-card shadow-black/[0.02] shadow-sm">
+    <article
+      ref={cardRef}
+      className="overflow-hidden rounded-lg border bg-card shadow-black/[0.02] shadow-sm"
+    >
       <header className="flex items-start justify-between gap-4 border-b px-4 py-2.5">
         <div className="min-w-0">
           <div className="flex items-center gap-1.5 font-semibold text-[13px]">
