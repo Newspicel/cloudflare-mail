@@ -586,10 +586,11 @@ function shortFp(fp: string): string {
 }
 
 /**
- * Bulk-import exported mail (.eml/.mbox/.zip) into a chosen mailbox. Extraction
- * runs in the browser; each message is POSTed individually so large archives
- * never hit a Worker body/time limit. Imported mail is marked read and deduped
- * by Message-ID, so re-running an import is safe.
+ * Bulk-import exported mail (.eml/.mbox/.zip, incl. a Proton Mail export) into a
+ * chosen mailbox. Extraction runs in the browser; each message is POSTed
+ * individually so large archives never hit a Worker body/time limit. Mail is
+ * deduped by Message-ID (re-running is safe) and marked read unless an export's
+ * metadata says otherwise.
  */
 export function MailboxImportSection({ mailboxes }: { mailboxes: ImportTarget[] }) {
   const qc = useQueryClient();
@@ -637,7 +638,7 @@ export function MailboxImportSection({ mailboxes }: { mailboxes: ImportTarget[] 
   return (
     <Section
       title="Import mail"
-      description="Upload exported messages — .eml, .mbox, or a .zip of either."
+      description="Upload exported messages — .eml, .mbox, or a .zip (incl. a Proton Mail export)."
       footer={
         <Button variant="primary" disabled={!files.length || running || !mailboxId} onClick={start}>
           {running
@@ -670,7 +671,7 @@ export function MailboxImportSection({ mailboxes }: { mailboxes: ImportTarget[] 
       <input
         ref={inputRef}
         type="file"
-        accept=".eml,.mbox,.zip,message/rfc822"
+        accept=".eml,.mbox,.zip,.json,message/rfc822"
         multiple
         disabled={running}
         onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
