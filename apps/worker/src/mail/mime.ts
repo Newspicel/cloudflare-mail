@@ -75,7 +75,14 @@ export interface BuildMimeInput extends ThreadingHeaders {
     filename: string;
     contentType: string;
     data: Uint8Array;
+    // Inline body parts (cid: images). `contentId` is matched by the HTML's
+    // `cid:` references; set `inline` so it lands in the related/inline part.
+    inline?: boolean;
+    contentId?: string;
   }[];
+  // Extra raw headers (e.g. Auto-Submitted for automated rule sends). Applied
+  // after threading headers; don't use this to override Message-ID/From/To.
+  extraHeaders?: Record<string, string>;
 }
 
 export function buildMime(input: BuildMimeInput): string {
@@ -93,16 +100,22 @@ export function buildMime(input: BuildMimeInput): string {
     msg.setHeader(name, value);
   }
   if (input.replyTo) msg.setHeader("Reply-To", input.replyTo);
+  for (const [name, value] of Object.entries(input.extraHeaders ?? {})) {
+    msg.setHeader(name, value);
+  }
 
   if (input.text) msg.addMessage({ contentType: "text/plain", data: input.text });
   if (input.html) msg.addMessage({ contentType: "text/html", data: input.html });
 
   for (const att of input.attachments ?? []) {
+    const cid = att.contentId ? normalizeContentId(att.contentId) : undefined;
     msg.addAttachment({
       filename: sanitizeFilename(att.filename),
       contentType: att.contentType,
       data: uint8ToBase64(att.data),
       encoding: "base64",
+      inline: att.inline || undefined,
+      headers: cid ? { "Content-ID": cid } : undefined,
     });
   }
 
@@ -119,6 +132,14 @@ function sanitizeFilename(name: string): string {
     clean += ch;
   }
   return clean.trim().slice(0, 200) || "attachment";
+}
+
+// Content-ID must be angle-bracketed (`<id>`) in the header; HTML refers to the
+// bare id via `cid:id`. Strip stray brackets/whitespace, then re-wrap so both
+// agree regardless of how the source labelled it.
+function normalizeContentId(id: string): string {
+  const bare = id.trim().replace(/^<|>$/g, "");
+  return bare ? `<${bare}>` : "";
 }
 
 function uint8ToBase64(bytes: Uint8Array): string {

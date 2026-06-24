@@ -162,6 +162,13 @@
       "when": 1782250768067,
       "tag": "0022_luxuriant_the_phantom",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1782289950569,
+      "tag": "0023_round_spirit",
+      "breakpoints": true
     }
   ]
 }

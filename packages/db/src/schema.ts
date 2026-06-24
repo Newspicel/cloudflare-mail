@@ -35,6 +35,8 @@ export type RuleAction =
   | { type: "moveFolder"; folderId: string }
   | { type: "markRead" }
   | { type: "markSpam" }
+  | { type: "forward"; to: string }
+  | { type: "autoReply"; subject?: string; body: string }
   | { type: "hardBlock" }
   | { type: "stopProcessing" };
 
@@ -546,6 +548,31 @@ export const rule = sqliteTable(
   (t) => [
     uniqueIndex("rule_mailbox_name_uq").on(t.mailboxId, t.name),
     index("rule_mailbox_priority_idx").on(t.mailboxId, t.priority),
+  ],
+);
+
+// Audit/throttle ledger for rule-driven outbound sends (forward + autoReply).
+// Two reads off this: a per-(rule, recipient) lookup powers the vacation
+// responder's "reply at most once per sender per window", and a per-mailbox
+// count over a recent window caps the auto-send rate (anti-relay backstop).
+// Rows are best-effort; a missing row just means we might send once more.
+export const ruleSendLog = sqliteTable(
+  "rule_send_log",
+  {
+    id: text("id").primaryKey(),
+    mailboxId: text("mailbox_id")
+      .notNull()
+      .references(() => mailbox.id, { onDelete: "cascade" }),
+    ruleId: text("rule_id")
+      .notNull()
+      .references(() => rule.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: ["forward", "autoReply"] }).notNull(),
+    recipient: text("recipient").notNull(),
+    sentAt: createdAt(),
+  },
+  (t) => [
+    index("rule_send_log_mailbox_sent_idx").on(t.mailboxId, t.sentAt),
+    index("rule_send_log_rule_recipient_idx").on(t.ruleId, t.recipient, t.sentAt),
   ],
 );
 

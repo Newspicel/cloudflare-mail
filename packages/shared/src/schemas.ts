@@ -221,13 +221,21 @@ const ruleCondition = z.object({
   value: z.string().min(1).max(512),
 });
 
-// Actions are a discriminated union on `type`; only applyLabel/moveFolder carry
-// a target id. Order is preserved (hardBlock/stopProcessing short-circuit eval).
+// Actions are a discriminated union on `type`. applyLabel/moveFolder carry a
+// target id; forward carries an external address; autoReply carries the canned
+// body (+ optional subject). Order is preserved (hardBlock/stopProcessing
+// short-circuit eval).
 const ruleAction = z.discriminatedUnion("type", [
   z.object({ type: z.literal("applyLabel"), labelId: z.string().min(1) }),
   z.object({ type: z.literal("moveFolder"), folderId: z.string().min(1) }),
   z.object({ type: z.literal("markRead") }),
   z.object({ type: z.literal("markSpam") }),
+  z.object({ type: z.literal("forward"), to: z.string().email().max(254) }),
+  z.object({
+    type: z.literal("autoReply"),
+    subject: z.string().max(255).optional(),
+    body: z.string().min(1).max(5000),
+  }),
   z.object({ type: z.literal("hardBlock") }),
   z.object({ type: z.literal("stopProcessing") }),
 ]);

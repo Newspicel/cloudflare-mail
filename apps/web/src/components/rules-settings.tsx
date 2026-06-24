@@ -40,6 +40,7 @@ import {
 import { Input } from "./ui/input.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select.tsx";
 import { Switch } from "./ui/switch.tsx";
+import { Textarea } from "./ui/textarea.tsx";
 
 const FIELD_LABELS: Record<RuleField, string> = {
   from: "From",
@@ -64,9 +65,13 @@ const ACTION_LABELS: Record<RuleActionType, string> = {
   moveFolder: "Move to folder",
   markRead: "Mark as read",
   markSpam: "Mark as spam",
+  forward: "Forward to address",
+  autoReply: "Auto-reply",
   hardBlock: "Block (reject)",
   stopProcessing: "Stop processing rules",
 };
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // ─── Section ────────────────────────────────────────────────────────────────
 
@@ -316,7 +321,15 @@ function summarize(r: RuleRow): string {
 // by add/remove); it's stripped before the rule is saved.
 const uid = () => crypto.randomUUID();
 type CondDraft = RuleCondition & { rowId: string };
-type ActionDraft = { rowId: string; type: RuleActionType; labelId?: string; folderId?: string };
+type ActionDraft = {
+  rowId: string;
+  type: RuleActionType;
+  labelId?: string;
+  folderId?: string;
+  to?: string;
+  subject?: string;
+  body?: string;
+};
 
 function RuleEditor({
   mailboxId,
@@ -349,6 +362,9 @@ function RuleEditor({
           type: a.type,
           labelId: a.type === "applyLabel" ? a.labelId : undefined,
           folderId: a.type === "moveFolder" ? a.folderId : undefined,
+          to: a.type === "forward" ? a.to : undefined,
+          subject: a.type === "autoReply" ? a.subject : undefined,
+          body: a.type === "autoReply" ? a.body : undefined,
         }))
       : [{ rowId: uid(), type: "applyLabel" }],
   );
@@ -359,7 +375,11 @@ function RuleEditor({
     conditions.every((c) => c.value.trim().length > 0) &&
     actions.length > 0 &&
     actions.every(
-      (a) => (a.type !== "applyLabel" || !!a.labelId) && (a.type !== "moveFolder" || !!a.folderId),
+      (a) =>
+        (a.type !== "applyLabel" || !!a.labelId) &&
+        (a.type !== "moveFolder" || !!a.folderId) &&
+        (a.type !== "forward" || EMAIL_RE.test((a.to ?? "").trim())) &&
+        (a.type !== "autoReply" || (a.body ?? "").trim().length > 0),
     );
 
   const save = useMutation({
@@ -375,6 +395,11 @@ function RuleEditor({
         actions: actions.map((a): RuleAction => {
           if (a.type === "applyLabel") return { type: "applyLabel", labelId: a.labelId! };
           if (a.type === "moveFolder") return { type: "moveFolder", folderId: a.folderId! };
+          if (a.type === "forward") return { type: "forward", to: a.to!.trim() };
+          if (a.type === "autoReply") {
+            const subject = a.subject?.trim();
+            return { type: "autoReply", body: a.body!.trim(), ...(subject ? { subject } : {}) };
+          }
           return { type: a.type };
         }),
         enabled,
@@ -498,67 +523,100 @@ function RuleEditor({
             <div className="mb-1.5 text-[12px] font-medium text-muted-foreground">Then</div>
             <div className="space-y-2">
               {actions.map((a, i) => (
-                <div key={a.rowId} className="flex items-center gap-1.5">
-                  <Select
-                    value={a.type}
-                    onValueChange={(v) => setAction(i, { type: v as RuleActionType })}
-                  >
-                    <SelectTrigger className="h-8 w-44 shrink-0">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {RULE_ACTION_TYPES.map((t) => (
-                        <SelectItem key={t} value={t}>
-                          {ACTION_LABELS[t]}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {a.type === "applyLabel" && (
+                <div key={a.rowId} className="flex flex-col gap-1.5">
+                  <div className="flex items-center gap-1.5">
                     <Select
-                      value={a.labelId ?? ""}
-                      onValueChange={(v) => setAction(i, { labelId: v as string })}
+                      value={a.type}
+                      onValueChange={(v) => setAction(i, { type: v as RuleActionType })}
                     >
-                      <SelectTrigger className="h-8 min-w-0 flex-1">
-                        <SelectValue placeholder={labels.length ? "Pick a label" : "No labels"} />
+                      <SelectTrigger className="h-8 w-44 shrink-0">
+                        <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {labels.map((l) => (
-                          <SelectItem key={l.id} value={l.id}>
-                            {l.name}
+                        {RULE_ACTION_TYPES.map((t) => (
+                          <SelectItem key={t} value={t}>
+                            {ACTION_LABELS[t]}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
-                  )}
-                  {a.type === "moveFolder" && (
-                    <Select
-                      value={a.folderId ?? ""}
-                      onValueChange={(v) => setAction(i, { folderId: v as string })}
+                    {a.type === "applyLabel" && (
+                      <Select
+                        value={a.labelId ?? ""}
+                        onValueChange={(v) => setAction(i, { labelId: v as string })}
+                      >
+                        <SelectTrigger className="h-8 min-w-0 flex-1">
+                          <SelectValue placeholder={labels.length ? "Pick a label" : "No labels"} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {labels.map((l) => (
+                            <SelectItem key={l.id} value={l.id}>
+                              {l.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                    {a.type === "moveFolder" && (
+                      <Select
+                        value={a.folderId ?? ""}
+                        onValueChange={(v) => setAction(i, { folderId: v as string })}
+                      >
+                        <SelectTrigger className="h-8 min-w-0 flex-1">
+                          <SelectValue
+                            placeholder={folders.length ? "Pick a folder" : "No folders"}
+                          />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {folders.map((f) => (
+                            <SelectItem key={f.id} value={f.id}>
+                              {f.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                    {a.type === "forward" && (
+                      <Input
+                        type="email"
+                        value={a.to ?? ""}
+                        onChange={(e) => setAction(i, { to: e.target.value })}
+                        placeholder="forward@example.com"
+                        aria-label="Forward to address"
+                        className="h-8 min-w-0 flex-1"
+                      />
+                    )}
+                    {a.type === "autoReply" && (
+                      <Input
+                        value={a.subject ?? ""}
+                        onChange={(e) => setAction(i, { subject: e.target.value })}
+                        maxLength={255}
+                        placeholder="Subject (optional)"
+                        aria-label="Auto-reply subject"
+                        className="h-8 min-w-0 flex-1"
+                      />
+                    )}
+                    <button
+                      type="button"
+                      aria-label="Remove action"
+                      disabled={actions.length === 1}
+                      onClick={() => setActions((as) => as.filter((_, idx) => idx !== i))}
+                      className="ml-auto rounded p-1.5 text-muted-foreground transition hover:bg-muted disabled:opacity-30"
                     >
-                      <SelectTrigger className="h-8 min-w-0 flex-1">
-                        <SelectValue
-                          placeholder={folders.length ? "Pick a folder" : "No folders"}
-                        />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {folders.map((f) => (
-                          <SelectItem key={f.id} value={f.id}>
-                            {f.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      <X className="size-3.5" />
+                    </button>
+                  </div>
+                  {a.type === "autoReply" && (
+                    <Textarea
+                      value={a.body ?? ""}
+                      onChange={(e) => setAction(i, { body: e.target.value })}
+                      maxLength={5000}
+                      rows={3}
+                      placeholder="Auto-reply message…"
+                      aria-label="Auto-reply message"
+                      className="ml-[11.75rem] min-h-16"
+                    />
                   )}
-                  <button
-                    type="button"
-                    aria-label="Remove action"
-                    disabled={actions.length === 1}
-                    onClick={() => setActions((as) => as.filter((_, idx) => idx !== i))}
-                    className="ml-auto rounded p-1.5 text-muted-foreground transition hover:bg-muted disabled:opacity-30"
-                  >
-                    <X className="size-3.5" />
-                  </button>
                 </div>
               ))}
             </div>

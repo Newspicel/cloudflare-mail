@@ -29,6 +29,10 @@ export interface RuleOutcome {
   labelIds: string[];
   // Last moveFolder wins; files into this user's thread_folder (invariant 17).
   folder?: { userId: string; folderId: string };
+  // Best-effort outbound sends, executed after the message is stored (never
+  // block delivery). `ruleId` ties each back to its rule for throttle/audit.
+  forwards: { ruleId: string; to: string }[];
+  autoReplies: { ruleId: string; subject?: string; body: string }[];
 }
 
 // Evaluate a mailbox's enabled rules against a parsed inbound message. Pure read
@@ -46,7 +50,13 @@ export async function evaluateRules(
     .where(and(eq(rule.mailboxId, mailboxId), eq(rule.enabled, true)))
     .orderBy(asc(rule.priority), asc(rule.createdAt));
 
-  const outcome: RuleOutcome = { markSpam: false, markRead: false, labelIds: [] };
+  const outcome: RuleOutcome = {
+    markSpam: false,
+    markRead: false,
+    labelIds: [],
+    forwards: [],
+    autoReplies: [],
+  };
 
   for (const r of rows) {
     const conditions = r.conditions ?? [];
@@ -68,6 +78,12 @@ export async function evaluateRules(
           break;
         case "markSpam":
           outcome.markSpam = true;
+          break;
+        case "forward":
+          outcome.forwards.push({ ruleId: r.id, to: action.to });
+          break;
+        case "autoReply":
+          outcome.autoReplies.push({ ruleId: r.id, subject: action.subject, body: action.body });
           break;
         case "hardBlock":
           outcome.reject = "Address not found";
