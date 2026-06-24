@@ -80,6 +80,8 @@ function MovePopover({ threadIds, mailboxId, currentFolderId, onMoved }: Props) 
     );
   }
 
+  const otherFolders = folders.filter((f) => f.id !== currentFolderId);
+
   const create = useMutation({
     mutationFn: () =>
       api<{ id: string }>("/api/folders", {
@@ -130,7 +132,7 @@ function MovePopover({ threadIds, mailboxId, currentFolderId, onMoved }: Props) 
 
       <ul className="max-h-64 overflow-y-auto">
         {currentFolderId && threadIds.length === 1 && (
-          <li className="mb-1 border-b pb-1">
+          <li className={otherFolders.length > 0 ? "mb-1 border-b pb-1" : ""}>
             <button
               type="button"
               onClick={moveBack}
@@ -142,24 +144,22 @@ function MovePopover({ threadIds, mailboxId, currentFolderId, onMoved }: Props) 
             </button>
           </li>
         )}
-        {folders
-          .filter((f) => f.id !== currentFolderId)
-          .map((f) => (
-            <li key={f.id}>
-              <button
-                type="button"
-                onClick={() => move(f.id, f.name)}
-                disabled={file.isPending}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] hover:bg-accent disabled:opacity-50"
-              >
-                <span
-                  className="h-2.5 w-2.5 shrink-0 rounded-sm"
-                  style={{ backgroundColor: f.color }}
-                />
-                <span className="flex-1 truncate text-left">{f.name}</span>
-              </button>
-            </li>
-          ))}
+        {otherFolders.map((f) => (
+          <li key={f.id}>
+            <button
+              type="button"
+              onClick={() => move(f.id, f.name)}
+              disabled={file.isPending}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] hover:bg-accent disabled:opacity-50"
+            >
+              <span
+                className="h-2.5 w-2.5 shrink-0 rounded-sm"
+                style={{ backgroundColor: f.color }}
+              />
+              <span className="flex-1 truncate text-left">{f.name}</span>
+            </button>
+          </li>
+        ))}
         {folders.length === 0 && !creating && (
           <li className="px-2 py-3 text-center text-[11px] text-muted-foreground">
             No folders yet — create one.
