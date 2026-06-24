@@ -26,6 +26,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select.tsx";
+import { Tabs, TabsIndicator, TabsList, TabsTab } from "@/components/ui/tabs.tsx";
+import { ToggleGroup, ToggleItem } from "@/components/ui/toggle-group.tsx";
 import { api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
 import { type MailboxSummary, mailboxesQuery, meQuery } from "@/lib/queries.ts";
@@ -134,23 +136,16 @@ function AdminPage() {
         </header>
 
         {isAdmin && (
-          <div className="flex gap-6 border-b">
-            <TabButton active={tab === "domains"} onClick={() => setTab("domains")}>
-              Domains
-            </TabButton>
-            <TabButton active={tab === "users"} onClick={() => setTab("users")}>
-              Users
-            </TabButton>
-            <TabButton active={tab === "mailboxes"} onClick={() => setTab("mailboxes")}>
-              Mailboxes
-            </TabButton>
-            <TabButton active={tab === "service"} onClick={() => setTab("service")}>
-              Service
-            </TabButton>
-            <TabButton active={tab === "blocking"} onClick={() => setTab("blocking")}>
-              Blocking
-            </TabButton>
-          </div>
+          <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
+            <TabsList>
+              <TabsTab value="domains">Domains</TabsTab>
+              <TabsTab value="users">Users</TabsTab>
+              <TabsTab value="mailboxes">Mailboxes</TabsTab>
+              <TabsTab value="service">Service</TabsTab>
+              <TabsTab value="blocking">Blocking</TabsTab>
+              <TabsIndicator />
+            </TabsList>
+          </Tabs>
         )}
 
         {isAdmin && tab === "domains" && <DomainsSection />}
@@ -164,31 +159,6 @@ function AdminPage() {
 }
 
 // ─── Building blocks ────────────────────────────────────────────────────────
-
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "-mb-px border-b-2 px-1 py-2 text-[13px] font-medium transition",
-        active
-          ? "border-primary text-foreground"
-          : "border-transparent text-muted-foreground hover:border-border hover:text-foreground",
-      )}
-    >
-      {children}
-    </button>
-  );
-}
 
 function Section({
   title,
@@ -1549,32 +1519,10 @@ function AdminCreateForm({
 
   return (
     <div className="space-y-3">
-      <div className="inline-flex rounded-md border p-0.5 text-[12px]">
-        <button
-          type="button"
-          onClick={() => setMode("mailbox")}
-          className={cn(
-            "rounded px-3 py-1 font-medium transition",
-            mode === "mailbox"
-              ? "bg-primary text-primary-foreground"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          New mailbox
-        </button>
-        <button
-          type="button"
-          onClick={() => setMode("redirect")}
-          className={cn(
-            "rounded px-3 py-1 font-medium transition",
-            mode === "redirect"
-              ? "bg-primary text-primary-foreground"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          New redirect
-        </button>
-      </div>
+      <ToggleGroup value={mode} onValueChange={setMode}>
+        <ToggleItem value="mailbox">New mailbox</ToggleItem>
+        <ToggleItem value="redirect">New redirect</ToggleItem>
+      </ToggleGroup>
 
       {mode === "mailbox" ? (
         <div className="flex flex-wrap items-center gap-2">

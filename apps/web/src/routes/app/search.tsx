@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/select.tsx";
 import { Separator } from "@/components/ui/separator.tsx";
 import { Switch } from "@/components/ui/switch.tsx";
+import { ToggleGroup, ToggleItem } from "@/components/ui/toggle-group.tsx";
 import { EmptyState, ThreadListSkeleton } from "@/components/ui.tsx";
 import { cn } from "@/lib/cn.ts";
 import { useDateTimeFmt } from "@/lib/prefs.ts";
@@ -443,27 +444,14 @@ function Segmented<T extends string>({
   options: { value: T; label: string; icon: typeof Inbox }[];
 }) {
   return (
-    <div className="flex h-7 items-center rounded-md border bg-card p-0.5 shadow-sm">
-      {options.map((o) => {
-        const active = o.value === value;
-        return (
-          <button
-            key={o.value}
-            type="button"
-            onClick={() => onChange(o.value)}
-            className={cn(
-              "flex items-center gap-1 rounded px-2 py-0.5 text-[12px] transition-colors",
-              active
-                ? "bg-accent font-medium text-foreground"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            <o.icon className="h-3.5 w-3.5" />
-            {o.label}
-          </button>
-        );
-      })}
-    </div>
+    <ToggleGroup value={value} onValueChange={onChange} className="h-7 bg-card">
+      {options.map((o) => (
+        <ToggleItem key={o.value} value={o.value} variant="accent" className="px-2 py-0.5">
+          <o.icon />
+          {o.label}
+        </ToggleItem>
+      ))}
+    </ToggleGroup>
   );
 }
 

@@ -22,6 +22,7 @@ import { type DateTimeFmt, formatStamp } from "@/lib/time.ts";
 import { Logo } from "./logo.tsx";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar.tsx";
 import { Button } from "./ui/button.tsx";
+import { Kbd } from "./ui/kbd.tsx";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -232,9 +233,9 @@ function SearchBox() {
         >
           <SlidersHorizontal className="h-3.5 w-3.5" />
         </button>
-        <kbd className="hidden shrink-0 items-center gap-0.5 rounded border bg-card px-1.5 py-0.5 font-medium text-[10px] text-muted-foreground sm:inline-flex">
+        <Kbd className="hidden min-w-0 shrink-0 gap-0.5 bg-card text-[10px] sm:inline-flex">
           /
-        </kbd>
+        </Kbd>
       </label>
 
       {showDropdown && (

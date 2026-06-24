@@ -1,4 +1,5 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog.tsx";
+import { Kbd } from "./ui/kbd.tsx";
 
 const SHORTCUTS: { keys: string[]; label: string }[] = [
   { keys: ["j"], label: "Next conversation" },
@@ -32,12 +33,7 @@ export function ShortcutsDialog({ open, onClose }: { open: boolean; onClose: () 
               <span className="text-[13px]">{s.label}</span>
               <span className="flex gap-1">
                 {s.keys.map((k) => (
-                  <kbd
-                    key={k}
-                    className="inline-flex min-w-[1.5rem] justify-center rounded border bg-muted px-1.5 py-0.5 font-medium text-[11px] text-muted-foreground"
-                  >
-                    {k}
-                  </kbd>
+                  <Kbd key={k}>{k}</Kbd>
                 ))}
               </span>
             </li>

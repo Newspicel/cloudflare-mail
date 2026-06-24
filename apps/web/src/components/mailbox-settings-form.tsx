@@ -15,6 +15,7 @@ import {
 import { Badge } from "@/components/ui/badge.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { useConfirmHelpers } from "@/components/ui/confirm.tsx";
+import { Progress } from "@/components/ui/progress.tsx";
 import {
   Select,
   SelectContent,
@@ -680,12 +681,7 @@ export function MailboxImportSection({ mailboxes }: { mailboxes: ImportTarget[] 
       />
       {running && progress && (
         <div className="grid gap-1.5">
-          <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-            <div
-              className="h-full rounded-full bg-primary transition-[width]"
-              style={{ width: `${pct}%` }}
-            />
-          </div>
+          <Progress value={pct} />
           <span className="text-[12px] text-muted-foreground">
             {progress.done} / {progress.total} processed
             {progress.duplicate ? ` · ${progress.duplicate} skipped` : ""}

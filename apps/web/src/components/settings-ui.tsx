@@ -3,6 +3,7 @@ import type * as React from "react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { cn } from "@/lib/cn.ts";
+import { ToggleGroup, ToggleItem } from "./ui/toggle-group.tsx";
 
 // Shared building blocks for the Settings surface. Every settings card —
 // profile, appearance, rules, mailboxes, PGP — composes these so the page reads
@@ -185,24 +186,13 @@ export function Segmented<T extends string>({
   disabled?: boolean;
 }) {
   return (
-    <div className="inline-flex rounded-md border bg-background p-0.5 shadow-sm">
+    <ToggleGroup value={value} onValueChange={onChange} disabled={disabled}>
       {options.map(([v, label]) => (
-        <button
-          key={v}
-          type="button"
-          disabled={disabled}
-          onClick={() => onChange(v)}
-          className={cn(
-            "rounded px-2.5 py-1 text-[12px] font-medium transition-colors disabled:opacity-50",
-            value === v
-              ? "bg-primary text-primary-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
+        <ToggleItem key={v} value={v}>
           {label}
-        </button>
+        </ToggleItem>
       ))}
-    </div>
+    </ToggleGroup>
   );
 }
 
