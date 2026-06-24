@@ -22,7 +22,9 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
 import { Button } from "@/components/ui/button.tsx";
+import { ColorField } from "@/components/ui/color-field.tsx";
 import { useConfirmHelpers } from "@/components/ui/confirm.tsx";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover.tsx";
 import { Switch } from "@/components/ui/switch.tsx";
 import { api } from "@/lib/api.ts";
 import { authClient } from "@/lib/auth-client.ts";
@@ -1044,14 +1046,22 @@ function FolderRowEditor({
 
   return (
     <li className="flex items-center gap-2 py-2">
-      <input
-        type="color"
-        value={folder.color}
-        onChange={(e) => onRecolor(e.target.value)}
-        disabled={busy}
-        aria-label={`Color for ${folder.name}`}
-        className="size-7 shrink-0 cursor-pointer rounded border bg-transparent"
-      />
+      <Popover>
+        <PopoverTrigger
+          render={
+            <button
+              type="button"
+              disabled={busy}
+              aria-label={`Color for ${folder.name}`}
+              className="size-7 shrink-0 cursor-pointer rounded border disabled:opacity-50"
+              style={{ backgroundColor: folder.color }}
+            />
+          }
+        />
+        <PopoverContent align="start" className="w-56 p-2">
+          <ColorField color={folder.color} onChange={onRecolor} />
+        </PopoverContent>
+      </Popover>
       <Input
         value={name}
         onChange={(e) => setName(e.target.value)}

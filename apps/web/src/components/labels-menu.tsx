@@ -7,25 +7,12 @@ import { cn } from "@/lib/cn.ts";
 import { labelsQuery, messageLabelsQuery, threadLabelsQuery } from "@/lib/queries.ts";
 import { keys } from "@/lib/query-keys.ts";
 import { Button } from "./ui/button.tsx";
-import { ColorPicker } from "./ui/color-picker.tsx";
+import { ColorField, DEFAULT_COLOR } from "./ui/color-field.tsx";
 import { useConfirm } from "./ui/confirm.tsx";
 import { Input } from "./ui/input.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
 import { Tooltip } from "./ui/tooltip.tsx";
 import { LabelChip } from "./ui.tsx";
-
-const DEFAULT_COLOR = "#64748b";
-
-const PRESET_COLORS = [
-  "#64748b",
-  "#ef4444",
-  "#f97316",
-  "#eab308",
-  "#22c55e",
-  "#06b6d4",
-  "#6366f1",
-  "#ec4899",
-];
 
 function invalidateLabels(qc: QueryClient, mailboxId: string) {
   qc.invalidateQueries({ queryKey: keys.labels(mailboxId) });
@@ -153,7 +140,6 @@ function LabelsPopover({ mailboxId, applied, partial, busy, onToggle }: ShellPro
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [color, setColor] = useState(DEFAULT_COLOR);
-  const [customColor, setCustomColor] = useState(false);
 
   const invalidate = () => invalidateLabels(qc, mailboxId);
 
@@ -167,7 +153,6 @@ function LabelsPopover({ mailboxId, applied, partial, busy, onToggle }: ShellPro
       setCreating(false);
       setName("");
       setColor(DEFAULT_COLOR);
-      setCustomColor(false);
       invalidate();
       onToggle(res.id, true);
     },
@@ -215,43 +200,7 @@ function LabelsPopover({ mailboxId, applied, partial, busy, onToggle }: ShellPro
             placeholder="Label name"
             maxLength={64}
           />
-          <div className="flex flex-wrap items-center gap-1">
-            {PRESET_COLORS.map((c) => (
-              <button
-                key={c}
-                type="button"
-                onClick={() => {
-                  setColor(c);
-                  setCustomColor(false);
-                }}
-                className={cn(
-                  "h-5 w-5 rounded-full border",
-                  !customColor && color === c
-                    ? "ring-2 ring-ring ring-offset-1 ring-offset-card"
-                    : "",
-                )}
-                style={{ backgroundColor: c }}
-                aria-label={c}
-              />
-            ))}
-            <button
-              type="button"
-              onClick={() => setCustomColor((v) => !v)}
-              className={cn(
-                "h-5 w-5 rounded-full border",
-                customColor ? "ring-2 ring-ring ring-offset-1 ring-offset-card" : "",
-              )}
-              style={{
-                background: customColor
-                  ? color
-                  : "conic-gradient(from 0deg, #ef4444, #eab308, #22c55e, #06b6d4, #6366f1, #ec4899, #ef4444)",
-              }}
-              aria-label="Custom color"
-              title="Custom color"
-            />
-          </div>
-
-          {customColor && <ColorPicker value={color} onChange={setColor} />}
+          <ColorField color={color} onChange={setColor} />
           <div className="flex gap-2">
             <Button
               variant="primary"
