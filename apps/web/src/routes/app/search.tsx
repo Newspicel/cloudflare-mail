@@ -5,6 +5,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
+  ChevronsUpDown,
   Inbox,
   Mails,
   Paperclip,
@@ -19,6 +20,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge.tsx";
 import { Button } from "@/components/ui/button.tsx";
+import { Checkbox } from "@/components/ui/checkbox.tsx";
 import { inputClass } from "@/components/ui/input.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover.tsx";
 import {
@@ -74,6 +76,15 @@ export const Route = createFileRoute("/app/search")({
 function str(v: unknown): string | undefined {
   const s = typeof v === "string" ? v.trim() : "";
   return s ? s : undefined;
+}
+
+// `mailboxId` is a comma-separated list of ids ("" / "all" = every readable mailbox).
+function parseMailboxIds(v: string | undefined): string[] {
+  if (!v || v === ALL_MAILBOXES) return [];
+  return v
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 // Normalize raw URL params into a typed, default-stripped filter object.
@@ -155,7 +166,29 @@ function SearchPage() {
 
   const activeChips = buildChips(form, mailboxes.data?.mailboxes);
   const filterCount = activeChips.length;
-  const scopedMailbox = form.mailboxId && form.mailboxId !== ALL_MAILBOXES ? form.mailboxId : null;
+
+  const mailboxList = mailboxes.data?.mailboxes ?? [];
+  const selectedMailboxIds = parseMailboxIds(form.mailboxId);
+
+  function setMailboxIds(ids: string[]) {
+    // Keep the URL value in the same order the mailboxes are listed.
+    const ordered = mailboxList.filter((m) => ids.includes(m.id)).map((m) => m.id);
+    set("mailboxId", ordered.length ? ordered.join(",") : undefined);
+  }
+
+  function toggleMailbox(id: string, on: boolean) {
+    const next = new Set(selectedMailboxIds);
+    if (on) next.add(id);
+    else next.delete(id);
+    setMailboxIds([...next]);
+  }
+
+  const scopeText =
+    selectedMailboxIds.length === 0
+      ? "across all mailboxes"
+      : selectedMailboxIds.length === 1
+        ? "in 1 mailbox"
+        : `across ${selectedMailboxIds.length} mailboxes`;
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -245,36 +278,13 @@ function SearchPage() {
             />
           </div>
 
-          <div className="ml-auto flex items-center gap-2">
-            <div className="flex h-7 items-center gap-1.5 rounded-md border bg-card px-2.5 text-[12px] text-muted-foreground shadow-sm">
-              This mailbox only
-              <Switch
-                checked={Boolean(scopedMailbox)}
-                onCheckedChange={(on) =>
-                  set("mailboxId", on ? (mailboxes.data?.mailboxes[0]?.id ?? undefined) : undefined)
-                }
-                className="ml-1"
-                aria-label="Scope to one mailbox"
-              />
-            </div>
-            {scopedMailbox && (
-              <Select value={scopedMailbox} onValueChange={(v) => set("mailboxId", v as string)}>
-                <SelectTrigger
-                  aria-label="Mailbox"
-                  className="h-7 w-auto max-w-[14rem] gap-1.5 text-[12px]"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {(mailboxes.data?.mailboxes ?? []).map((m) => (
-                    <SelectItem key={m.id} value={m.id}>
-                      {m.address}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          </div>
+          <MailboxScope
+            className="sm:ml-auto"
+            mailboxes={mailboxList}
+            selected={selectedMailboxIds}
+            onToggle={toggleMailbox}
+            onClear={() => setMailboxIds([])}
+          />
         </div>
 
         {/* Active filter chips */}
@@ -282,9 +292,11 @@ function SearchPage() {
           <div className="mx-auto mt-2.5 flex max-w-3xl flex-wrap items-center gap-1.5">
             {activeChips.map((chip) => (
               <button
-                key={chip.key}
+                key={chip.mailboxId ?? chip.key}
                 type="button"
-                onClick={() => set(chip.key, undefined)}
+                onClick={() =>
+                  chip.mailboxId ? toggleMailbox(chip.mailboxId, false) : set(chip.key, undefined)
+                }
                 className="group"
                 aria-label={`Remove ${chip.label}`}
               >
@@ -318,7 +330,7 @@ function SearchPage() {
             query={query}
             results={results}
             active={hasSearchCriteria(filters)}
-            scopedAll={!scopedMailbox}
+            scopeText={scopeText}
             hasMore={query.data?.hasMore ?? false}
             shownLimit={limit}
             atCap={limit >= MAX_RESULTS}
@@ -459,11 +471,89 @@ function Segmented<T extends string>({
   );
 }
 
+function MailboxScope({
+  className,
+  mailboxes,
+  selected,
+  onToggle,
+  onClear,
+}: {
+  className?: string;
+  mailboxes: { id: string; address: string; displayName?: string | null }[];
+  selected: string[];
+  onToggle: (id: string, on: boolean) => void;
+  onClear: () => void;
+}) {
+  const count = selected.length;
+  const label =
+    count === 0
+      ? "All mailboxes"
+      : count === 1
+        ? (mailboxes.find((m) => m.id === selected[0])?.address ?? "1 mailbox")
+        : `${count} mailboxes`;
+
+  return (
+    <Popover>
+      <PopoverTrigger
+        render={
+          <button
+            type="button"
+            aria-label="Filter by mailbox"
+            className={cn(
+              "flex h-7 min-w-0 max-w-[14rem] items-center gap-1.5 rounded-md border bg-card px-2.5 text-[12px] shadow-sm transition-colors hover:bg-accent/60",
+              count > 0 ? "text-foreground" : "text-muted-foreground",
+              className,
+            )}
+          >
+            <Inbox className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{label}</span>
+            <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          </button>
+        }
+      />
+      <PopoverContent align="end" className="w-[16rem] max-w-[calc(100vw-2rem)] p-1.5">
+        <div className="px-2 py-1.5 text-[11px] font-medium text-muted-foreground">Mailboxes</div>
+        <div className="max-h-64 overflow-y-auto">
+          <button
+            type="button"
+            onClick={onClear}
+            className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors hover:bg-accent"
+          >
+            <Checkbox checked={count === 0} tabIndex={-1} className="pointer-events-none" />
+            <span className="truncate">All mailboxes</span>
+          </button>
+          {mailboxes.map((m) => {
+            const on = selected.includes(m.id);
+            return (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => onToggle(m.id, !on)}
+                className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors hover:bg-accent"
+              >
+                <Checkbox checked={on} tabIndex={-1} className="pointer-events-none" />
+                <span className="flex min-w-0 flex-col">
+                  <span className="truncate">{m.address}</span>
+                  {m.displayName && (
+                    <span className="truncate text-[11px] text-muted-foreground">
+                      {m.displayName}
+                    </span>
+                  )}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function Results({
   query,
   results,
   active,
-  scopedAll,
+  scopeText,
   hasMore,
   shownLimit,
   atCap,
@@ -472,7 +562,7 @@ function Results({
   query: UseQueryResult<SearchResultsDto>;
   results: SearchResultDto[];
   active: boolean;
-  scopedAll: boolean;
+  scopeText: string;
   hasMore: boolean;
   shownLimit: number;
   atCap: boolean;
@@ -519,8 +609,7 @@ function Results({
     <div className="py-2">
       <div className="px-4 py-1 text-[11px] text-muted-foreground">
         {results.length}
-        {hasMore ? "+" : ""} result{results.length === 1 ? "" : "s"}{" "}
-        {scopedAll ? "across all mailboxes" : "in this mailbox"}
+        {hasMore ? "+" : ""} result{results.length === 1 ? "" : "s"} {scopeText}
       </div>
       <ul>
         {results.map((r) => (
@@ -587,6 +676,8 @@ function ResultRow({ r }: { r: SearchResultDto }) {
 interface Chip {
   key: keyof SearchParams;
   label: string;
+  // Set for per-mailbox chips so removing one only drops that id, not the whole scope.
+  mailboxId?: string;
 }
 
 function buildChips(form: SearchParams, mailboxes?: { id: string; address: string }[]): Chip[] {
@@ -602,9 +693,9 @@ function buildChips(form: SearchParams, mailboxes?: { id: string; address: strin
   if (form.folder) chips.push({ key: "folder", label: `folder: ${form.folder}` });
   if (form.after) chips.push({ key: "after", label: `after: ${form.after}` });
   if (form.before) chips.push({ key: "before", label: `before: ${form.before}` });
-  if (form.mailboxId) {
-    const addr = mailboxes?.find((m) => m.id === form.mailboxId)?.address ?? "mailbox";
-    chips.push({ key: "mailboxId", label: addr });
+  for (const id of parseMailboxIds(form.mailboxId)) {
+    const addr = mailboxes?.find((m) => m.id === id)?.address ?? "mailbox";
+    chips.push({ key: "mailboxId", label: addr, mailboxId: id });
   }
   return chips;
 }
