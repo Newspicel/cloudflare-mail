@@ -33,6 +33,7 @@ import { cn } from "@/lib/cn.ts";
 import {
   invalidateThreadChange,
   patchMessageFlags,
+  removeMessageFromThread,
   removeThreadsFromLists,
 } from "@/lib/invalidate.ts";
 import { linkifyText } from "@/lib/linkify.tsx";
@@ -87,9 +88,43 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
     optimistic: (_v, client) => removeThreadsFromLists(client, thread.mailboxId, [thread.id]),
   });
 
+  // Permanently delete a single message out of the thread. The server drops the
+  // whole thread when it was the last message — navigate away in that case,
+  // otherwise just remove the card from the open thread.
+  const delMsg = useMutation({
+    mutationFn: (id: string) =>
+      api<{ deleted: boolean; threadDeleted: boolean }>(`/api/messages/${id}`, {
+        method: "DELETE",
+      }),
+    onSuccess: (res, id) => {
+      toast.success("Message deleted");
+      if (res.threadDeleted) {
+        removeThreadsFromLists(qc, thread.mailboxId, [thread.id]);
+        nav({
+          to: "/app/m/$mailboxId",
+          params: { mailboxId: thread.mailboxId },
+          search: { view },
+        });
+      } else {
+        removeMessageFromThread(qc, thread.id, id);
+      }
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+    onSettled: invalidate,
+  });
+
+  async function removeMessage(id: string) {
+    // The thread's last message — deleting it drops the whole conversation.
+    const subject = messages.length <= 1 ? "this conversation" : "this message";
+    if (!(await confirmDelete(subject))) return;
+    delMsg.mutate(id);
+  }
+
   const setMsg = useMutation({
-    mutationFn: (input: { id: string; patch: { seen?: boolean; starred?: boolean } }) =>
-      api(`/api/messages/${input.id}`, { method: "PATCH", body: JSON.stringify(input.patch) }),
+    mutationFn: (input: {
+      id: string;
+      patch: { seen?: boolean; starred?: boolean; trash?: boolean };
+    }) => api(`/api/messages/${input.id}`, { method: "PATCH", body: JSON.stringify(input.patch) }),
     onMutate: async ({ id, patch }) => {
       await qc.cancelQueries({ queryKey: keys.thread(thread.id) });
       const prev = qc.getQueryData<{ messages: MessageRow[] }>(keys.thread(thread.id));
@@ -98,6 +133,9 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
         let flags = current.flags;
         if (patch.seen !== undefined) flags = setFlag(flags, Flag.SEEN, patch.seen);
         if (patch.starred !== undefined) flags = setFlag(flags, Flag.STARRED, patch.starred);
+        // Trashing/restoring flips Flag.TRASH; the message then drops in or out of
+        // the visible list (which filters on it) for instant feedback.
+        if (patch.trash !== undefined) flags = setFlag(flags, Flag.TRASH, patch.trash);
         patchMessageFlags(qc, thread.id, id, flags);
       }
       return { prev };
@@ -109,13 +147,34 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
     onSettled: invalidate,
   });
 
+  function trashMessage(id: string) {
+    setMsg.mutate(
+      { id, patch: { trash: true } },
+      {
+        onSuccess: () =>
+          toast.success("Message deleted", {
+            action: {
+              label: "Undo",
+              onClick: () => setMsg.mutate({ id, patch: { trash: false } }),
+            },
+          }),
+      },
+    );
+  }
+
+  function restoreMessage(id: string) {
+    setMsg.mutate({ id, patch: { trash: false } }, { onSuccess: () => toast.success("Restored") });
+  }
+
   // Auto-mark inbound messages as read when the thread is opened.
   const { prefs } = useUserPrefs();
   const autoMarkRead = prefs.autoMarkRead !== false;
   const markedRef = useRef<string | null>(null);
   useEffect(() => {
     if (readOnly || !autoMarkRead || markedRef.current === thread.id) return;
-    const unseen = messages.filter((m) => m.direction === "in" && !hasFlag(m.flags, Flag.SEEN));
+    const unseen = messages.filter(
+      (m) => m.direction === "in" && !hasFlag(m.flags, Flag.SEEN) && !hasFlag(m.flags, Flag.TRASH),
+    );
     if (unseen.length === 0) return;
     markedRef.current = thread.id;
     void Promise.all(
@@ -155,8 +214,29 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
   }
 
   function markUnread() {
-    const last = messages.findLast((m) => m.direction === "in");
+    const last = messages.findLast((m) => m.direction === "in" && !hasFlag(m.flags, Flag.TRASH));
     if (last) setMsg.mutate({ id: last.id, patch: { seen: false } });
+  }
+
+  // Individually-trashed messages are hidden from the active folders. The Trash
+  // view shows the whole conversation when the thread itself is trashed, else
+  // only its deleted messages; "All" shows everything.
+  const visibleMessages = useMemo(() => {
+    if (view === "trash")
+      return thread.trashed ? messages : messages.filter((m) => hasFlag(m.flags, Flag.TRASH));
+    if (view === "all") return messages;
+    return messages.filter((m) => !hasFlag(m.flags, Flag.TRASH));
+  }, [messages, view, thread.trashed]);
+
+  // Per-message actions depend on its state: a trashed message can be restored or
+  // permanently deleted; a live message in a trashed thread can only be purged;
+  // otherwise it can be soft-deleted into the Trash.
+  function messageActions(m: MessageRow) {
+    if (readOnly) return {};
+    if (hasFlag(m.flags, Flag.TRASH))
+      return { onRestore: () => restoreMessage(m.id), onDelete: () => removeMessage(m.id) };
+    if (thread.trashed) return { onDelete: () => removeMessage(m.id) };
+    return { onTrash: () => trashMessage(m.id) };
   }
 
   return (
@@ -237,11 +317,13 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
         </div>
 
         <div className="flex-1 space-y-3 overflow-y-auto p-3 sm:p-4">
-          {messages.map((m) => (
+          {visibleMessages.map((m) => (
             <MessageCard
               key={m.id}
               msg={m}
               readOnly={readOnly}
+              busy={setMsg.isPending || delMsg.isPending}
+              {...messageActions(m)}
               onToggleStar={() =>
                 setMsg.mutate({
                   id: m.id,
@@ -577,10 +659,18 @@ function CalendarBanner({ event }: { event: CalendarEventDto }) {
 function MessageCard({
   msg,
   readOnly,
+  onTrash,
+  onRestore,
+  onDelete,
+  busy,
   onToggleStar,
 }: {
   msg: MessageRow;
   readOnly: boolean;
+  onTrash?: () => void;
+  onRestore?: () => void;
+  onDelete?: () => void;
+  busy?: boolean;
   onToggleStar: () => void;
 }) {
   // The body isn't in the thread payload (listing only carries the snippet);
@@ -641,7 +731,14 @@ function MessageCard({
                 <Star className={cn(starred && "fill-current")} />
               </Button>
             )}
-            <MessageMenu msg={msg} body={body.data} />
+            <MessageMenu
+              msg={msg}
+              body={body.data}
+              onTrash={onTrash}
+              onRestore={onRestore}
+              onDelete={onDelete}
+              busy={busy}
+            />
           </div>
           {!readOnly && <MessageActions msg={msg} />}
         </div>

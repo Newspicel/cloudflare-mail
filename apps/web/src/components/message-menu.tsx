@@ -1,6 +1,7 @@
 import type { MessageBodyDto } from "@cfmail/shared/responses";
 import { useMutation } from "@tanstack/react-query";
 import {
+  ArchiveRestore,
   Ban,
   Code2,
   Copy,
@@ -9,6 +10,7 @@ import {
   FileText,
   Mail,
   Printer,
+  Trash2,
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -81,7 +83,23 @@ function printMessage(msg: MessageRow, body: MessageBodyDto | undefined) {
 
 type Source = { title: string; content: string };
 
-export function MessageMenu({ msg, body }: { msg: MessageRow; body: MessageBodyDto | undefined }) {
+export function MessageMenu({
+  msg,
+  body,
+  onTrash,
+  onRestore,
+  onDelete,
+  busy,
+}: {
+  msg: MessageRow;
+  body: MessageBodyDto | undefined;
+  // Per-message actions, supplied by the thread view depending on the message's
+  // state. Soft-delete into Trash, restore from it, or permanently delete.
+  onTrash?: () => void;
+  onRestore?: () => void;
+  onDelete?: () => void;
+  busy?: boolean;
+}) {
   const [source, setSource] = useState<Source | null>(null);
   const [loadingRaw, setLoadingRaw] = useState(false);
 
@@ -156,17 +174,32 @@ export function MessageMenu({ msg, body }: { msg: MessageRow; body: MessageBodyD
           <DropdownMenuItem onClick={exportEml}>
             <Download /> Export (.eml)
           </DropdownMenuItem>
+          {(msg.direction === "in" || onTrash || onRestore || onDelete) && (
+            <DropdownMenuSeparator />
+          )}
           {msg.direction === "in" && (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                variant="destructive"
-                disabled={requestBlock.isPending}
-                onClick={() => requestBlock.mutate()}
-              >
-                <Ban /> Request block
-              </DropdownMenuItem>
-            </>
+            <DropdownMenuItem
+              variant="destructive"
+              disabled={requestBlock.isPending}
+              onClick={() => requestBlock.mutate()}
+            >
+              <Ban /> Request block
+            </DropdownMenuItem>
+          )}
+          {onRestore && (
+            <DropdownMenuItem disabled={busy} onClick={onRestore}>
+              <ArchiveRestore /> Restore message
+            </DropdownMenuItem>
+          )}
+          {onTrash && (
+            <DropdownMenuItem variant="destructive" disabled={busy} onClick={onTrash}>
+              <Trash2 /> Delete message
+            </DropdownMenuItem>
+          )}
+          {onDelete && (
+            <DropdownMenuItem variant="destructive" disabled={busy} onClick={onDelete}>
+              <Trash2 /> Delete permanently
+            </DropdownMenuItem>
           )}
         </DropdownMenuContent>
       </DropdownMenu>

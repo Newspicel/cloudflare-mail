@@ -4,7 +4,7 @@ import { Perm } from "@cfmail/shared/permissions";
 import type { FolderCountsResponseDto } from "@cfmail/shared/responses";
 import { updateThread } from "@cfmail/shared/schemas";
 import { zValidator } from "@hono/zod-validator";
-import { and, asc, count, desc, eq, gt, inArray, type SQL, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, inArray, or, type SQL, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { dbFromCtx } from "../db.ts";
@@ -54,7 +54,9 @@ export function threadsRoutes() {
     let filter: SQL | undefined;
     switch (view) {
       case "trash":
-        filter = eq(thread.trashed, true);
+        // Whole-thread trash, plus live threads holding an individually-deleted
+        // message (those surface in Trash for just that message).
+        filter = trashFilter;
         break;
       case "spam":
         filter = and(eq(thread.spam, true), eq(thread.trashed, false));
@@ -63,16 +65,13 @@ export function threadsRoutes() {
         filter = undefined;
         break;
       case "sent":
-        filter = and(active, hasMessage(eq(message.direction, "out")));
+        filter = and(active, hasMessage(and(eq(message.direction, "out"), LIVE_MSG)));
         break;
       case "marked":
-        filter = and(
-          active,
-          hasMessage(sql`(${message.flags} & ${Flag.STARRED}) = ${Flag.STARRED}`),
-        );
+        filter = and(active, hasMessage(and(STARRED_MSG, LIVE_MSG)));
         break;
       default:
-        filter = and(active, hasMessage(eq(message.direction, "in")));
+        filter = and(active, hasMessage(and(eq(message.direction, "in"), LIVE_MSG)));
     }
 
     const where = and(scope, filter, cursorBefore(cursor, thread.lastMsgAt, thread.id));
@@ -117,7 +116,6 @@ export function threadsRoutes() {
       notFiledBy(user.id),
     );
     const inSpam = and(inMailbox, eq(thread.spam, true), eq(thread.trashed, false));
-    const starred = sql`(${message.flags} & ${Flag.STARRED}) = ${Flag.STARRED}`;
 
     const cnt = async (cond: SQL | undefined): Promise<number> => {
       const rows = await db.select({ c: count() }).from(thread).where(cond);
@@ -135,13 +133,19 @@ export function threadsRoutes() {
 
     const [inbox, inboxUnread, sent, marked, spam, spamUnread, trash, all, drafts] =
       await Promise.all([
-        cnt(and(active, hasMessage(eq(message.direction, "in")))),
-        cnt(and(active, hasMessage(eq(message.direction, "in")), gt(thread.unreadCount, 0))),
-        cnt(and(active, hasMessage(eq(message.direction, "out")))),
-        cnt(and(active, hasMessage(starred))),
+        cnt(and(active, hasMessage(and(eq(message.direction, "in"), LIVE_MSG)))),
+        cnt(
+          and(
+            active,
+            hasMessage(and(eq(message.direction, "in"), LIVE_MSG)),
+            gt(thread.unreadCount, 0),
+          ),
+        ),
+        cnt(and(active, hasMessage(and(eq(message.direction, "out"), LIVE_MSG)))),
+        cnt(and(active, hasMessage(and(STARRED_MSG, LIVE_MSG)))),
         cnt(inSpam),
         cnt(and(inSpam, gt(thread.unreadCount, 0))),
-        cnt(and(inMailbox, eq(thread.trashed, true))),
+        cnt(and(inMailbox, trashFilter)),
         cnt(inMailbox),
         draftCnt(),
       ]);
@@ -254,9 +258,22 @@ function emptyCounts(): FolderCountsResponseDto["counts"] {
 
 // Correlated EXISTS over a thread's messages (sent/starred live on rows, not
 // the thread) — lets the sent/marked folders filter by message-level state.
-function hasMessage(cond: SQL): SQL {
-  return sql`exists (select 1 from ${message} where ${message.threadId} = ${thread.id} and ${cond})`;
+function hasMessage(cond: SQL | undefined): SQL {
+  return sql`exists (select 1 from ${message} where ${message.threadId} = ${thread.id}${cond ? sql` and ${cond}` : sql``})`;
 }
+
+// Message-level flag predicates. LIVE excludes individually-trashed messages so
+// the active folders ignore them; TRASHED surfaces a thread in the Trash view.
+const LIVE_MSG = sql`(${message.flags} & ${Flag.TRASH}) = 0`;
+const TRASHED_MSG = sql`(${message.flags} & ${Flag.TRASH}) = ${Flag.TRASH}`;
+const STARRED_MSG = sql`(${message.flags} & ${Flag.STARRED}) = ${Flag.STARRED}`;
+
+// Trash view: a whole-thread trash, or an otherwise-active thread that holds at
+// least one individually-deleted message (shown in Trash for just that message).
+const trashFilter = or(
+  eq(thread.trashed, true),
+  and(eq(thread.trashed, false), eq(thread.spam, false), hasMessage(TRASHED_MSG)),
+);
 
 // True when the user has NOT filed this thread into a custom folder — filed
 // threads are hidden from the active mailbox views (a true "move").

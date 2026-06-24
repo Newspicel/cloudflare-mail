@@ -1,10 +1,10 @@
-import { attachment, blocklist, blockRequest, message } from "@cfmail/db/schema";
+import { attachment, blocklist, blockRequest, message, thread } from "@cfmail/db/schema";
 import { Flag, setFlag } from "@cfmail/shared/flags";
 import { Perm } from "@cfmail/shared/permissions";
 import type { MessageBodyDto } from "@cfmail/shared/responses";
 import { createBlockRequest, sendMessage } from "@cfmail/shared/schemas";
 import { zValidator } from "@hono/zod-validator";
-import { and, eq } from "drizzle-orm";
+import { and, count, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -12,6 +12,7 @@ import { getOrCreateAuthSecret } from "../config.ts";
 import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
 import { assertOwnedAttachmentKeys } from "../mail/attachment-keys.ts";
+import { collectMessageBlobKeys, deleteBlobs } from "../mail/blobs.ts";
 import { extractCalendar } from "../mail/calendar.ts";
 import {
   bareCid,
@@ -24,7 +25,7 @@ import {
 import { parseMime } from "../mail/mime.ts";
 import { buildQuote } from "../mail/quote.ts";
 import { sendFromMailbox } from "../mail/send.ts";
-import { recomputeThreadUnread } from "../mail/threads.ts";
+import { recomputeThreadAfterMessageDelete, recomputeThreadUnread } from "../mail/threads.ts";
 import { performUnsubscribe } from "../mail/unsubscribe.ts";
 import { requireUser } from "../middleware.ts";
 import { requireEntityAccess, requirePerm } from "../permissions.ts";
@@ -84,9 +85,44 @@ export function messagesRoutes() {
     if (patch.trash !== undefined) flags = setFlag(flags, Flag.TRASH, patch.trash);
 
     await db.update(message).set({ flags }).where(eq(message.id, id));
-    // SEEN drives the thread's unread badge; keep the cached count in sync.
-    if (patch.seen !== undefined) await recomputeThreadUnread(db, msg.threadId);
+    // SEEN drives the thread's unread badge, and a trashed message drops out of
+    // the count — keep the cached total in sync after either changes.
+    if (patch.seen !== undefined || patch.trash !== undefined)
+      await recomputeThreadUnread(db, msg.threadId);
     return c.json({ flags });
+  });
+
+  // Permanently drop a single message out of its thread (irreversible). Deleting
+  // the row cascades to its attachments via FKs; R2 blobs don't cascade, so
+  // collect and delete them first. When it's the thread's last message the whole
+  // (now-empty) thread goes too; otherwise the thread's cached aggregates are
+  // reconciled with the survivors.
+  r.delete("/:id", async (c) => {
+    const db = dbFromCtx(c);
+    const user = c.get("user")!;
+    const id = c.req.param("id");
+
+    // Deleting hides mail thread-wide and can't be undone — gate on WRITE.
+    const msg = await requireEntityAccess(db, user.id, message, id, Perm.WRITE);
+
+    const keys = await collectMessageBlobKeys(db, id);
+    await deleteBlobs(c.env, keys);
+
+    const rows = await db
+      .select({ c: count() })
+      .from(message)
+      .where(eq(message.threadId, msg.threadId));
+    const remaining = (rows[0]?.c ?? 1) - 1;
+
+    await db.delete(message).where(eq(message.id, id));
+
+    if (remaining <= 0) {
+      await db.delete(thread).where(eq(thread.id, msg.threadId));
+      return c.json({ deleted: true, threadDeleted: true });
+    }
+
+    await recomputeThreadAfterMessageDelete(db, msg.threadId);
+    return c.json({ deleted: true, threadDeleted: false });
   });
 
   // Act on the message's List-Unsubscribe headers (newsletter opt-out). May POST

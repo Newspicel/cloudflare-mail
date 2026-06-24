@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { ArchiveRestore, Inbox, Mail, MailOpen, ShieldAlert, Timer, Trash2, X } from "lucide-react";
 import { type CSSProperties, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
 import { patchThreadsInLists, removeThreadsFromLists } from "@/lib/invalidate.ts";
@@ -85,7 +86,15 @@ export function ThreadList({
   });
 
   async function deleteSelected() {
-    const ids = [...selected];
+    // Only whole-thread-trashed threads can be bulk-purged. Threads surfaced in
+    // Trash solely for an individually-deleted message are skipped — deleting the
+    // whole thread would take its live messages with it; purge those from inside.
+    const wholeTrashed = new Set(threads.filter((t) => t.trashed).map((t) => t.id));
+    const ids = [...selected].filter((id) => wholeTrashed.has(id));
+    if (ids.length === 0) {
+      toast.message("Open the conversation to delete its message permanently.");
+      return;
+    }
     const subject = ids.length === 1 ? "this conversation" : `${ids.length} conversations`;
     if (!(await confirmDelete(subject))) return;
     bulkDel.mutate(ids);
@@ -305,24 +314,30 @@ function ThreadRowItem({
               onClick={() => patch.mutate({ read: unread })}
             />
             {view === "trash" ? (
-              <>
-                <IconButton
-                  icon={ArchiveRestore}
-                  label="Restore"
-                  size="icon-sm"
-                  className="h-6 w-6 hover:text-foreground"
-                  disabled={patch.isPending}
-                  onClick={() => patch.mutate({ trashed: false })}
-                />
-                <IconButton
-                  icon={Trash2}
-                  label="Delete permanently"
-                  size="icon-sm"
-                  className="h-6 w-6 hover:text-foreground"
-                  disabled={del.isPending}
-                  onClick={remove}
-                />
-              </>
+              // Whole-thread restore/delete only apply when the thread itself is
+              // trashed. A thread surfaced here only for an individually-deleted
+              // message is managed inside the thread (per-message restore/delete),
+              // so the destructive whole-thread shortcuts are withheld.
+              thread.trashed ? (
+                <>
+                  <IconButton
+                    icon={ArchiveRestore}
+                    label="Restore"
+                    size="icon-sm"
+                    className="h-6 w-6 hover:text-foreground"
+                    disabled={patch.isPending}
+                    onClick={() => patch.mutate({ trashed: false })}
+                  />
+                  <IconButton
+                    icon={Trash2}
+                    label="Delete permanently"
+                    size="icon-sm"
+                    className="h-6 w-6 hover:text-foreground"
+                    disabled={del.isPending}
+                    onClick={remove}
+                  />
+                </>
+              ) : null
             ) : (
               <IconButton
                 icon={Trash2}
