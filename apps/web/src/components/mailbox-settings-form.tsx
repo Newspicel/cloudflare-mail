@@ -595,6 +595,7 @@ function shortFp(fp: string): string {
 export function MailboxImportSection({ mailboxes }: { mailboxes: ImportTarget[] }) {
   const qc = useQueryClient();
   const inputRef = useRef<HTMLInputElement>(null);
+  const folderRef = useRef<HTMLInputElement>(null);
   const [mailboxId, setMailboxId] = useState(mailboxes[0]?.id ?? "");
   const [files, setFiles] = useState<File[]>([]);
   const [progress, setProgress] = useState<ImportProgress | null>(null);
@@ -604,6 +605,13 @@ export function MailboxImportSection({ mailboxes }: { mailboxes: ImportTarget[] 
   useEffect(() => {
     if (!mailboxes.some((m) => m.id === mailboxId)) setMailboxId(mailboxes[0]?.id ?? "");
   }, [mailboxes, mailboxId]);
+
+  // `webkitdirectory` has no JSX typing; set it on the DOM node directly. With it
+  // the picker selects a whole folder, and the browser reads each message lazily
+  // — so a large Proton export imports without zipping or buffering it all.
+  useEffect(() => {
+    if (folderRef.current) folderRef.current.webkitdirectory = true;
+  }, []);
 
   async function start() {
     if (!files.length || running || !mailboxId) return;
@@ -626,6 +634,7 @@ export function MailboxImportSection({ mailboxes }: { mailboxes: ImportTarget[] 
       qc.invalidateQueries({ queryKey: keys.folders() });
       setFiles([]);
       if (inputRef.current) inputRef.current.value = "";
+      if (folderRef.current) folderRef.current.value = "";
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Import failed");
     } finally {
@@ -638,7 +647,7 @@ export function MailboxImportSection({ mailboxes }: { mailboxes: ImportTarget[] 
   return (
     <Section
       title="Import mail"
-      description="Upload exported messages — .eml, .mbox, or a .zip (incl. a Proton Mail export)."
+      description="Upload exported messages — .eml, .mbox, or a .zip. For a large export (e.g. Proton Mail), select its folder instead of zipping it."
       footer={
         <Button variant="primary" disabled={!files.length || running || !mailboxId} onClick={start}>
           {running
@@ -674,12 +683,41 @@ export function MailboxImportSection({ mailboxes }: { mailboxes: ImportTarget[] 
         accept=".eml,.mbox,.zip,.json,message/rfc822"
         multiple
         disabled={running}
-        onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
+        onChange={(e) => {
+          setFiles(Array.from(e.target.files ?? []));
+          if (folderRef.current) folderRef.current.value = "";
+        }}
         className={cn(
           fieldClass,
           "cursor-pointer py-1.5 file:mr-3 file:cursor-pointer file:rounded file:border-0 file:bg-muted file:px-2 file:py-1 file:text-foreground",
         )}
       />
+      <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
+        <span>or</span>
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={running}
+          onClick={() => folderRef.current?.click()}
+        >
+          Select folder
+        </Button>
+        <input
+          ref={folderRef}
+          type="file"
+          hidden
+          disabled={running}
+          onChange={(e) => {
+            setFiles(Array.from(e.target.files ?? []));
+            if (inputRef.current) inputRef.current.value = "";
+          }}
+        />
+        {files.length > 0 && (
+          <span>
+            {files.length} file{files.length === 1 ? "" : "s"} selected
+          </span>
+        )}
+      </div>
       {running && progress && (
         <div className="grid gap-1.5">
           <Progress value={pct} />
