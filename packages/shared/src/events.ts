@@ -20,6 +20,14 @@ export const hubEvent = z.discriminatedUnion("type", [
     mailboxId: z.string(),
     threadId: z.string(),
   }),
+  // A thread's read/unread state changed on one device — peers sync their cached
+  // unread badge, and on read=true dismiss any push notification for the thread.
+  z.object({
+    type: z.literal("thread_read"),
+    mailboxId: z.string(),
+    threadId: z.string(),
+    read: z.boolean(),
+  }),
   z.object({
     type: z.literal("mailbox_expired"),
     mailboxId: z.string(),

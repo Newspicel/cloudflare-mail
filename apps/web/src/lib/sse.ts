@@ -1,7 +1,13 @@
 import type { HubEvent } from "@cfmail/shared/events";
 import type { QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { bumpMailboxUnread, bumpThreadToTop, invalidateThreadChange } from "./invalidate.ts";
+import {
+  bumpMailboxUnread,
+  bumpThreadToTop,
+  invalidateThreadChange,
+  patchThreadsInLists,
+} from "./invalidate.ts";
+import { dismissThreadNotification } from "./push.ts";
 import { type MailboxSummary, mailboxesQuery } from "./queries.ts";
 import { keys } from "./query-keys.ts";
 
@@ -39,6 +45,16 @@ export function connectStream(qc: QueryClient, navigate?: Navigate): () => void 
           invalidateThreadChange(qc, evt.mailboxId, evt.threadId);
           break;
         }
+        case "thread_read": {
+          // A peer device changed the thread's read state. Mirror its unread
+          // badge locally and reconcile counts; on read, dismiss its push.
+          patchThreadsInLists(qc, evt.mailboxId, [evt.threadId], {
+            unreadCount: evt.read ? 0 : 1,
+          });
+          invalidateThreadChange(qc, evt.mailboxId, evt.threadId);
+          if (evt.read) dismissThreadNotification(evt.threadId);
+          break;
+        }
         case "mailbox_expired": {
           qc.invalidateQueries({ queryKey: keys.mailboxes() });
           break;
@@ -63,6 +79,7 @@ export function connectStream(qc: QueryClient, navigate?: Navigate): () => void 
     "new_message",
     "message_sent",
     "thread_updated",
+    "thread_read",
     "mailbox_expired",
     "scheduled_send_failed",
     "ping",

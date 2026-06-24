@@ -76,15 +76,22 @@ export class UserHub extends DurableObject<Env> {
   }
 }
 
+// Best-effort realtime fan-out: a hub hiccup must never fail the action that
+// triggered it (delivery, read-marking, sending…). Each stub is fired
+// independently and failures are logged, not thrown.
 export async function broadcastToUsers(env: Env, userIds: string[], evt: HubEvent): Promise<void> {
   await Promise.all(
-    userIds.map((uid) => {
-      const stub = env.USER_HUB.get(env.USER_HUB.idFromName(uid));
-      return stub.fetch("https://hub/broadcast", {
-        method: "POST",
-        body: JSON.stringify(evt),
-        headers: { "content-type": "application/json" },
-      });
+    userIds.map(async (uid) => {
+      try {
+        const stub = env.USER_HUB.get(env.USER_HUB.idFromName(uid));
+        await stub.fetch("https://hub/broadcast", {
+          method: "POST",
+          body: JSON.stringify(evt),
+          headers: { "content-type": "application/json" },
+        });
+      } catch (err) {
+        console.error("hub broadcast failed", err);
+      }
     }),
   );
 }

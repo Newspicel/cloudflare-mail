@@ -295,6 +295,7 @@ export async function handleInbound(
       title: unverified ? `⚠ Unverified sender: ${sender}` : sender,
       body: parsed.subject?.trim() ? parsed.subject : "(no subject)",
       url: `/app/m/${mb.id}/t/${threadId}`,
+      threadId,
     });
   }
 }

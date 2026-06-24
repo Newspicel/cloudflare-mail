@@ -1,5 +1,15 @@
-import { useQuery } from "@tanstack/react-query";
-import { ArchiveRestore, Inbox, Mail, MailOpen, ShieldAlert, Timer, Trash2, X } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  ArchiveRestore,
+  Inbox,
+  Loader2,
+  Mail,
+  MailOpen,
+  ShieldAlert,
+  Timer,
+  Trash2,
+  X,
+} from "lucide-react";
 import { type CSSProperties, useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api.ts";
@@ -11,13 +21,16 @@ import {
   type ThreadRow,
   threadLabelsQuery,
 } from "@/lib/queries.ts";
+import { keys } from "@/lib/query-keys.ts";
 import { useThreadListMutation } from "@/lib/thread-mutations.ts";
 import { formatRemaining, useNow } from "@/lib/time.ts";
 import { useListVirtualizer, visibleBlock } from "@/lib/use-list-virtualizer.ts";
+import { usePullToRefresh } from "@/lib/use-pull-to-refresh.ts";
 import { FOLDER_META, FolderTabs } from "./folder-tabs.tsx";
 import { BulkLabelsMenu } from "./labels-menu.tsx";
 import { MoveToFolderMenu } from "./move-to-folder-menu.tsx";
-import { ThreadRowView } from "./thread-row.tsx";
+import { ThreadActionSheet } from "./thread-action-sheet.tsx";
+import { type RowSwipe, ThreadRowView } from "./thread-row.tsx";
 import { Checkbox } from "./ui/checkbox.tsx";
 import { useConfirmHelpers } from "./ui/confirm.tsx";
 import { IconButton } from "./ui/icon-button.tsx";
@@ -49,10 +62,17 @@ export function ThreadList({
 }: Props) {
   const meta = FOLDER_META[view];
   const { confirmDelete } = useConfirmHelpers();
+  const queryClient = useQueryClient();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const selecting = selected.size > 0;
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const onRefresh = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: keys.threadsRoot(mailboxId) }),
+    [queryClient, mailboxId],
+  );
+  const ready = !loading && threads.length > 0;
+  const pull = usePullToRefresh(scrollRef, onRefresh, ready);
   const virtualizer = useListVirtualizer(scrollRef, threads.length, {
     infinite: { hasMore, loadingMore, loadMore: () => loadMore?.() },
     cacheKey: `m:${mailboxId}:${view}`,
@@ -221,7 +241,25 @@ export function ThreadList({
         ) : threads.length === 0 ? (
           <EmptyState icon={meta.icon} title={meta.empty} className="m-auto" />
         ) : (
-          <div ref={scrollRef} className="flex-1 overflow-y-auto">
+          <div ref={scrollRef} className="relative flex-1 overflow-y-auto">
+            {(pull.distance > 0 || pull.refreshing) && (
+              <div
+                className="pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-center"
+                style={{ transform: `translateY(${Math.max(pull.distance - 28, 4)}px)` }}
+              >
+                <span className="flex h-7 w-7 items-center justify-center rounded-full border bg-card text-muted-foreground shadow-sm">
+                  <Loader2
+                    className={cn(
+                      "h-4 w-4",
+                      pull.refreshing ? "animate-spin" : "transition-transform",
+                    )}
+                    style={
+                      pull.refreshing ? undefined : { transform: `rotate(${pull.distance * 3}deg)` }
+                    }
+                  />
+                </span>
+              </div>
+            )}
             <ul className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
               {vItems.map((vi) => {
                 const t = threads[vi.index]!;
@@ -240,6 +278,7 @@ export function ThreadList({
                     selected={selected.has(t.id)}
                     selecting={selecting}
                     onToggleSelect={() => toggle(t.id)}
+                    onRequestSelect={() => setSelected(new Set([t.id]))}
                   />
                 );
               })}
@@ -276,6 +315,7 @@ function ThreadRowItem({
   selected,
   selecting,
   onToggleSelect,
+  onRequestSelect,
   rowRef,
   remeasure,
   style,
@@ -289,6 +329,7 @@ function ThreadRowItem({
   selected: boolean;
   selecting: boolean;
   onToggleSelect: () => void;
+  onRequestSelect: () => void;
   rowRef: (el: HTMLLIElement | null) => void;
   remeasure: (index: number, el: HTMLLIElement) => void;
   style: CSSProperties;
@@ -296,14 +337,16 @@ function ThreadRowItem({
 }) {
   const unread = thread.unreadCount > 0;
   const { confirmDelete } = useConfirmHelpers();
+  const [sheetOpen, setSheetOpen] = useState(false);
 
-  const patch = useThreadListMutation<{ trashed?: boolean; read?: boolean }>({
+  const patch = useThreadListMutation<{ trashed?: boolean; read?: boolean; spam?: boolean }>({
     mailboxId,
     threadId: thread.id,
     mutationFn: (body) =>
       api(`/api/threads/${thread.id}`, { method: "PATCH", body: JSON.stringify(body) }),
     optimistic: (body, qc) => {
-      if (body.trashed !== undefined) removeThreadsFromLists(qc, mailboxId, [thread.id]);
+      if (body.trashed !== undefined || body.spam !== undefined)
+        removeThreadsFromLists(qc, mailboxId, [thread.id]);
       else if (body.read !== undefined)
         patchThreadsInLists(qc, mailboxId, [thread.id], { unreadCount: body.read ? 0 : 1 });
     },
@@ -320,85 +363,143 @@ function ThreadRowItem({
     if (await confirmDelete("this conversation")) del.mutate();
   }
 
+  // Swipe-to-trash is reversible, so confirm-free: offer an Undo toast instead.
+  function trashWithUndo() {
+    patch.mutate({ trashed: true });
+    toast.success("Moved to Trash", {
+      action: { label: "Undo", onClick: () => patch.mutate({ trashed: false }) },
+    });
+  }
+
+  // Touch gestures (mailbox lists only). Suspended while multi-selecting so a
+  // swipe can't fight the selection bar.
+  const swipe: RowSwipe | undefined = selecting
+    ? undefined
+    : {
+        onLongPress: () => setSheetOpen(true),
+        right:
+          view === "trash"
+            ? thread.trashed
+              ? {
+                  icon: ArchiveRestore,
+                  label: "Restore",
+                  className: "bg-emerald-600",
+                  onCommit: () => patch.mutate({ trashed: false }),
+                }
+              : undefined
+            : {
+                icon: unread ? MailOpen : Mail,
+                label: unread ? "Mark read" : "Mark unread",
+                className: "bg-sky-600",
+                onCommit: () => patch.mutate({ read: unread }),
+              },
+        left:
+          view === "trash"
+            ? thread.trashed
+              ? { icon: Trash2, label: "Delete", className: "bg-destructive", onCommit: remove }
+              : undefined
+            : {
+                icon: Trash2,
+                label: "Trash",
+                className: "bg-destructive",
+                onCommit: trashWithUndo,
+              },
+      };
+
   return (
-    <ThreadRowView
-      thread={thread}
-      link={{ kind: "mailbox", mailboxId, view }}
-      active={active}
-      selected={selected}
-      labels={labels}
-      rowRef={rowRef}
-      remeasure={remeasure}
-      style={style}
-      dataIndex={dataIndex}
-      leading={
-        <div
-          className={cn(
-            "flex w-9 shrink-0 items-center justify-center transition-opacity",
-            selecting || selected
-              ? "opacity-100"
-              : // No hover on touch: keep the checkbox visible below md (the
-                // full-width mobile list) so multi-select is reachable.
-                "opacity-100 md:opacity-0 md:focus-within:opacity-100 md:group-hover:opacity-100",
-          )}
-        >
-          <Checkbox
-            checked={selected}
-            onCheckedChange={onToggleSelect}
-            aria-label={selected ? "Deselect" : "Select"}
-          />
-        </div>
-      }
-      actions={
-        selecting ? undefined : (
-          <>
-            <IconButton
-              icon={unread ? MailOpen : Mail}
-              label={unread ? "Mark as read" : "Mark as unread"}
-              size="icon-sm"
-              className="h-6 w-6 hover:text-foreground"
-              disabled={patch.isPending}
-              onClick={() => patch.mutate({ read: unread })}
+    <>
+      <ThreadActionSheet
+        open={sheetOpen}
+        onOpenChange={setSheetOpen}
+        thread={thread}
+        view={view}
+        onToggleRead={() => patch.mutate({ read: unread })}
+        onTrash={trashWithUndo}
+        onRestore={() => patch.mutate({ trashed: false })}
+        onDelete={remove}
+        onSpam={(spam) => patch.mutate({ spam })}
+        onSelect={onRequestSelect}
+      />
+      <ThreadRowView
+        swipe={swipe}
+        thread={thread}
+        link={{ kind: "mailbox", mailboxId, view }}
+        active={active}
+        selected={selected}
+        labels={labels}
+        rowRef={rowRef}
+        remeasure={remeasure}
+        style={style}
+        dataIndex={dataIndex}
+        leading={
+          <div
+            className={cn(
+              "flex w-9 shrink-0 items-center justify-center transition-opacity",
+              selecting || selected
+                ? "opacity-100"
+                : // No hover on touch: keep the checkbox visible below md (the
+                  // full-width mobile list) so multi-select is reachable.
+                  "opacity-100 md:opacity-0 md:focus-within:opacity-100 md:group-hover:opacity-100",
+            )}
+          >
+            <Checkbox
+              checked={selected}
+              onCheckedChange={onToggleSelect}
+              aria-label={selected ? "Deselect" : "Select"}
             />
-            {view === "trash" ? (
-              // Whole-thread restore/delete only apply when the thread itself is
-              // trashed. A thread surfaced here only for an individually-deleted
-              // message is managed inside the thread (per-message restore/delete),
-              // so the destructive whole-thread shortcuts are withheld.
-              thread.trashed ? (
-                <>
-                  <IconButton
-                    icon={ArchiveRestore}
-                    label="Restore"
-                    size="icon-sm"
-                    className="h-6 w-6 hover:text-foreground"
-                    disabled={patch.isPending}
-                    onClick={() => patch.mutate({ trashed: false })}
-                  />
-                  <IconButton
-                    icon={Trash2}
-                    label="Delete permanently"
-                    size="icon-sm"
-                    className="h-6 w-6 hover:text-foreground"
-                    disabled={del.isPending}
-                    onClick={remove}
-                  />
-                </>
-              ) : null
-            ) : (
+          </div>
+        }
+        actions={
+          selecting ? undefined : (
+            <>
               <IconButton
-                icon={Trash2}
-                label="Trash"
+                icon={unread ? MailOpen : Mail}
+                label={unread ? "Mark as read" : "Mark as unread"}
                 size="icon-sm"
                 className="h-6 w-6 hover:text-foreground"
                 disabled={patch.isPending}
-                onClick={() => patch.mutate({ trashed: true })}
+                onClick={() => patch.mutate({ read: unread })}
               />
-            )}
-          </>
-        )
-      }
-    />
+              {view === "trash" ? (
+                // Whole-thread restore/delete only apply when the thread itself is
+                // trashed. A thread surfaced here only for an individually-deleted
+                // message is managed inside the thread (per-message restore/delete),
+                // so the destructive whole-thread shortcuts are withheld.
+                thread.trashed ? (
+                  <>
+                    <IconButton
+                      icon={ArchiveRestore}
+                      label="Restore"
+                      size="icon-sm"
+                      className="h-6 w-6 hover:text-foreground"
+                      disabled={patch.isPending}
+                      onClick={() => patch.mutate({ trashed: false })}
+                    />
+                    <IconButton
+                      icon={Trash2}
+                      label="Delete permanently"
+                      size="icon-sm"
+                      className="h-6 w-6 hover:text-foreground"
+                      disabled={del.isPending}
+                      onClick={remove}
+                    />
+                  </>
+                ) : null
+              ) : (
+                <IconButton
+                  icon={Trash2}
+                  label="Trash"
+                  size="icon-sm"
+                  className="h-6 w-6 hover:text-foreground"
+                  disabled={patch.isPending}
+                  onClick={() => patch.mutate({ trashed: true })}
+                />
+              )}
+            </>
+          )
+        }
+      />
+    </>
   );
 }
 
