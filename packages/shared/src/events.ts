@@ -13,6 +13,13 @@ export const hubEvent = z.discriminatedUnion("type", [
     messageId: z.string(),
     threadId: z.string(),
   }),
+  // A thread's metadata changed in place (e.g. best-effort AI summary/category
+  // landed after delivery) — clients re-fetch the list without bumping it.
+  z.object({
+    type: z.literal("thread_updated"),
+    mailboxId: z.string(),
+    threadId: z.string(),
+  }),
   z.object({
     type: z.literal("mailbox_expired"),
     mailboxId: z.string(),

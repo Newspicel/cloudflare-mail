@@ -1,7 +1,7 @@
 import { attachment, blocklist, blockRequest, message, thread } from "@cfmail/db/schema";
 import { Flag, setFlag } from "@cfmail/shared/flags";
 import { Perm } from "@cfmail/shared/permissions";
-import type { MessageBodyDto } from "@cfmail/shared/responses";
+import type { MessageBodyDto, SmartReplyDto } from "@cfmail/shared/responses";
 import { createBlockRequest, sendMessage } from "@cfmail/shared/schemas";
 import { zValidator } from "@hono/zod-validator";
 import { and, count, eq } from "drizzle-orm";
@@ -11,6 +11,7 @@ import { z } from "zod";
 import { getOrCreateAuthSecret } from "../config.ts";
 import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
+import { generateSmartReply } from "../mail/ai.ts";
 import { assertOwnedAttachmentKeys } from "../mail/attachment-keys.ts";
 import { collectMessageBlobKeys, deleteBlobs } from "../mail/blobs.ts";
 import { extractCalendar } from "../mail/calendar.ts";
@@ -182,6 +183,29 @@ export function messagesRoutes() {
       requestedByUserId: user.id,
     });
     return c.json({ status: "submitted" }, 201);
+  });
+
+  // AI-drafted reply suggestions for an inbound message (best-effort, on-demand).
+  // READ is enough — it only returns text the user may choose to send.
+  r.post("/:id/smart-reply", async (c) => {
+    const db = dbFromCtx(c);
+    const user = c.get("user")!;
+    const id = c.req.param("id");
+    const msg = await requireEntityAccess(db, user.id, message, id, Perm.READ);
+    if (msg.direction !== "in") throw new HTTPException(400, { message: "not an inbound message" });
+
+    const mb = await db.query.mailbox.findFirst({
+      where: (m, { eq }) => eq(m.id, msg.mailboxId),
+      columns: { aiFeatures: true, aiTokenCap: true },
+    });
+    if (!mb?.aiFeatures) throw new HTTPException(403, { message: "AI features are off" });
+
+    const suggestions = await generateSmartReply(c.env, db, msg.mailboxId, mb.aiTokenCap ?? null, {
+      from: msg.fromName ? `${msg.fromName} <${msg.fromAddr}>` : msg.fromAddr,
+      subject: msg.subject,
+      body: msg.bodyText ?? "",
+    });
+    return c.json({ suggestions } satisfies SmartReplyDto);
   });
 
   // Full body, parsed on demand from the raw `.eml`. Listing endpoints only

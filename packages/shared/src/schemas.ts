@@ -401,6 +401,8 @@ export const updateMailboxSettings = z.object({
     .optional(),
   spamFilter: spamFilterLevel.optional(),
   spamAiTokenCap: z.number().int().positive().max(100_000_000).nullable().optional(),
+  aiFeatures: z.boolean().optional(),
+  aiTokenCap: z.number().int().positive().max(100_000_000).nullable().optional(),
   pgpMode: pgpMode.optional(),
 });
 

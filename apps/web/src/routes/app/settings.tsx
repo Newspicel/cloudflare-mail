@@ -366,6 +366,16 @@ function ReadingSection() {
             onCheckedChange={(checked) => setPrefs({ autoMarkRead: checked })}
           />
         </Row>
+        <Row
+          label="AI summaries in list"
+          hint="Show the one-line AI summary under each conversation (where the mailbox has AI enabled)."
+        >
+          <Switch
+            checked={prefs.aiSummaries !== false}
+            disabled={saving}
+            onCheckedChange={(checked) => setPrefs({ aiSummaries: checked })}
+          />
+        </Row>
         <Row label="Open addresses in" hint="Which maps service event locations open in.">
           <Segmented<NonNullable<UserPrefs["mapProvider"]>>
             value={prefs.mapProvider ?? "auto"}

@@ -1,6 +1,7 @@
 import {
   domain,
   mailbox,
+  mailboxAiUsage,
   mailboxMember,
   mailboxSpamUsage,
   message,
@@ -167,11 +168,17 @@ export function adminRoutes() {
         type: true,
         spamFilter: true,
         spamAiTokenCap: true,
+        aiFeatures: true,
+        aiTokenCap: true,
       },
     });
     if (!mb) throw new HTTPException(404, { message: "not found" });
     const usage = await db.query.mailboxSpamUsage.findFirst({
       where: eq(mailboxSpamUsage.mailboxId, id),
+      columns: { period: true, calls: true, tokensIn: true, tokensOut: true },
+    });
+    const aiUsage = await db.query.mailboxAiUsage.findFirst({
+      where: eq(mailboxAiUsage.mailboxId, id),
       columns: { period: true, calls: true, tokensIn: true, tokensOut: true },
     });
     return c.json({
@@ -184,6 +191,15 @@ export function adminRoutes() {
       spamAiTokenCap: mb.spamAiTokenCap,
       spamUsage: usage
         ? { period: usage.period, calls: usage.calls, tokens: usage.tokensIn + usage.tokensOut }
+        : null,
+      aiFeatures: mb.aiFeatures,
+      aiTokenCap: mb.aiTokenCap,
+      aiUsage: aiUsage
+        ? {
+            period: aiUsage.period,
+            calls: aiUsage.calls,
+            tokens: aiUsage.tokensIn + aiUsage.tokensOut,
+          }
         : null,
     });
   });
@@ -207,6 +223,8 @@ export function adminRoutes() {
       replyTo: (v: string | null) => (v ? v : null),
       spamFilter: true,
       spamAiTokenCap: true,
+      aiFeatures: true,
+      aiTokenCap: true,
     });
     if (Object.keys(patch).length === 0) return c.json({ ok: true });
 

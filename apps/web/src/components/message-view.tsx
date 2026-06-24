@@ -2,6 +2,8 @@ import { Flag, hasFlag, setFlag } from "@cfmail/shared/flags";
 import type {
   AttachmentDto,
   CalendarEventDto,
+  SmartReplyDto,
+  ThreadSummaryDto,
   UnsubscribeResultDto,
   UserPrefs,
 } from "@cfmail/shared/responses";
@@ -27,6 +29,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   ShieldQuestion,
+  Sparkles,
   Star,
   Trash2,
   Users,
@@ -44,7 +47,7 @@ import {
 import { linkifyText } from "@/lib/linkify.tsx";
 import { useDateTimeFmt, useUserPrefs } from "@/lib/prefs.ts";
 import type { MailView, MessageRow, ThreadRow } from "@/lib/queries.ts";
-import { messageBodyQuery } from "@/lib/queries.ts";
+import { mailboxesQuery, messageBodyQuery } from "@/lib/queries.ts";
 import { keys } from "@/lib/query-keys.ts";
 import { sanitizeEmailHtml } from "@/lib/sanitize-email.ts";
 import { useThreadListMutation } from "@/lib/thread-mutations.ts";
@@ -323,6 +326,7 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
         </div>
 
         <div className="flex-1 space-y-3 overflow-y-auto p-3 sm:p-4">
+          {!readOnly && <ThreadAiPanel thread={thread} messages={visibleMessages} />}
           {visibleMessages.map((m) => (
             <MessageCard
               key={m.id}
@@ -341,6 +345,87 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
         </div>
       </div>
     </TooltipProvider>
+  );
+}
+
+// AI helpers for an open thread: a one-tap thread summary and smart-reply
+// suggestions for the latest inbound message. Only shown when the mailbox has
+// AI features enabled; both calls are best-effort and degrade to a toast.
+function ThreadAiPanel({ thread, messages }: { thread: ThreadRow; messages: MessageRow[] }) {
+  const { data: mbData } = useQuery(mailboxesQuery);
+  const aiOn = mbData?.mailboxes.find((m) => m.id === thread.mailboxId)?.aiFeatures ?? false;
+  const lastInbound = useMemo(
+    () => [...messages].toReversed().find((m) => m.direction === "in"),
+    [messages],
+  );
+
+  const summarize = useMutation({
+    mutationFn: () =>
+      api<ThreadSummaryDto>(`/api/threads/${thread.id}/summary`, { method: "POST" }),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Couldn't summarize"),
+  });
+  const smartReply = useMutation({
+    mutationFn: () =>
+      api<SmartReplyDto>(`/api/messages/${lastInbound!.id}/smart-reply`, { method: "POST" }),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Couldn't draft replies"),
+  });
+
+  if (!aiOn) return null;
+
+  const bullets = summarize.data?.bullets ?? [];
+  const suggestions = smartReply.data?.suggestions ?? [];
+
+  return (
+    <div className="space-y-2 rounded-lg border border-dashed bg-muted/30 p-2.5 text-[13px]">
+      <div className="flex flex-wrap items-center gap-2">
+        <Sparkles className="h-3.5 w-3.5 text-muted-foreground" />
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={summarize.isPending}
+          onClick={() => summarize.mutate()}
+        >
+          {summarize.isPending ? "Summarizing…" : "Summarize thread"}
+        </Button>
+        {lastInbound && (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={smartReply.isPending}
+            onClick={() => smartReply.mutate()}
+          >
+            {smartReply.isPending ? "Drafting…" : "Suggest replies"}
+          </Button>
+        )}
+      </div>
+      {summarize.isSuccess && (
+        <ul className="ml-1 list-disc space-y-0.5 pl-4 text-muted-foreground">
+          {bullets.length ? (
+            bullets.map((b) => <li key={b}>{b}</li>)
+          ) : (
+            <li className="list-none">No summary available.</li>
+          )}
+        </ul>
+      )}
+      {smartReply.isSuccess && lastInbound && (
+        <div className="flex flex-col gap-1.5">
+          {suggestions.length ? (
+            suggestions.map((sug) => (
+              <button
+                key={sug}
+                type="button"
+                className="rounded-md border bg-card px-2.5 py-1.5 text-left text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+                onClick={() => openCompose({ replyToMessage: lastInbound, initialBody: sug })}
+              >
+                {sug}
+              </button>
+            ))
+          ) : (
+            <span className="text-muted-foreground">No suggestions available.</span>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

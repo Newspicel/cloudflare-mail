@@ -28,6 +28,12 @@ export function connectStream(qc: QueryClient, navigate?: Navigate): () => void 
           invalidateThreadChange(qc, evt.mailboxId, evt.threadId);
           break;
         }
+        case "thread_updated": {
+          // In-place metadata change (e.g. AI summary landed) — refresh the list
+          // and the open thread without bumping it to the top.
+          invalidateThreadChange(qc, evt.mailboxId, evt.threadId);
+          break;
+        }
         case "mailbox_expired": {
           qc.invalidateQueries({ queryKey: keys.mailboxes() });
           break;
@@ -40,7 +46,7 @@ export function connectStream(qc: QueryClient, navigate?: Navigate): () => void 
     }
   };
 
-  for (const t of ["new_message", "message_sent", "mailbox_expired", "ping"]) {
+  for (const t of ["new_message", "message_sent", "thread_updated", "mailbox_expired", "ping"]) {
     es.addEventListener(t, onEvent);
   }
   return () => es.close();

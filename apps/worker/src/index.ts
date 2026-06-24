@@ -50,8 +50,8 @@ export default {
     return withSecurityHeaders(await env.ASSETS.fetch(req));
   },
 
-  async email(msg: ForwardableEmailMessage, env: Env, _ctx: ExecutionContext): Promise<void> {
-    await handleInbound(msg, env);
+  async email(msg: ForwardableEmailMessage, env: Env, ctx: ExecutionContext): Promise<void> {
+    await handleInbound(msg, env, ctx);
   },
 
   async scheduled(_ctrl: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {

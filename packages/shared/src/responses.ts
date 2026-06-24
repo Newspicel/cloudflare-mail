@@ -64,6 +64,8 @@ export interface MailboxSummaryDto {
   perms: number;
   unread: number;
   pgpMode: PgpMode;
+  /** Whether reader AI features (summaries, smart reply, thread summary) are on. */
+  aiFeatures: boolean;
 }
 
 export interface SearchResultDto {
@@ -114,6 +116,9 @@ export interface UserPrefs {
   timeFormat?: "12h" | "24h";
   // which maps service event/address links open in ("auto" picks by device)
   mapProvider?: "auto" | "google" | "apple";
+  // show the AI summary line under each row in the list (default on when the
+  // mailbox has AI features enabled). Purely a display toggle — no spend impact.
+  aiSummaries?: boolean;
 }
 
 /**
@@ -215,6 +220,16 @@ export interface UnsubscribeResultDto {
   url?: string;
 }
 
+/** AI-drafted reply options for a message (may be empty if AI is unavailable). */
+export interface SmartReplyDto {
+  suggestions: string[];
+}
+
+/** AI catch-up summary of a thread as short bullets (empty if unavailable). */
+export interface ThreadSummaryDto {
+  bullets: string[];
+}
+
 export type MailView = "inbox" | "drafts" | "sent" | "marked" | "spam" | "trash" | "all";
 export type FolderCountsDto = Record<MailView, { total: number; unread: number }>;
 
@@ -244,6 +259,10 @@ export interface MailboxSettingsDto {
   spamFilter: SpamFilterLevel;
   spamAiTokenCap: number | null;
   spamUsage: { period: string; calls: number; tokens: number } | null;
+  // Reader AI features (summary/category, smart reply, thread summarize).
+  aiFeatures: boolean;
+  aiTokenCap: number | null;
+  aiUsage: { period: string; calls: number; tokens: number } | null;
   // Gateway PGP. The private key/passphrase are never sent; `pgpConfigured` says
   // whether a keypair exists, and the armored public key is shareable.
   pgpMode: PgpMode;
