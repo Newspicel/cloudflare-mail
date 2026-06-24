@@ -8,7 +8,7 @@ import { MailboxSettingsForm } from "@/components/mailbox-settings-form.tsx";
 import { TokenField } from "@/components/token-field.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Checkbox } from "@/components/ui/checkbox.tsx";
-import { useConfirm } from "@/components/ui/confirm.tsx";
+import { useConfirm, useConfirmHelpers } from "@/components/ui/confirm.tsx";
 import {
   Dialog,
   DialogClose,
@@ -794,6 +794,7 @@ function UserRow({ user }: { user: AdminUser }) {
 
 function InviteRow({ invite }: { invite: UserInviteRow }) {
   const qc = useQueryClient();
+  const { confirm } = useConfirmHelpers();
   const revoke = useMutation({
     mutationFn: () => api(`/api/users/invites/${invite.id}`, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-invites"] }),
@@ -807,7 +808,20 @@ function InviteRow({ invite }: { invite: UserInviteRow }) {
           {invite.role} · expires {new Date(invite.expiresAt).toLocaleString()}
         </div>
       </div>
-      <GhostBtn destructive onClick={() => revoke.mutate()}>
+      <GhostBtn
+        destructive
+        onClick={async () => {
+          if (
+            await confirm({
+              title: `Revoke invite for ${invite.email}?`,
+              description: "The invite link stops working immediately.",
+              confirmLabel: "Revoke",
+              destructive: true,
+            })
+          )
+            revoke.mutate();
+        }}
+      >
         Revoke
       </GhostBtn>
     </li>
@@ -1677,6 +1691,7 @@ function RedirectRow({
 }) {
   const [migrateOpen, setMigrateOpen] = useState(false);
   const [target, setTarget] = useState(rd.targetMailboxId);
+  const { confirmDelete } = useConfirmHelpers();
 
   const migrate = useMutation({
     mutationFn: () =>
@@ -1725,7 +1740,18 @@ function RedirectRow({
           >
             Migrate
           </GhostBtn>
-          <GhostBtn destructive onClick={() => remove.mutate()}>
+          <GhostBtn
+            destructive
+            onClick={async () => {
+              if (
+                await confirmDelete(
+                  `redirect ${rd.address}`,
+                  "Mail to this address stops being forwarded.",
+                )
+              )
+                remove.mutate();
+            }}
+          >
             Remove
           </GhostBtn>
         </div>
@@ -2006,6 +2032,7 @@ interface Invite {
 
 function MembersPanel({ mailboxId }: { mailboxId: string }) {
   const qc = useQueryClient();
+  const { confirm } = useConfirmHelpers();
   const membersQ = useQuery({
     queryKey: ["mailbox-members", mailboxId],
     queryFn: () => api<{ members: Member[] }>(`/api/mailboxes/${mailboxId}/members`),
@@ -2118,7 +2145,20 @@ function MembersPanel({ mailboxId }: { mailboxId: string }) {
                 checked={has(member.perms, Perm.MANAGE)}
                 onChange={() => toggle(member, Perm.MANAGE)}
               />
-              <GhostBtn destructive onClick={() => removeMember.mutate(member.userId)}>
+              <GhostBtn
+                destructive
+                onClick={async () => {
+                  if (
+                    await confirm({
+                      title: `Remove ${member.email}?`,
+                      description: "They lose access to this mailbox immediately.",
+                      confirmLabel: "Remove",
+                      destructive: true,
+                    })
+                  )
+                    removeMember.mutate(member.userId);
+                }}
+              >
                 Remove
               </GhostBtn>
             </div>
@@ -2143,7 +2183,20 @@ function MembersPanel({ mailboxId }: { mailboxId: string }) {
                 Invite sent {new Date(inv.createdAt).toLocaleString()} · {permLabel(inv.perms)}
               </div>
             </div>
-            <GhostBtn destructive onClick={() => removeInvite.mutate(inv.id)}>
+            <GhostBtn
+              destructive
+              onClick={async () => {
+                if (
+                  await confirm({
+                    title: `Revoke invite for ${inv.email}?`,
+                    description: "The invite stops working immediately.",
+                    confirmLabel: "Revoke",
+                    destructive: true,
+                  })
+                )
+                  removeInvite.mutate(inv.id);
+              }}
+            >
               Revoke
             </GhostBtn>
           </li>
@@ -2286,6 +2339,7 @@ function BlockRequestRow({
   req: BlockReq;
   act: (path: string, method: "POST" | "DELETE") => Promise<unknown>;
 }) {
+  const { confirm } = useConfirmHelpers();
   const run = (path: string, method: "POST" | "DELETE", ok: string) =>
     act(path, method)
       .then(() => toast.success(ok))
@@ -2330,7 +2384,16 @@ function BlockRequestRow({
           )}
           <GhostBtn
             destructive
-            onClick={() => run(`/api/admin/block/requests/${req.id}`, "DELETE", "Removed")}
+            onClick={async () => {
+              if (
+                await confirm({
+                  title: "Delete this block request?",
+                  confirmLabel: "Delete",
+                  destructive: true,
+                })
+              )
+                run(`/api/admin/block/requests/${req.id}`, "DELETE", "Removed");
+            }}
           >
             Delete
           </GhostBtn>

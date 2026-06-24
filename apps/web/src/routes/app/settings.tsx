@@ -497,6 +497,7 @@ function shortUA(ua?: string | null): string {
 
 function SecuritySection() {
   const qc = useQueryClient();
+  const { confirm, confirmDelete } = useConfirmHelpers();
   const { data: current } = authClient.useSession();
   const currentToken = current?.session?.token;
 

@@ -10,6 +10,7 @@ import { useListVirtualizer } from "@/lib/use-list-virtualizer.ts";
 import { openCompose } from "./compose-dock.tsx";
 import { FOLDER_META, FolderTabs } from "./folder-tabs.tsx";
 import { Button } from "./ui/button.tsx";
+import { useConfirmHelpers } from "./ui/confirm.tsx";
 import { Tooltip, TooltipProvider } from "./ui/tooltip.tsx";
 import { EmptyState, ThreadListSkeleton } from "./ui.tsx";
 
@@ -45,6 +46,7 @@ export function DraftList({
 }: Props) {
   const meta = FOLDER_META.drafts;
   const qc = useQueryClient();
+  const { confirmDelete } = useConfirmHelpers();
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const virtualizer = useListVirtualizer(scrollRef, drafts.length, {
@@ -114,7 +116,9 @@ export function DraftList({
                           variant="ghost"
                           size="icon-sm"
                           disabled={remove.isPending}
-                          onClick={() => remove.mutate(d.id)}
+                          onClick={async () => {
+                            if (await confirmDelete("this draft")) remove.mutate(d.id);
+                          }}
                           aria-label="Discard draft"
                           className="hover:bg-destructive/10 hover:text-destructive"
                         >

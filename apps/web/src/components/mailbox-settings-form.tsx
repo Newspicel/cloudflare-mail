@@ -14,6 +14,7 @@ import {
 } from "@/components/settings-ui.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
 import { Button } from "@/components/ui/button.tsx";
+import { useConfirmHelpers } from "@/components/ui/confirm.tsx";
 import {
   Select,
   SelectContent,
@@ -256,6 +257,7 @@ export function MailboxSettingsForm({
  */
 function MailboxPgpCard({ mailboxId, settingsKey }: { mailboxId: string; settingsKey: unknown[] }) {
   const qc = useQueryClient();
+  const { confirm, confirmDelete } = useConfirmHelpers();
   const base = `/api/mailboxes/${mailboxId}`;
   const settingsQ = useQuery({
     queryKey: settingsKey,
@@ -384,7 +386,18 @@ function MailboxPgpCard({ mailboxId, settingsKey }: { mailboxId: string; setting
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => removeKey.mutate()}
+                onClick={async () => {
+                  if (
+                    await confirm({
+                      title: "Remove the mailbox PGP key?",
+                      description:
+                        "Signing and encryption turn off, and encrypted mail can no longer be decrypted.",
+                      confirmLabel: "Remove",
+                      destructive: true,
+                    })
+                  )
+                    removeKey.mutate();
+                }}
                 disabled={removeKey.isPending}
                 className="text-destructive hover:bg-destructive/10 hover:text-destructive"
               >
@@ -466,7 +479,9 @@ function MailboxPgpCard({ mailboxId, settingsKey }: { mailboxId: string; setting
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => removeContact.mutate(k.id)}
+                    onClick={async () => {
+                      if (await confirmDelete(`recipient key for ${k.email}`)) removeContact.mutate(k.id);
+                    }}
                     disabled={removeContact.isPending}
                   >
                     Remove
