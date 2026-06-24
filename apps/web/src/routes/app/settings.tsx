@@ -1,4 +1,4 @@
-import type { MailView, UserPrefs } from "@cfmail/shared";
+import type { DateFormat, MailView, UserPrefs } from "@cfmail/shared";
 import { has, Perm } from "@cfmail/shared/permissions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
@@ -11,6 +11,7 @@ import { RulesSection } from "@/components/rules-settings.tsx";
 import {
   CopyButton,
   Field,
+  fieldClass,
   GroupLabel,
   Input,
   Row,
@@ -24,7 +25,7 @@ import { useConfirmHelpers } from "@/components/ui/confirm.tsx";
 import { Switch } from "@/components/ui/switch.tsx";
 import { api } from "@/lib/api.ts";
 import { authClient } from "@/lib/auth-client.ts";
-import { useUserPrefs } from "@/lib/prefs.ts";
+import { useDateTimeFmt, useUserPrefs } from "@/lib/prefs.ts";
 import { disablePush, enablePush, isPushEnabled, pushSupported } from "@/lib/push.ts";
 import {
   type FolderRow,
@@ -36,6 +37,7 @@ import {
 } from "@/lib/queries.ts";
 import { keys } from "@/lib/query-keys.ts";
 import { type Theme, useTheme } from "@/lib/theme.ts";
+import { dateFormatExample, formatDateTime } from "@/lib/time.ts";
 
 export const Route = createFileRoute("/app/settings")({
   component: SettingsPage,
@@ -45,6 +47,7 @@ const NAV = [
   ["profile", "Profile"],
   ["appearance", "Appearance"],
   ["reading", "Reading"],
+  ["datetime", "Date & time"],
   ["compose", "Compose"],
   ["security", "Security"],
   ["notifications", "Notifications"],
@@ -93,6 +96,7 @@ function SettingsPage() {
           />
           <AppearanceSection />
           <ReadingSection />
+          <DateTimeSection />
           <ComposeSection />
           <SecuritySection />
           <TwoFactorSection enabled={!!me.data?.user?.twoFactorEnabled} />
@@ -332,6 +336,12 @@ const VIEW_OPTIONS = [
   ["marked", "Marked"],
 ] as const;
 
+const MAP_OPTIONS = [
+  ["auto", "Auto"],
+  ["google", "Google"],
+  ["apple", "Apple"],
+] as const;
+
 function ReadingSection() {
   const { prefs, setPrefs, saving } = useUserPrefs();
 
@@ -354,6 +364,77 @@ function ReadingSection() {
             checked={prefs.autoMarkRead !== false}
             disabled={saving}
             onCheckedChange={(checked) => setPrefs({ autoMarkRead: checked })}
+          />
+        </Row>
+        <Row label="Open addresses in" hint="Which maps service event locations open in.">
+          <Segmented<NonNullable<UserPrefs["mapProvider"]>>
+            value={prefs.mapProvider ?? "auto"}
+            options={MAP_OPTIONS}
+            onChange={(v) => setPrefs({ mapProvider: v })}
+            disabled={saving}
+          />
+        </Row>
+      </div>
+    </Section>
+  );
+}
+
+// ─── Date & time ──────────────────────────────────────────────────────────
+
+// Fixed instant for the settings preview so it's stable across renders.
+const SAMPLE_DATE = new Date(2026, 5, 24, 14, 30);
+
+// Explicit layouts, grouped numeric → named, each labelled by its own example.
+const DATE_FORMAT_OPTIONS: DateFormat[] = [
+  "dmy-dot",
+  "dmy-dot-2",
+  "dmy-slash",
+  "dmy-slash-2",
+  "mdy-slash",
+  "mdy-slash-2",
+  "iso",
+  "d-mon-y",
+  "d-month-y",
+  "mon-d-y",
+  "month-d-y",
+];
+
+const TIME_OPTIONS = [
+  ["24h", "24-hour"],
+  ["12h", "12-hour"],
+] as const;
+
+function DateTimeSection() {
+  const { prefs, setPrefs, saving } = useUserPrefs();
+  const fmt = useDateTimeFmt();
+
+  return (
+    <Section
+      id="datetime"
+      title="Date & time"
+      description={`How dates and times are shown. Preview: ${formatDateTime(SAMPLE_DATE, fmt)}`}
+    >
+      <div className="divide-y">
+        <Row label="Date format" hint="Order, separator, and how the month is written.">
+          <select
+            className={fieldClass}
+            value={prefs.dateFormat ?? "dmy-dot"}
+            disabled={saving}
+            onChange={(e) => setPrefs({ dateFormat: e.target.value as DateFormat })}
+          >
+            {DATE_FORMAT_OPTIONS.map((id) => (
+              <option key={id} value={id}>
+                {dateFormatExample(id)}
+              </option>
+            ))}
+          </select>
+        </Row>
+        <Row label="Clock" hint="12- or 24-hour time.">
+          <Segmented<NonNullable<UserPrefs["timeFormat"]>>
+            value={prefs.timeFormat ?? "24h"}
+            options={TIME_OPTIONS}
+            onChange={(v) => setPrefs({ timeFormat: v })}
+            disabled={saving}
           />
         </Row>
       </div>

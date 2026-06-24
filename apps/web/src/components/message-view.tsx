@@ -3,6 +3,7 @@ import type {
   AttachmentDto,
   CalendarEventDto,
   UnsubscribeResultDto,
+  UserPrefs,
 } from "@cfmail/shared/responses";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -37,12 +38,13 @@ import {
   removeThreadsFromLists,
 } from "@/lib/invalidate.ts";
 import { linkifyText } from "@/lib/linkify.tsx";
-import { useUserPrefs } from "@/lib/prefs.ts";
+import { useDateTimeFmt, useUserPrefs } from "@/lib/prefs.ts";
 import type { MailView, MessageRow, ThreadRow } from "@/lib/queries.ts";
 import { messageBodyQuery } from "@/lib/queries.ts";
 import { keys } from "@/lib/query-keys.ts";
 import { sanitizeEmailHtml } from "@/lib/sanitize-email.ts";
 import { useThreadListMutation } from "@/lib/thread-mutations.ts";
+import { type DateTimeFmt, formatClock, formatDateTime } from "@/lib/time.ts";
 import { openCompose } from "./compose-dock.tsx";
 import { EmailFrame } from "./email-frame.tsx";
 import { LabelChips, LabelsMenu } from "./labels-menu.tsx";
@@ -556,37 +558,43 @@ function MessageAttachments({
 
 // Render a calendar invite's start/end window. All-day events show the date(s)
 // only; timed events show the day plus a start–end time range.
-function formatEventWhen(event: CalendarEventDto): string | null {
+function formatEventWhen(event: CalendarEventDto, fmt: DateTimeFmt): string | null {
   if (!event.start) return null;
   const start = new Date(event.start);
   if (Number.isNaN(start.getTime())) return null;
   const end = event.end ? new Date(event.end) : null;
   const endValid = end && !Number.isNaN(end.getTime());
 
-  if (event.allDay) {
-    const date = start.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
-    return date;
-  }
-
   const day = start.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
-  const from = start.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (event.allDay) return day;
+
+  const from = formatClock(start, fmt);
   if (!endValid) return `${day} · ${from}`;
   const sameDay = start.toDateString() === end.toDateString();
-  const to = sameDay
-    ? end.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
-    : end.toLocaleString([], {
-        month: "short",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      });
+  const to = sameDay ? formatClock(end, fmt) : formatDateTime(end, fmt);
   return `${day} · ${from} – ${to}`;
+}
+
+// Build a maps deep link for an address. "auto" picks Apple Maps on Apple
+// devices (where it opens the native app) and Google Maps everywhere else.
+function mapsUrl(address: string, provider: UserPrefs["mapProvider"]): string {
+  const q = encodeURIComponent(address);
+  const apple =
+    provider === "apple" ||
+    (provider !== "google" &&
+      typeof navigator !== "undefined" &&
+      /iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent));
+  return apple
+    ? `https://maps.apple.com/?q=${q}`
+    : `https://www.google.com/maps/search/?api=1&query=${q}`;
 }
 
 // Banner for a message carrying an iCalendar invite (Invitation.ics / event.ics).
 // Display-only: we surface the event details; we don't RSVP or manage a calendar.
 function CalendarBanner({ event }: { event: CalendarEventDto }) {
-  const when = formatEventWhen(event);
+  const fmt = useDateTimeFmt();
+  const { prefs } = useUserPrefs();
+  const when = formatEventWhen(event, fmt);
   const cancelled = event.method === "CANCEL";
   const isReply = event.method === "REPLY";
   const label = cancelled
@@ -631,10 +639,16 @@ function CalendarBanner({ event }: { event: CalendarEventDto }) {
             </div>
           )}
           {event.location && (
-            <div className="flex items-center gap-1.5 text-muted-foreground">
+            <a
+              href={mapsUrl(event.location, prefs.mapProvider)}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground hover:underline"
+              title={`Open in ${prefs.mapProvider === "apple" ? "Apple Maps" : prefs.mapProvider === "google" ? "Google Maps" : "Maps"}`}
+            >
               <MapPin className="size-3.5 shrink-0" />
               <span className="truncate">{event.location}</span>
-            </div>
+            </a>
           )}
           {event.organizer && (event.organizer.name || event.organizer.email) && (
             <div className="text-muted-foreground">
@@ -676,6 +690,7 @@ function MessageCard({
   // The body isn't in the thread payload (listing only carries the snippet);
   // fetch the full parsed body lazily when the card mounts.
   const body = useQuery(messageBodyQuery(msg.id));
+  const fmt = useDateTimeFmt();
   const bodyHtml = useMemo(() => {
     const html = body.data?.html;
     return html ? sanitizeEmailHtml(html) : null;
@@ -711,13 +726,11 @@ function MessageCard({
         </div>
         <div className="flex shrink-0 flex-col items-end gap-2">
           <div className="flex items-center gap-1.5">
-            <time className="text-[11px] text-muted-foreground" title={when.toLocaleString()}>
-              {when.toLocaleString([], {
-                month: "short",
-                day: "numeric",
-                hour: "numeric",
-                minute: "2-digit",
-              })}
+            <time
+              className="text-[11px] text-muted-foreground"
+              title={when.toLocaleString(undefined, { hour12: fmt.hour12 })}
+            >
+              {formatDateTime(when, fmt)}
             </time>
             {!readOnly && (
               <Button
