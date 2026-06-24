@@ -204,6 +204,59 @@ describe("ingestRaw — attachments", () => {
   });
 });
 
+describe("ingestRaw — trashed thread resurfacing", () => {
+  // Ingest two messages that thread together via the subject window. Recent
+  // dates keep the thread inside the 7-day window so the second joins it.
+  const now = new Date();
+
+  async function trashThe(threadId: string): Promise<void> {
+    await db
+      .update(thread)
+      .set({ trashed: true, trashedAt: new Date() })
+      .where(eq(thread.id, threadId));
+  }
+
+  it("a live inbound reply pulls a trashed thread back out of the trash", async () => {
+    const first = await ingestRaw(
+      e,
+      db,
+      importOpts({ raw: eml({ subject: "Project sync" }), receivedAt: now, live: true }),
+    );
+    await trashThe(first.threadId);
+
+    const second = await ingestRaw(
+      e,
+      db,
+      importOpts({ raw: eml({ subject: "Re: Project sync" }), receivedAt: now, live: true }),
+    );
+    expect(second.threadId).toBe(first.threadId);
+    expect(second.isNewThread).toBe(false);
+
+    const th = (await db.query.thread.findFirst({ where: eq(thread.id, first.threadId) }))!;
+    expect(th.trashed).toBe(false);
+    expect(th.trashedAt).toBeNull();
+  });
+
+  it("a historical import does not resurrect a trashed thread", async () => {
+    const first = await ingestRaw(
+      e,
+      db,
+      importOpts({ raw: eml({ subject: "Project sync" }), receivedAt: now, live: true }),
+    );
+    await trashThe(first.threadId);
+
+    const second = await ingestRaw(
+      e,
+      db,
+      importOpts({ raw: eml({ subject: "Re: Project sync" }), receivedAt: now }),
+    );
+    expect(second.threadId).toBe(first.threadId);
+
+    const th = (await db.query.thread.findFirst({ where: eq(thread.id, first.threadId) }))!;
+    expect(th.trashed).toBe(true);
+  });
+});
+
 describe("isAuthenticated", () => {
   it("trusts DMARC pass alone", () => {
     expect(isAuthenticated({ spf: "fail", dkim: "fail", dmarc: "pass" })).toBe(true);

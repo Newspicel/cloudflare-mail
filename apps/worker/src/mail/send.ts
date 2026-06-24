@@ -223,7 +223,14 @@ export async function sendFromMailbox(
   ]);
 
   await Promise.all([
-    bumpThread(db, threadId, sentAt, [{ name: fromName, address: fromAddr }, ...allRecipients], 0),
+    bumpThread(
+      db,
+      threadId,
+      sentAt,
+      [{ name: fromName, address: fromAddr }, ...allRecipients],
+      0,
+      true,
+    ),
     userId
       ? broadcastToUsers(env, [userId], {
           type: "message_sent",
