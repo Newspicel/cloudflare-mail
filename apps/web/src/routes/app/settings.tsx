@@ -2,18 +2,28 @@ import type { MailView, UserPrefs } from "@cfmail/shared";
 import { has, Perm } from "@cfmail/shared/permissions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Check, Copy, Trash2 } from "lucide-react";
+import { KeyRound, Trash2 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { MailboxImportSection, MailboxSettingsForm } from "@/components/mailbox-settings-form.tsx";
 import { RulesSection } from "@/components/rules-settings.tsx";
+import {
+  CopyButton,
+  Field,
+  GroupLabel,
+  Input,
+  Row,
+  Section,
+  Segmented,
+} from "@/components/settings-ui.tsx";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar.tsx";
+import { Badge } from "@/components/ui/badge.tsx";
+import { Button } from "@/components/ui/button.tsx";
 import { useConfirmHelpers } from "@/components/ui/confirm.tsx";
 import { Switch } from "@/components/ui/switch.tsx";
 import { api } from "@/lib/api.ts";
 import { authClient } from "@/lib/auth-client.ts";
-import { cn } from "@/lib/cn.ts";
 import { useUserPrefs } from "@/lib/prefs.ts";
 import { disablePush, enablePush, isPushEnabled, pushSupported } from "@/lib/push.ts";
 import {
@@ -90,153 +100,34 @@ function SettingsPage() {
           <FoldersSection />
           <RulesSection mailboxes={editable} />
 
-          <div id="mailboxes">
-            <h2 className="mb-3 text-[14px] font-semibold tracking-tight">Mailboxes</h2>
-            {editable.length === 0 && (
-              <div className="rounded-md border bg-card px-5 py-4 text-[13px] text-muted-foreground">
+          <div id="mailboxes" className="scroll-mt-8 space-y-4">
+            <div className="px-0.5">
+              <h2 className="text-[14px] font-semibold tracking-tight">Mailboxes</h2>
+              <p className="mt-0.5 text-[12px] text-muted-foreground">
+                Identity, spam filtering, and encryption for each mailbox you manage.
+              </p>
+            </div>
+            {editable.length === 0 ? (
+              <div className="rounded-lg border bg-card px-5 py-8 text-center text-[13px] text-muted-foreground shadow-sm">
                 No editable mailboxes yet.
               </div>
+            ) : (
+              <div className="space-y-4">
+                {editable.map((m) => (
+                  <MailboxSettingsForm
+                    key={m.id}
+                    mailboxId={m.id}
+                    address={m.address}
+                    type={m.type}
+                  />
+                ))}
+              </div>
             )}
-            <div className="space-y-4">
-              {editable.map((m) => (
-                <MailboxSettingsForm
-                  key={m.id}
-                  mailboxId={m.id}
-                  address={m.address}
-                  type={m.type}
-                />
-              ))}
-              {importable.length > 0 && <MailboxImportSection mailboxes={importable} />}
-            </div>
+            {importable.length > 0 && <MailboxImportSection mailboxes={importable} />}
           </div>
         </div>
       </div>
     </div>
-  );
-}
-
-// ─── Shared primitives ──────────────────────────────────────────────────────
-
-function Section({
-  id,
-  title,
-  description,
-  children,
-}: {
-  id?: string;
-  title: string;
-  description?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section id={id} className="scroll-mt-8 rounded-md border bg-card">
-      <header className="border-b px-5 py-3">
-        <h2 className="text-[14px] font-semibold tracking-tight">{title}</h2>
-        {description && <p className="mt-0.5 text-[12px] text-muted-foreground">{description}</p>}
-      </header>
-      <div className="px-5 py-4">{children}</div>
-    </section>
-  );
-}
-
-function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
-  return (
-    <input
-      {...props}
-      className={cn(
-        "rounded-md border bg-background px-2.5 py-1.5 text-[13px] outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/20",
-        props.className,
-      )}
-    />
-  );
-}
-
-function PrimaryBtn(props: React.ButtonHTMLAttributes<HTMLButtonElement>) {
-  return (
-    <button
-      {...props}
-      className={cn(
-        "rounded-md bg-primary px-3 py-1.5 text-[13px] font-medium text-primary-foreground transition hover:brightness-105 disabled:opacity-50",
-        props.className,
-      )}
-    />
-  );
-}
-
-/** A labelled row: text on the left, control on the right. */
-function Row({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-4 py-2 first:pt-0 last:pb-0">
-      <div className="min-w-0 text-[13px]">
-        <div className="font-medium">{label}</div>
-        {hint && <div className="text-[12px] text-muted-foreground">{hint}</div>}
-      </div>
-      <div className="shrink-0">{children}</div>
-    </div>
-  );
-}
-
-/** Small segmented control for picking one of a few enum values. */
-function Segmented<T extends string>({
-  value,
-  options,
-  onChange,
-  disabled,
-}: {
-  value: T;
-  options: ReadonlyArray<readonly [T, string]>;
-  onChange: (v: T) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <div className="inline-flex rounded-md border bg-background p-0.5">
-      {options.map(([v, label]) => (
-        <button
-          key={v}
-          type="button"
-          disabled={disabled}
-          onClick={() => onChange(v)}
-          className={cn(
-            "rounded px-2.5 py-1 text-[12px] font-medium transition-colors disabled:opacity-50",
-            value === v
-              ? "bg-primary text-primary-foreground"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function CopyButton({ value, label }: { value: string; label: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <button
-      type="button"
-      onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(value);
-          setCopied(true);
-          setTimeout(() => setCopied(false), 1500);
-        } catch {
-          toast.error("Copy failed");
-        }
-      }}
-      className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium transition hover:bg-muted"
-    >
-      {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
-      {copied ? "Copied" : label}
-    </button>
   );
 }
 
@@ -361,33 +252,32 @@ function ProfileSection({
             )}
           </div>
         </div>
-        <div className="min-w-0 flex-1 space-y-3">
-          <label htmlFor="profile-name" className="block">
-            <span className="mb-1 block text-[12px] font-medium text-muted-foreground">Name</span>
+        <div className="min-w-0 flex-1 space-y-4">
+          <Field label="Name" htmlFor="profile-name">
             <Input
               id="profile-name"
               value={draftName}
               onChange={(e) => setDraftName(e.target.value)}
               maxLength={120}
-              className="w-full"
             />
-          </label>
-          <dl className="grid grid-cols-[80px_1fr] gap-y-1 text-[13px]">
-            <dt className="text-muted-foreground">Email</dt>
-            <dd>{email}</dd>
-            <dt className="text-muted-foreground">Role</dt>
+          </Field>
+          <dl className="grid grid-cols-[72px_1fr] items-center gap-y-2 text-[13px]">
+            <dt className="text-[12px] text-muted-foreground">Email</dt>
+            <dd className="truncate">{email}</dd>
+            <dt className="text-[12px] text-muted-foreground">Role</dt>
             <dd>
-              <span className="inline-flex items-center rounded border bg-muted px-1.5 py-0 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              <Badge variant="outline" className="uppercase tracking-wider">
                 {role ?? "—"}
-              </span>
+              </Badge>
             </dd>
           </dl>
-          <PrimaryBtn
+          <Button
+            variant="primary"
             onClick={() => save.mutate()}
             disabled={!dirty || !draftName.trim() || save.isPending}
           >
             Save profile
-          </PrimaryBtn>
+          </Button>
         </div>
       </div>
     </Section>
@@ -529,6 +419,56 @@ interface SessionRow {
   createdAt: string | Date;
 }
 
+interface PasskeyRow {
+  id: string;
+  name?: string | null;
+  deviceType?: string | null;
+  createdAt: string | Date;
+}
+
+function PasskeyRowEditor({
+  passkey,
+  busy,
+  onRename,
+  onDelete,
+}: {
+  passkey: PasskeyRow;
+  busy: boolean;
+  onRename: (name: string) => void;
+  onDelete: () => void;
+}) {
+  const [name, setName] = useState(passkey.name ?? "");
+  useEffect(() => setName(passkey.name ?? ""), [passkey.name]);
+  const created = new Date(passkey.createdAt).toLocaleDateString();
+
+  return (
+    <li className="flex items-center gap-2 py-2.5 text-[13px]">
+      <KeyRound className="size-4 shrink-0 text-muted-foreground" />
+      <div className="min-w-0 flex-1">
+        <Input
+          value={name}
+          placeholder="Passkey"
+          onChange={(e) => setName(e.target.value)}
+          onBlur={() => onRename(name.trim())}
+          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+          maxLength={64}
+          className="h-8"
+        />
+        <div className="mt-1 text-[12px] text-muted-foreground">Added {created}</div>
+      </div>
+      <button
+        type="button"
+        aria-label="Delete passkey"
+        disabled={busy}
+        onClick={onDelete}
+        className="rounded p-1.5 text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+      >
+        <Trash2 className="size-3.5" />
+      </button>
+    </li>
+  );
+}
+
 function shortUA(ua?: string | null): string {
   if (!ua) return "Unknown device";
   const browser = /Firefox/.test(ua)
@@ -580,6 +520,49 @@ function SecuritySection() {
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
+  const passkeysQ = useQuery({
+    queryKey: ["passkeys"],
+    queryFn: async () => {
+      const res = await authClient.passkey.listUserPasskeys();
+      if (res.error) throw new Error(res.error.message ?? "Failed");
+      return (res.data ?? []) as unknown as PasskeyRow[];
+    },
+  });
+
+  const addPasskey = useMutation({
+    mutationFn: async () => {
+      // addPasskey always resolves to a { data, error } object — it never throws,
+      // even when the WebAuthn ceremony is cancelled. Inspect error explicitly.
+      const res = await authClient.passkey.addPasskey();
+      if (res?.error) throw new Error(res.error.message ?? "Failed");
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["passkeys"] });
+      toast.success("Passkey added");
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
+  const renamePasskey = useMutation({
+    mutationFn: async ({ id, name }: { id: string; name: string }) => {
+      const res = await authClient.passkey.updatePasskey({ id, name });
+      if (res.error) throw new Error(res.error.message ?? "Failed");
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["passkeys"] }),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
+  const removePasskey = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await authClient.passkey.deletePasskey({ id });
+      if (res.error) throw new Error(res.error.message ?? "Failed");
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["passkeys"] }),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
+  const passkeys = passkeysQ.data ?? [];
+
   const sessionsQ = useQuery({
     queryKey: ["sessions"],
     queryFn: async () => {
@@ -614,11 +597,14 @@ function SecuritySection() {
   const hasOthers = sessions.some((s) => s.token !== currentToken);
 
   return (
-    <Section id="security" title="Security" description="Password and active sessions.">
-      <div className="space-y-3">
-        <div className="text-[12px] font-medium uppercase tracking-wider text-muted-foreground">
-          Change password
-        </div>
+    <Section
+      id="security"
+      title="Security"
+      description="Password and active sessions."
+      contentClassName="space-y-5"
+    >
+      <div className="space-y-2.5">
+        <GroupLabel>Change password</GroupLabel>
         <div className="flex flex-col gap-2 sm:flex-row">
           <Input
             type="password"
@@ -636,32 +622,67 @@ function SecuritySection() {
             className="flex-1"
             autoComplete="new-password"
           />
-          <PrimaryBtn
+          <Button
+            variant="primary"
             onClick={() => changePw.mutate()}
             disabled={!curPw || newPw.length < 8 || changePw.isPending}
           >
             Update
-          </PrimaryBtn>
+          </Button>
         </div>
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-[12px] text-muted-foreground">
           Changing your password signs out all other devices.
         </p>
       </div>
 
-      <div className="mt-5 border-t pt-4">
-        <div className="mb-2 flex items-center justify-between">
-          <div className="text-[12px] font-medium uppercase tracking-wider text-muted-foreground">
-            Active sessions
-          </div>
+      <div className="space-y-2 border-t pt-4">
+        <div className="flex items-center justify-between">
+          <GroupLabel>Passkeys</GroupLabel>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => addPasskey.mutate()}
+            disabled={addPasskey.isPending}
+          >
+            <KeyRound className="size-3.5" />
+            Add passkey
+          </Button>
+        </div>
+        <p className="text-[12px] text-muted-foreground">
+          Sign in with your fingerprint, face, or a security key instead of a password.
+        </p>
+        {passkeysQ.isLoading && <div className="text-[12px] text-muted-foreground">Loading…</div>}
+        {!passkeysQ.isLoading && passkeys.length === 0 && (
+          <div className="text-[13px] text-muted-foreground">No passkeys yet.</div>
+        )}
+        <ul className="divide-y">
+          {passkeys.map((p) => (
+            <PasskeyRowEditor
+              key={p.id}
+              passkey={p}
+              busy={renamePasskey.isPending || removePasskey.isPending}
+              onRename={(name) =>
+                name && name !== (p.name ?? "") && renamePasskey.mutate({ id: p.id, name })
+              }
+              onDelete={() => removePasskey.mutate(p.id)}
+            />
+          ))}
+        </ul>
+      </div>
+
+      <div className="space-y-2 border-t pt-4">
+        <div className="flex items-center justify-between">
+          <GroupLabel>Active sessions</GroupLabel>
           {hasOthers && (
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => revokeOthers.mutate()}
               disabled={revokeOthers.isPending}
-              className="rounded-md border px-2 py-1 text-[11px] font-medium text-destructive transition hover:bg-destructive/10 disabled:opacity-50"
+              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
             >
               Sign out other devices
-            </button>
+            </Button>
           )}
         </div>
         {sessionsQ.isLoading && <div className="text-[12px] text-muted-foreground">Loading…</div>}
@@ -669,27 +690,27 @@ function SecuritySection() {
           {sessions.map((s) => {
             const isCurrent = s.token === currentToken;
             return (
-              <li key={s.id} className="flex items-center justify-between gap-4 py-2 text-[13px]">
+              <li key={s.id} className="flex items-center justify-between gap-4 py-2.5 text-[13px]">
                 <div className="min-w-0">
-                  <div className="font-medium">
+                  <div className="flex items-center gap-2 font-medium">
                     {shortUA(s.userAgent)}
                     {isCurrent && (
-                      <span className="ml-2 rounded bg-primary/15 px-1.5 py-0 text-[10px] font-medium uppercase tracking-wider text-primary">
+                      <Badge variant="primary" className="uppercase tracking-wider">
                         This device
-                      </span>
+                      </Badge>
                     )}
                   </div>
-                  <div className="text-[11px] text-muted-foreground">{s.ipAddress ?? "—"}</div>
+                  <div className="text-[12px] text-muted-foreground">{s.ipAddress ?? "—"}</div>
                 </div>
                 {!isCurrent && (
-                  <button
-                    type="button"
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={() => revoke.mutate(s.token)}
                     disabled={revoke.isPending}
-                    className="rounded-md border px-2 py-1 text-[11px] font-medium text-muted-foreground transition hover:bg-muted disabled:opacity-50"
                   >
                     Revoke
-                  </button>
+                  </Button>
                 )}
               </li>
             );
@@ -933,18 +954,20 @@ function TwoFactorSection({ enabled }: { enabled: boolean }) {
             onChange={(e) => setPassword(e.target.value)}
             className="flex-1"
           />
-          <PrimaryBtn onClick={() => enable.mutate()} disabled={!password || enable.isPending}>
+          <Button
+            variant="primary"
+            onClick={() => enable.mutate()}
+            disabled={!password || enable.isPending}
+          >
             Enable 2FA
-          </PrimaryBtn>
+          </Button>
         </div>
       )}
 
       {totpUri && (
         <div className="space-y-3">
           <div className="rounded-md border bg-muted/40 p-3 text-[12px]">
-            <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Authenticator setup
-            </div>
+            <GroupLabel className="mb-2">Authenticator setup</GroupLabel>
             <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center">
               <div className="rounded-md bg-white p-2">
                 <QRCodeSVG value={totpUri} size={144} />
@@ -963,9 +986,7 @@ function TwoFactorSection({ enabled }: { enabled: boolean }) {
           </div>
           {backupCodes && backupCodes.length > 0 && (
             <div className="rounded-md border bg-muted/40 p-3 text-[12px]">
-              <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Backup codes (save these now)
-              </div>
+              <GroupLabel className="mb-1.5">Backup codes (save these now)</GroupLabel>
               <ul className="grid grid-cols-2 gap-1 font-mono">
                 {backupCodes.map((c) => (
                   <li key={c}>{c}</li>
@@ -980,9 +1001,13 @@ function TwoFactorSection({ enabled }: { enabled: boolean }) {
               onChange={(e) => setVerifyCode(e.target.value)}
               className="flex-1"
             />
-            <PrimaryBtn onClick={() => verify.mutate()} disabled={!verifyCode || verify.isPending}>
+            <Button
+              variant="primary"
+              onClick={() => verify.mutate()}
+              disabled={!verifyCode || verify.isPending}
+            >
               Verify
-            </PrimaryBtn>
+            </Button>
           </div>
         </div>
       )}
@@ -996,14 +1021,14 @@ function TwoFactorSection({ enabled }: { enabled: boolean }) {
             onChange={(e) => setPassword(e.target.value)}
             className="flex-1"
           />
-          <button
-            type="button"
+          <Button
+            variant="outline"
             onClick={() => disable.mutate()}
             disabled={!password || disable.isPending}
-            className="rounded-md border px-3 py-1.5 text-[13px] font-medium text-destructive transition hover:bg-destructive/10 disabled:opacity-50"
+            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
           >
             Disable 2FA
-          </button>
+          </Button>
         </div>
       )}
     </Section>
@@ -1076,19 +1101,17 @@ function NotificationsSection({ mailboxes }: { mailboxes: MailboxSummary[] }) {
               : "Not supported in this browser"}
           </div>
         </div>
-        <PrimaryBtn onClick={toggleDevice} disabled={!supported || busy}>
+        <Button variant="primary" onClick={toggleDevice} disabled={!supported || busy}>
           {deviceOn ? "Disable" : "Enable"}
-        </PrimaryBtn>
+        </Button>
       </div>
 
       {receivable.length > 0 && (
         <div className="mt-4 border-t pt-4">
-          <div className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-            Per mailbox
-          </div>
+          <GroupLabel className="mb-1.5">Per mailbox</GroupLabel>
           <ul className="divide-y">
             {receivable.map((m) => (
-              <li key={m.id} className="flex items-center justify-between gap-4 py-2 text-[13px]">
+              <li key={m.id} className="flex items-center justify-between gap-4 py-2.5 text-[13px]">
                 <span className="min-w-0 truncate">{m.displayName ?? m.address}</span>
                 <Switch
                   checked={enabledSet.has(m.id)}

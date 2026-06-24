@@ -28,6 +28,7 @@ export function Field({
   type = "text",
   required,
   minLength,
+  autoComplete,
 }: {
   label: string;
   value: string;
@@ -35,6 +36,7 @@ export function Field({
   type?: string;
   required?: boolean;
   minLength?: number;
+  autoComplete?: string;
 }) {
   return (
     <label className="mb-3 block">
@@ -44,6 +46,7 @@ export function Field({
         required={required}
         type={type}
         minLength={minLength}
+        autoComplete={autoComplete}
         value={value}
         onChange={(e) => onChange(e.target.value)}
       />
