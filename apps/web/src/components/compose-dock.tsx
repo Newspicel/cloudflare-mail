@@ -1162,7 +1162,16 @@ export function ComposeForm({
             {pendingImages.some((f) => canDownscale(f.type)) && (
               <div className="flex items-center justify-between gap-2 text-[13px]">
                 <span>Scale down</span>
-                <Select value={String(resizeMax)} onValueChange={(v) => setResizeMax(Number(v))}>
+                <Select
+                  items={[
+                    { value: "0", label: "Original size" },
+                    { value: "2048", label: "Large (2048px)" },
+                    { value: "1280", label: "Medium (1280px)" },
+                    { value: "640", label: "Small (640px)" },
+                  ]}
+                  value={String(resizeMax)}
+                  onValueChange={(v) => setResizeMax(Number(v))}
+                >
                   <SelectTrigger className="h-8 w-36 text-[13px]" aria-label="Scale down image">
                     <SelectValue />
                   </SelectTrigger>

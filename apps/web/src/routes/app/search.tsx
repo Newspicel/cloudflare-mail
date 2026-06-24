@@ -243,6 +243,7 @@ function SearchPage() {
         {/* Quick filter row */}
         <div className="mx-auto mt-2.5 flex max-w-3xl flex-wrap items-center gap-2">
           <Select
+            items={FOLDERS}
             value={form.folder ?? "any"}
             onValueChange={(v) =>
               set("folder", v === "any" ? undefined : (v as SearchParams["folder"]))
@@ -353,6 +354,7 @@ function AdvancedPanel({ form, set }: { form: SearchParams; set: SetFn }) {
       <div className="text-[12px] font-medium text-foreground">Advanced filters</div>
       <Field label="Search in">
         <Select
+          items={SEARCH_IN}
           value={form.searchIn ?? "all"}
           onValueChange={(v) =>
             set("searchIn", v === "all" ? undefined : (v as SearchParams["searchIn"]))

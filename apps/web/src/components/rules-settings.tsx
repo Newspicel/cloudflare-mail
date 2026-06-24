@@ -454,7 +454,14 @@ function RuleEditor({
           <div>
             <div className="mb-1.5 flex items-center gap-2 text-[12px] font-medium text-foreground">
               Match
-              <Select value={mode} onValueChange={(v) => setMode(v as RuleConditionMode)}>
+              <Select
+                items={RULE_CONDITION_MODES.map((m) => ({
+                  value: m,
+                  label: m === "all" ? "all of" : "any of",
+                }))}
+                value={mode}
+                onValueChange={(v) => setMode(v as RuleConditionMode)}
+              >
                 <SelectTrigger className="h-7 w-24">
                   <SelectValue />
                 </SelectTrigger>
@@ -471,6 +478,7 @@ function RuleEditor({
               {conditions.map((c, i) => (
                 <div key={c.rowId} className="flex items-center gap-1.5">
                   <Select
+                    items={RULE_FIELDS.map((f) => ({ value: f, label: FIELD_LABELS[f] }))}
                     value={c.field}
                     onValueChange={(v) => setCondition(i, { field: v as RuleField })}
                   >
@@ -485,7 +493,11 @@ function RuleEditor({
                       ))}
                     </SelectContent>
                   </Select>
-                  <Select value={c.op} onValueChange={(v) => setCondition(i, { op: v as RuleOp })}>
+                  <Select
+                    items={RULE_OPS.map((o) => ({ value: o, label: OP_LABELS[o] }))}
+                    value={c.op}
+                    onValueChange={(v) => setCondition(i, { op: v as RuleOp })}
+                  >
                     <SelectTrigger className="h-8 w-36 shrink-0">
                       <SelectValue />
                     </SelectTrigger>
@@ -533,6 +545,10 @@ function RuleEditor({
                 <div key={a.rowId} className="flex flex-col gap-1.5">
                   <div className="flex items-center gap-1.5">
                     <Select
+                      items={RULE_ACTION_TYPES.map((t) => ({
+                        value: t,
+                        label: ACTION_LABELS[t],
+                      }))}
                       value={a.type}
                       onValueChange={(v) => setAction(i, { type: v as RuleActionType })}
                     >
@@ -549,6 +565,7 @@ function RuleEditor({
                     </Select>
                     {a.type === "applyLabel" && (
                       <Select
+                        items={labels.map((l) => ({ value: l.id, label: l.name }))}
                         value={a.labelId ?? ""}
                         onValueChange={(v) => setAction(i, { labelId: v as string })}
                       >
@@ -566,6 +583,7 @@ function RuleEditor({
                     )}
                     {a.type === "moveFolder" && (
                       <Select
+                        items={folders.map((f) => ({ value: f.id, label: f.name }))}
                         value={a.folderId ?? ""}
                         onValueChange={(v) => setAction(i, { folderId: v as string })}
                       >
