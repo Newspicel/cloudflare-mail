@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { CalendarClock, CalendarX2, Trash2 } from "lucide-react";
+import { AlertTriangle, CalendarClock, CalendarX2, Trash2 } from "lucide-react";
 import { type CSSProperties, useRef } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api.ts";
@@ -67,22 +67,27 @@ export function DraftList({
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
-  // Cancel a scheduled send — the draft reverts to an ordinary editable draft.
+  // Clear a draft's scheduled/failed state — reverts it to an ordinary draft.
   const unschedule = useMutation({
     mutationFn: (id: string) => api(`/api/drafts/${id}/schedule`, { method: "DELETE" }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: keys.drafts(mailboxId) });
-      toast.success("Scheduled send canceled");
-    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.drafts(mailboxId) }),
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
+  function cancelSchedule(id: string) {
+    unschedule.mutate(id);
+    toast.success("Scheduled send canceled");
+  }
+
   // Opening a scheduled draft cancels its schedule first — editing a draft whose
-  // payload is already queued to send would otherwise fire the stale version.
+  // payload is already queued to send would otherwise fire the stale version. A
+  // failed draft just has its stale error flag cleared as it's reopened.
   function openDraft(d: DraftRow) {
     if (d.scheduledFor) {
       unschedule.mutate(d.id);
       toast("Scheduled send canceled — editing draft");
+    } else if (d.scheduledError) {
+      unschedule.mutate(d.id);
     }
     openCompose({ draft: d });
   }
@@ -133,6 +138,11 @@ export function DraftList({
                           <CalendarClock className="h-3 w-3" />
                           Sends {formatStamp(d.scheduledFor, fmt)}
                         </div>
+                      ) : d.scheduledError ? (
+                        <div className="flex items-center gap-1 truncate font-medium text-[11px] text-destructive">
+                          <AlertTriangle className="h-3 w-3 shrink-0" />
+                          <span className="truncate">Send failed — {d.scheduledError}</span>
+                        </div>
                       ) : (
                         d.body.trim() && (
                           <div className="truncate text-[12px] text-muted-foreground">{d.body}</div>
@@ -151,7 +161,7 @@ export function DraftList({
                             variant="ghost"
                             size="icon-sm"
                             disabled={unschedule.isPending}
-                            onClick={() => unschedule.mutate(d.id)}
+                            onClick={() => cancelSchedule(d.id)}
                             aria-label="Cancel scheduled send"
                           >
                             <CalendarX2 />

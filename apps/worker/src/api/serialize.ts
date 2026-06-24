@@ -23,7 +23,7 @@ export function serializeMessage(r: typeof message.$inferSelect): MessageDto {
 }
 
 export function serializeDraft(r: typeof draft.$inferSelect): DraftDto {
-  const { scheduledPayload: _payload, ...rest } = r;
+  const { scheduledPayload: _payload, scheduledAttempts: _attempts, ...rest } = r;
   return {
     ...rest,
     createdAt: r.createdAt.toISOString(),
