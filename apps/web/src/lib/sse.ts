@@ -67,6 +67,21 @@ export function connectStream(qc: QueryClient, navigate?: Navigate): () => void 
           toast.error(`Scheduled send failed: ${evt.error}`);
           break;
         }
+        case "reminder_fired": {
+          // A reminder's time arrived (on any device). Refresh the bell and
+          // surface a toast that jumps to the thread.
+          qc.invalidateQueries({ queryKey: keys.reminders() });
+          toast(evt.subject || "Reminder", {
+            description: evt.note || undefined,
+            action: navigate
+              ? {
+                  label: "Open",
+                  onClick: () => navigate({ mailboxId: evt.mailboxId, threadId: evt.threadId }),
+                }
+              : undefined,
+          });
+          break;
+        }
         case "ping":
           break;
       }
@@ -82,6 +97,7 @@ export function connectStream(qc: QueryClient, navigate?: Navigate): () => void 
     "thread_read",
     "mailbox_expired",
     "scheduled_send_failed",
+    "reminder_fired",
     "ping",
   ]) {
     es.addEventListener(t, onEvent);

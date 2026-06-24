@@ -24,6 +24,7 @@ import type {
   message,
   RuleAction,
   RuleCondition,
+  reminder,
   rule,
   thread,
 } from "@cfmail/db/schema";
@@ -48,6 +49,8 @@ export type DraftDto = Omit<
   "scheduledPayload" | "scheduledAttempts"
 >;
 export type LabelDto = typeof label.$inferSelect; // no date columns
+
+export type ReminderDto = Serialized<typeof reminder.$inferSelect>;
 
 /** An inbound rule; `conditions`/`actions` keep their typed JSON shape. */
 export type RuleDto = Serialized<typeof rule.$inferSelect>;
@@ -339,6 +342,9 @@ export interface FolderListDto {
 }
 export interface RuleListDto {
   rules: RuleDto[];
+}
+export interface ReminderListDto {
+  reminders: ReminderDto[];
 }
 /** Result of cloning a rule; `strippedLabels` names applyLabel targets that had
  * no counterpart in the destination mailbox and were dropped (cross-mailbox). */

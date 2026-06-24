@@ -120,6 +120,34 @@ export const updateThread = z.object({
   read: z.boolean().optional(),
 });
 
+// ─── Reminders ──────────────────────────────────────────────────────────────
+
+// `remindAt` is epoch ms, bounded to the future and within a year so a typo
+// can't park a reminder indefinitely (mirrors scheduleDraft's bounds).
+const MAX_REMIND_AHEAD_MS = 365 * 24 * 60 * 60 * 1000;
+const remindAt = z
+  .number()
+  .int()
+  .refine((ms) => ms > Date.now(), "must be in the future")
+  .refine((ms) => ms < Date.now() + MAX_REMIND_AHEAD_MS, "too far in the future");
+
+export const createReminder = z.object({
+  mailboxId: z.string().min(1),
+  threadId: z.string().min(1),
+  messageId: z.string().min(1).optional(),
+  remindAt,
+  note: z.string().max(500).optional(),
+});
+export type CreateReminderInput = z.infer<typeof createReminder>;
+
+export const updateReminder = z.object({
+  remindAt: remindAt.optional(),
+  note: z.string().max(500).nullish(),
+  // The bell dismisses a fired reminder by setting it done.
+  status: z.enum(["done"]).optional(),
+});
+export type UpdateReminderInput = z.infer<typeof updateReminder>;
+
 // Bare Content-ID token (no angle brackets) for an inline image referenced from
 // the HTML body as `cid:<token>`. The server wraps it in <…> for the MIME
 // header; the charset is restricted so it can't inject header syntax.
@@ -472,6 +500,9 @@ export const sendMessage = z.object({
     )
     .max(20)
     .optional(),
+  // Follow-up reminder: when set, a "remind me if no reply" reminder is created
+  // for the sender, due `followUpDays` from now, auto-cancelled if a reply lands.
+  followUpDays: z.number().int().min(1).max(30).optional(),
 });
 export type SendMessageInput = z.infer<typeof sendMessage>;
 

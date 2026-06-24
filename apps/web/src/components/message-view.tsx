@@ -60,6 +60,7 @@ import { EmailFrame } from "./email-frame.tsx";
 import { LabelChips, LabelsMenu } from "./labels-menu.tsx";
 import { MessageMenu } from "./message-menu.tsx";
 import { MoveToFolderMenu } from "./move-to-folder-menu.tsx";
+import { ReminderMenu } from "./reminder-menu.tsx";
 import { Button } from "./ui/button.tsx";
 import { useConfirmHelpers } from "./ui/confirm.tsx";
 import { IconButton } from "./ui/icon-button.tsx";
@@ -302,6 +303,13 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
               mailboxId={thread.mailboxId}
               messageId={messages.at(-1)!.id}
               tooltip="Labels"
+            />
+          )}
+          {!readOnly && (
+            <ReminderMenu
+              threadId={thread.id}
+              mailboxId={thread.mailboxId}
+              messageId={messages.at(-1)?.id}
             />
           )}
           {!readOnly && (
@@ -1003,9 +1011,7 @@ function MessageCard({
                   variant="ghost"
                   size="icon-sm"
                   onClick={onToggleStar}
-                  className={cn(
-                    starred && "text-amber-500 hover:text-amber-500",
-                  )}
+                  className={cn(starred && "text-amber-500 hover:text-amber-500")}
                   aria-label={starred ? "Unstar" : "Star"}
                   aria-pressed={starred}
                 >

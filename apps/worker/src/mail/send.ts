@@ -1,6 +1,6 @@
 import { EmailMessage } from "cloudflare:email";
 import type { DB } from "@cfmail/db";
-import { contactKey, domain, mailbox, message } from "@cfmail/db/schema";
+import { contactKey, domain, mailbox, message, reminder } from "@cfmail/db/schema";
 import { Flag } from "@cfmail/shared/flags";
 import type { SendMessageInput } from "@cfmail/shared/schemas";
 import { and, eq, inArray } from "drizzle-orm";
@@ -252,6 +252,23 @@ export async function sendFromMailbox(
         })
       : Promise.resolve(),
   ]);
+
+  // Follow-up reminder: "remind me if no reply in N days". Personal to the
+  // sender, so skipped for key-authed service sends (no user). The cron fires it
+  // after the window; an inbound reply on this thread cancels it (mail/receive.ts).
+  if (userId && input.followUpDays) {
+    const remindAt = new Date(sentAt.getTime() + input.followUpDays * 24 * 60 * 60 * 1000);
+    await db.insert(reminder).values({
+      id: crypto.randomUUID(),
+      userId,
+      mailboxId: mb.id,
+      threadId,
+      messageId,
+      kind: "follow_up",
+      remindAt,
+      subject: input.subject,
+    });
+  }
 
   return pgpWarning ? { messageId, threadId, pgpWarning } : { messageId, threadId };
 }

@@ -20,6 +20,7 @@ import { meQuery, type SearchResult, searchQuery } from "@/lib/queries.ts";
 import { type Theme, useTheme } from "@/lib/theme.ts";
 import { type DateTimeFmt, formatStamp } from "@/lib/time.ts";
 import { Logo } from "./logo.tsx";
+import { NotificationBell } from "./notification-bell.tsx";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar.tsx";
 import { Button } from "./ui/button.tsx";
 import {
@@ -58,7 +59,8 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
 
       <SearchBox />
 
-      <div className="flex flex-1 items-center justify-end">
+      <div className="flex flex-1 items-center justify-end gap-1">
+        <NotificationBell />
         <AccountMenu email={data?.user?.email} name={data?.user?.name} image={data?.user?.image} />
       </div>
     </header>

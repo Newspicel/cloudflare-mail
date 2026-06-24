@@ -1,5 +1,5 @@
-import type { draft, message, thread } from "@cfmail/db/schema";
-import type { DraftDto, MessageDto, ThreadDto } from "@cfmail/shared";
+import type { draft, message, reminder, thread } from "@cfmail/db/schema";
+import type { DraftDto, MessageDto, ReminderDto, ThreadDto } from "@cfmail/shared";
 
 // Map Drizzle rows (with real `Date` columns) to the wire shape `c.json()`
 // emits. The return types are the canonical DTOs, so any schema change that
@@ -19,6 +19,16 @@ export function serializeMessage(r: typeof message.$inferSelect): MessageDto {
     receivedAt: r.receivedAt?.toISOString() ?? null,
     sentAt: r.sentAt?.toISOString() ?? null,
     createdAt: r.createdAt.toISOString(),
+  };
+}
+
+export function serializeReminder(r: typeof reminder.$inferSelect): ReminderDto {
+  return {
+    ...r,
+    remindAt: r.remindAt.toISOString(),
+    firedAt: r.firedAt?.toISOString() ?? null,
+    createdAt: r.createdAt.toISOString(),
+    updatedAt: r.updatedAt.toISOString(),
   };
 }
 

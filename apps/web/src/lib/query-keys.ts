@@ -32,6 +32,8 @@ export const keys = {
   rules: (mailboxId: string) => ["rules", mailboxId] as const,
   /** Prefix matching every mailbox's rules. */
   rulesRoot: () => ["rules"] as const,
+  /** The user's live reminders (pending + fired), powering the bell. */
+  reminders: () => ["reminders"] as const,
   /** The user's custom folders (with counts) for the sidebar. */
   folders: () => ["folders"] as const,
   /** Prefix matching every per-folder thread list. */
