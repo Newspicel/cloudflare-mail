@@ -1,13 +1,16 @@
 import { unzipSync } from "fflate";
 
 // Client-side extraction of exported mail. The browser unpacks .eml/.mbox/.zip
-// and uploads one raw RFC822 message per request, so each call stays within the
-// Worker's body/CPU limits no matter how large the export is.
+// (or a directly-selected export folder) and uploads one raw RFC822 message per
+// request, so each call stays within the Worker's body/CPU limits no matter how
+// large the export is.
 //
 // A Proton Mail export is a flat directory of <id>.eml + <id>.metadata.json
 // pairs plus a labels.json catalog. The .eml files are plain RFC822, so they
 // import like any other; the sidecar metadata carries read/star state and the
-// Spam/Trash placement, which we apply via per-message query params.
+// Spam/Trash placement, which we apply via per-message query params. Selecting
+// the folder directly (rather than zipping it) lets the browser read each
+// message lazily, so a multi-GB export never has to fit in memory at once.
 
 export interface ImportProgress {
   total: number;
@@ -56,6 +59,8 @@ function basename(path: string): string {
   return i === -1 ? path : path.slice(i + 1);
 }
 
+const META_SUFFIX = ".metadata.json";
+
 // Proton's well-known system label IDs (from labels.json). Custom labels carry
 // opaque hashed IDs, which we ignore.
 const PROTON_TRASH = "3";
@@ -68,9 +73,7 @@ function parseProtonState(bytes: Uint8Array): ImportState | undefined {
   try {
     const payload = JSON.parse(new TextDecoder().decode(bytes))?.Payload;
     if (!payload) return undefined;
-    const labels: string[] = Array.isArray(payload.LabelIDs)
-      ? payload.LabelIDs.map(String)
-      : [];
+    const labels: string[] = Array.isArray(payload.LabelIDs) ? payload.LabelIDs.map(String) : [];
     return {
       seen: !payload.Unread,
       starred: labels.includes(PROTON_STARRED),
@@ -82,45 +85,8 @@ function parseProtonState(bytes: Uint8Array): ImportState | undefined {
   }
 }
 
-// Flatten every selected file (and the contents of any .zip) into a single
-// basename → bytes map, so sidecar metadata can be paired with its .eml even
-// when the two arrive as separate files or separate zip entries.
-async function collectEntries(files: File[]): Promise<Map<string, Uint8Array>> {
-  const entries = new Map<string, Uint8Array>();
-  for (const file of files) {
-    // eslint-disable-next-line no-await-in-loop -- sequential reads keep peak memory bounded
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    if (file.name.toLowerCase().endsWith(".zip")) {
-      for (const [path, b] of Object.entries(unzipSync(bytes))) {
-        if (!path.endsWith("/")) entries.set(basename(path), b);
-      }
-    } else {
-      entries.set(file.name, bytes);
-    }
-  }
-  return entries;
-}
-
-function buildItems(entries: Map<string, Uint8Array>): ImportItem[] {
-  const items: ImportItem[] = [];
-  for (const [path, bytes] of entries) {
-    const lower = path.toLowerCase();
-    // Sidecars are consumed only when pairing with their .eml; never on their own.
-    if (lower.endsWith(".metadata.json") || lower === "labels.json") continue;
-    if (lower.endsWith(".mbox")) {
-      for (const raw of splitMbox(bytes)) items.push({ raw });
-      continue;
-    }
-    if (lower.endsWith(".eml")) {
-      const meta = entries.get(`${path.slice(0, -4)}.metadata.json`);
-      items.push({ raw: bytes, state: meta ? parseProtonState(meta) : undefined });
-      continue;
-    }
-    // Other JSON is export bookkeeping we don't import; anything else is a message.
-    if (lower.endsWith(".json")) continue;
-    items.push({ raw: bytes });
-  }
-  return items;
+function u8(buf: ArrayBuffer): Uint8Array {
+  return new Uint8Array(buf);
 }
 
 // fetch's BodyInit accepts ArrayBuffer cleanly (unlike the now-generic
@@ -150,25 +116,92 @@ async function uploadOne(mailboxId: string, item: ImportItem): Promise<{ duplica
   return (await res.json()) as { duplicate: boolean };
 }
 
+// Lazily-evaluated unit of work: produces a single message to upload. Bodies are
+// resolved here (not up front) so a large folder selection reads at most
+// `concurrency` messages into memory at a time.
+type Task = () => Promise<ImportItem>;
+
+// Build the upload tasks from the selection. Sidecar metadata is indexed first
+// so each .eml can pick up its read/star/folder state by base name.
+async function plan(files: File[]): Promise<Task[]> {
+  const stateByBase = new Map<string, ImportState>();
+  const tasks: Task[] = [];
+
+  const registerMeta = (name: string, bytes: Uint8Array) => {
+    const st = parseProtonState(bytes);
+    if (st) stateByBase.set(name.slice(0, -META_SUFFIX.length), st);
+  };
+
+  // Route in-memory bytes (a zip entry) into the metadata index or an upload task.
+  const routeBytes = (name: string, bytes: Uint8Array) => {
+    const lower = name.toLowerCase();
+    if (lower.endsWith(META_SUFFIX) || lower === "labels.json") return;
+    if (lower.endsWith(".mbox")) {
+      for (const raw of splitMbox(bytes)) tasks.push(async () => ({ raw }));
+    } else if (lower.endsWith(".eml")) {
+      tasks.push(async () => ({ raw: bytes, state: stateByBase.get(name.slice(0, -4)) }));
+    } else if (!lower.endsWith(".json")) {
+      tasks.push(async () => ({ raw: bytes }));
+    }
+  };
+
+  const looseMessages: File[] = [];
+  for (const file of files) {
+    const lower = file.name.toLowerCase();
+    if (lower.endsWith(".zip")) {
+      // A zip is fully in memory once unpacked; two-pass its entries so .eml
+      // items can resolve metadata that may appear after them.
+      // eslint-disable-next-line no-await-in-loop -- one archive at a time bounds peak memory
+      const entries = Object.entries(unzipSync(u8(await file.arrayBuffer())))
+        .filter(([p]) => !p.endsWith("/"))
+        .map(([p, b]) => [basename(p), b] as const);
+      for (const [name, b] of entries) {
+        if (name.toLowerCase().endsWith(META_SUFFIX)) registerMeta(name, b);
+      }
+      for (const [name, b] of entries) routeBytes(name, b);
+    } else if (lower.endsWith(META_SUFFIX)) {
+      // eslint-disable-next-line no-await-in-loop -- sidecars are tiny; sequential reads are fine
+      registerMeta(file.name, u8(await file.arrayBuffer()));
+    } else if (lower !== "labels.json" && !lower.endsWith(".json")) {
+      looseMessages.push(file);
+    }
+  }
+
+  // Loose files (a selected folder or individually-picked messages) are read
+  // lazily at upload time. .mbox must be split now, but those are one-off.
+  for (const f of looseMessages) {
+    const lower = f.name.toLowerCase();
+    if (lower.endsWith(".mbox")) {
+      // eslint-disable-next-line no-await-in-loop -- mbox archives are rare and read one at a time
+      for (const raw of splitMbox(u8(await f.arrayBuffer()))) tasks.push(async () => ({ raw }));
+    } else {
+      const state = lower.endsWith(".eml") ? stateByBase.get(f.name.slice(0, -4)) : undefined;
+      tasks.push(async () => ({ raw: u8(await f.arrayBuffer()), state }));
+    }
+  }
+
+  return tasks;
+}
+
 export async function runImport(
   mailboxId: string,
   files: File[],
   onProgress: (p: ImportProgress) => void,
   concurrency = 3,
 ): Promise<ImportProgress> {
-  const items = buildItems(await collectEntries(files));
+  const tasks = await plan(files);
 
-  const progress: ImportProgress = { total: items.length, done: 0, duplicate: 0, failed: 0 };
+  const progress: ImportProgress = { total: tasks.length, done: 0, duplicate: 0, failed: 0 };
   onProgress({ ...progress });
 
   let next = 0;
   async function worker(): Promise<void> {
     for (;;) {
       const i = next++;
-      if (i >= items.length) return;
+      if (i >= tasks.length) return;
       try {
         // eslint-disable-next-line no-await-in-loop -- a worker drains items sequentially; parallelism is across workers
-        const res = await uploadOne(mailboxId, items[i]!);
+        const res = await uploadOne(mailboxId, await tasks[i]!());
         if (res.duplicate) progress.duplicate++;
       } catch {
         progress.failed++;
@@ -178,6 +211,6 @@ export async function runImport(
     }
   }
 
-  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(concurrency, tasks.length) }, worker));
   return progress;
 }
