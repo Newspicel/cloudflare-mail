@@ -6,6 +6,7 @@ import {
   ChevronDown,
   Clock,
   ExternalLink,
+  FileText,
   Maximize2,
   Minimize2,
   Paperclip,
@@ -24,10 +25,12 @@ import {
   type DraftRow,
   type MessageRow,
   mailboxesQuery,
+  meQuery,
   messageBodyQuery,
 } from "@/lib/queries.ts";
 import { keys } from "@/lib/query-keys.ts";
 import { sanitizeEmailHtml } from "@/lib/sanitize-email.ts";
+import { fillTemplate, type TemplateContext } from "@/lib/templates.ts";
 import {
   AddressField,
   collectRecipients,
@@ -243,6 +246,8 @@ export function ComposeForm({
   const { prefs } = useUserPrefs();
   const { data: mailboxes } = useQuery(mailboxesQuery);
   const { data: contactsData } = useQuery(contactsQuery);
+  const { data: meData } = useQuery(meQuery);
+  const templates = prefs.templates ?? [];
   const contacts = contactsData?.contacts ?? [];
   const sendable = (mailboxes?.mailboxes ?? []).filter((m) => (m.perms & 2) === 2);
   const d = s.draft;
@@ -418,6 +423,7 @@ export function ComposeForm({
   const [savedHint, setSavedHint] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
   const [customDate, setCustomDate] = useState<Date | undefined>(undefined);
   const [customTime, setCustomTime] = useState("09:00");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -835,6 +841,34 @@ export function ComposeForm({
     if (mode === "html") setText(htmlToText(html));
     pendingCmdRef.current = null;
     setMode("markdown");
+  }
+
+  // Insert a saved template at the caret. Placeholders are resolved from the
+  // current recipient/sender; an unfilled subject is taken from the template.
+  function insertTemplate(t: { subject?: string; body: string }) {
+    const r = to.items[0];
+    const ctx: TemplateContext = {
+      recipientName: r?.name,
+      recipientEmail: r?.address,
+      myName: meData?.user?.name,
+      myEmail: currentFrom,
+    };
+    const body = fillTemplate(t.body, ctx);
+    if (t.subject && !subject.trim()) setSubject(fillTemplate(t.subject, ctx));
+    if (mode === "html") {
+      editorRef.current?.insertHtml(textToHtml(body));
+    } else {
+      const ta = bodyTextareaRef.current;
+      const start = ta?.selectionStart ?? text.length;
+      const end = ta?.selectionEnd ?? text.length;
+      setText(text.slice(0, start) + body + text.slice(end));
+      requestAnimationFrame(() => {
+        const caret = start + body.length;
+        ta?.focus();
+        ta?.setSelectionRange(caret, caret);
+      });
+    }
+    setTemplatesOpen(false);
   }
 
   async function uploadFile(file: File): Promise<void> {
@@ -1306,6 +1340,37 @@ export function ComposeForm({
               e.target.value = "";
             }}
           />
+          <Popover open={templatesOpen} onOpenChange={setTemplatesOpen}>
+            <PopoverTrigger
+              render={
+                <Button variant="ghost" size="icon" aria-label="Insert template">
+                  <FileText />
+                </Button>
+              }
+            />
+            <PopoverContent side="top" align="start" className="w-64 p-1.5">
+              <div className="px-1.5 py-1 font-medium text-[11px] text-muted-foreground">
+                Insert template
+              </div>
+              {templates.length === 0 ? (
+                <p className="px-1.5 py-1.5 text-[12px] text-muted-foreground">
+                  No templates yet. Add them in Settings → Templates.
+                </p>
+              ) : (
+                templates.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => insertTemplate(t)}
+                    className="block w-full truncate rounded-md px-2 py-1.5 text-left text-[13px] transition-colors hover:bg-accent"
+                    title={t.name}
+                  >
+                    {t.name}
+                  </button>
+                ))
+              )}
+            </PopoverContent>
+          </Popover>
         </div>
         <div className="flex items-center gap-2">
           {pgpMode !== "off" && (

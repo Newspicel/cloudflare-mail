@@ -23,6 +23,8 @@ import { cn } from "@/lib/cn.ts";
 
 export interface RichEditorHandle {
   exec(cmd: string, value?: string): void;
+  // Insert raw HTML at the caret (restoring the last in-editor selection first).
+  insertHtml(html: string): void;
   focus(): void;
 }
 
@@ -96,7 +98,27 @@ export const RichEditor = forwardRef<
     [onChange, saveSelection],
   );
 
-  useImperativeHandle(ref, () => ({ exec, focus: () => elRef.current?.focus() }), [exec]);
+  const insertHtml = useCallback(
+    (html: string) => {
+      const el = elRef.current;
+      if (!el) return;
+      el.focus();
+      const sel = window.getSelection();
+      if (savedRange.current && sel) {
+        sel.removeAllRanges();
+        sel.addRange(savedRange.current);
+      }
+      document.execCommand("insertHTML", false, html);
+      saveSelection();
+      onChange(el.innerHTML);
+    },
+    [onChange, saveSelection],
+  );
+
+  useImperativeHandle(ref, () => ({ exec, insertHtml, focus: () => elRef.current?.focus() }), [
+    exec,
+    insertHtml,
+  ]);
 
   // Seed content once on mount; the editor is uncontrolled afterwards so the
   // caret never jumps. Run any command queued during the promote-to-HTML step.

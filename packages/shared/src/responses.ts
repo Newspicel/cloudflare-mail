@@ -125,6 +125,17 @@ export interface UserPrefs {
   // show the AI summary line under each row in the list (default on when the
   // mailbox has AI features enabled). Purely a display toggle — no spend impact.
   aiSummaries?: boolean;
+  // reusable compose snippets, insertable at the caret from the composer
+  templates?: EmailTemplate[];
+}
+
+/** A saved compose snippet. `body` may contain {{placeholder}} tokens. */
+export interface EmailTemplate {
+  id: string;
+  name: string;
+  // Optional subject — fills the compose subject only when it's still empty.
+  subject?: string;
+  body: string;
 }
 
 /**
