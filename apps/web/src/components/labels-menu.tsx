@@ -1,10 +1,10 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Plus, Tag, Trash2 } from "lucide-react";
+import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Check, Minus, Plus, Tag, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
-import { labelsQuery, messageLabelsQuery } from "@/lib/queries.ts";
+import { labelsQuery, messageLabelsQuery, threadLabelsQuery } from "@/lib/queries.ts";
 import { keys } from "@/lib/query-keys.ts";
 import { Button } from "./ui/button.tsx";
 import { ColorPicker } from "./ui/color-picker.tsx";
@@ -25,54 +25,122 @@ const PRESET_COLORS = [
   "#ec4899",
 ];
 
-interface Props {
-  mailboxId: string;
-  messageId: string;
+function invalidateLabels(qc: QueryClient, mailboxId: string) {
+  qc.invalidateQueries({ queryKey: keys.labels(mailboxId) });
+  qc.invalidateQueries({ queryKey: keys.messageLabelsRoot() });
+  qc.invalidateQueries({ queryKey: keys.threadLabelsRoot() });
 }
 
-export function LabelsMenu({ mailboxId, messageId }: Props) {
+// Apply labels to the most recent message in a thread (single-message view).
+export function LabelsMenu({ mailboxId, messageId }: { mailboxId: string; messageId: string }) {
+  const qc = useQueryClient();
+  const appliedQ = useQuery(messageLabelsQuery([messageId]));
+  const applied = new Set((appliedQ.data?.labels[messageId] ?? []).map((l) => l.id));
+
+  const toggle = useMutation({
+    mutationFn: (input: { labelId: string; on: boolean }) => {
+      const path = `/api/labels/${input.labelId}/messages/${messageId}`;
+      return input.on ? api(path, { method: "PUT", body: "{}" }) : api(path, { method: "DELETE" });
+    },
+    onSuccess: () => invalidateLabels(qc, mailboxId),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
+  return (
+    <LabelsMenuShell
+      mailboxId={mailboxId}
+      applied={applied}
+      busy={toggle.isPending}
+      onToggle={(labelId, on) => toggle.mutate({ labelId, on })}
+    />
+  );
+}
+
+// Apply labels across every message of one or more selected threads (bulk bar).
+export function BulkLabelsMenu({
+  mailboxId,
+  threadIds,
+  size,
+}: {
+  mailboxId: string;
+  threadIds: string[];
+  size?: "icon" | "icon-sm";
+}) {
+  const qc = useQueryClient();
+  const appliedQ = useQuery(threadLabelsQuery(threadIds));
+  const byThread = appliedQ.data?.labels ?? {};
+
+  // A label is fully "applied" only when it rides on every selected thread;
+  // present on some-but-not-all shows an indeterminate dash.
+  const counts = new Map<string, number>();
+  for (const tid of threadIds)
+    for (const l of byThread[tid] ?? []) counts.set(l.id, (counts.get(l.id) ?? 0) + 1);
+  const applied = new Set([...counts].filter(([, n]) => n === threadIds.length).map(([id]) => id));
+  const partial = new Set([...counts].filter(([, n]) => n < threadIds.length).map(([id]) => id));
+
+  const toggle = useMutation({
+    mutationFn: (input: { labelId: string; on: boolean }) =>
+      Promise.all(
+        threadIds.map((tid) => {
+          const path = `/api/labels/${input.labelId}/threads/${tid}`;
+          return input.on
+            ? api(path, { method: "PUT", body: "{}" })
+            : api(path, { method: "DELETE" });
+        }),
+      ),
+    onSuccess: () => invalidateLabels(qc, mailboxId),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
+  return (
+    <LabelsMenuShell
+      mailboxId={mailboxId}
+      applied={applied}
+      partial={partial}
+      busy={toggle.isPending}
+      size={size}
+      onToggle={(labelId, on) => toggle.mutate({ labelId, on })}
+    />
+  );
+}
+
+interface ShellProps {
+  mailboxId: string;
+  applied: Set<string>;
+  partial?: Set<string>;
+  busy?: boolean;
+  size?: "icon" | "icon-sm";
+  onToggle: (labelId: string, on: boolean) => void;
+}
+
+function LabelsMenuShell({ size = "icon", ...rest }: ShellProps) {
   return (
     <Popover>
       <PopoverTrigger
         render={
-          <Button variant="ghost" size="icon" aria-label="Labels">
+          <Button variant="ghost" size={size} aria-label="Labels">
             <Tag />
           </Button>
         }
       />
       <PopoverContent align="end" className="w-72 p-2">
-        <LabelsPopover mailboxId={mailboxId} messageId={messageId} />
+        <LabelsPopover {...rest} />
       </PopoverContent>
     </Popover>
   );
 }
 
-function LabelsPopover({ mailboxId, messageId }: { mailboxId: string; messageId: string }) {
+function LabelsPopover({ mailboxId, applied, partial, busy, onToggle }: ShellProps) {
   const qc = useQueryClient();
   const confirm = useConfirm();
   const labelsQ = useQuery(labelsQuery(mailboxId));
-  const appliedQ = useQuery(messageLabelsQuery([messageId]));
-  const applied = new Set((appliedQ.data?.labels[messageId] ?? []).map((l) => l.id));
 
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [color, setColor] = useState(DEFAULT_COLOR);
   const [customColor, setCustomColor] = useState(false);
 
-  const invalidate = () => {
-    qc.invalidateQueries({ queryKey: keys.labels(mailboxId) });
-    qc.invalidateQueries({ queryKey: keys.messageLabelsRoot() });
-    qc.invalidateQueries({ queryKey: keys.threadLabelsRoot() });
-  };
-
-  const toggle = useMutation({
-    mutationFn: async (input: { labelId: string; on: boolean }) => {
-      const path = `/api/labels/${input.labelId}/messages/${messageId}`;
-      return input.on ? api(path, { method: "PUT", body: "{}" }) : api(path, { method: "DELETE" });
-    },
-    onSuccess: invalidate,
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
-  });
+  const invalidate = () => invalidateLabels(qc, mailboxId);
 
   const create = useMutation({
     mutationFn: () =>
@@ -86,7 +154,7 @@ function LabelsPopover({ mailboxId, messageId }: { mailboxId: string; messageId:
       setColor(DEFAULT_COLOR);
       setCustomColor(false);
       invalidate();
-      toggle.mutate({ labelId: res.id, on: true });
+      onToggle(res.id, true);
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
@@ -189,19 +257,25 @@ function LabelsPopover({ mailboxId, messageId }: { mailboxId: string; messageId:
       <ul className="max-h-64 overflow-y-auto">
         {(labelsQ.data?.labels ?? []).map((l) => {
           const on = applied.has(l.id);
+          const some = partial?.has(l.id);
           return (
             <li key={l.id} className="flex items-center justify-between gap-1">
               <button
                 type="button"
-                onClick={() => toggle.mutate({ labelId: l.id, on: !on })}
-                className="flex flex-1 items-center gap-2 rounded-md px-2 py-1 text-[13px] hover:bg-accent"
+                disabled={busy}
+                onClick={() => onToggle(l.id, !on)}
+                className="flex flex-1 items-center gap-2 rounded-md px-2 py-1 text-[13px] hover:bg-accent disabled:opacity-50"
               >
                 <span
                   className="h-2.5 w-2.5 shrink-0 rounded-sm"
                   style={{ backgroundColor: l.color }}
                 />
                 <span className="flex-1 truncate text-left">{l.name}</span>
-                {on && <Check className="h-3.5 w-3.5 text-primary" />}
+                {on ? (
+                  <Check className="h-3.5 w-3.5 text-primary" />
+                ) : some ? (
+                  <Minus className="h-3.5 w-3.5 text-muted-foreground" />
+                ) : null}
               </button>
               <Button
                 variant="ghost"
