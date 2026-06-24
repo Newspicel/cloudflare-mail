@@ -35,6 +35,7 @@ import {
   patchMessageFlags,
   removeThreadsFromLists,
 } from "@/lib/invalidate.ts";
+import { linkifyText } from "@/lib/linkify.tsx";
 import { useUserPrefs } from "@/lib/prefs.ts";
 import type { MailView, MessageRow, ThreadRow } from "@/lib/queries.ts";
 import { messageBodyQuery } from "@/lib/queries.ts";
@@ -624,7 +625,7 @@ function MessageCard({
         // Plain-text body once loaded; the snippet shows while the body is in
         // flight (or if parsing yields neither html nor text).
         <pre className="whitespace-pre-wrap px-4 py-3 font-sans text-[13px]">
-          {body.data?.text ?? msg.snippet}
+          {linkifyText(body.data?.text ?? msg.snippet)}
         </pre>
       )}
       {body.data && body.data.attachments.length > 0 && (

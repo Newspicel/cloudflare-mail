@@ -73,11 +73,17 @@ export function EmailFrame({ html, className }: { html: string; className?: stri
     roRef.current?.disconnect();
     const d = ref.current?.contentDocument;
     const root = d?.documentElement;
-    if (!root) return;
-    const update = () => setHeight(root.scrollHeight);
+    const body = d?.body;
+    if (!root || !body) return;
+    // Grow the frame to the full content so the card lengthens instead of the
+    // body scrolling inside it. `documentElement.scrollHeight` can under-report
+    // by a few px (margin collapse), leaving a sliver scrollbar — take the max
+    // with the body and observe both so late reflow (image loads) stays exact.
+    const update = () => setHeight(Math.max(root.scrollHeight, body.scrollHeight));
     update();
     const ro = new ResizeObserver(update);
     ro.observe(root);
+    ro.observe(body);
     roRef.current = ro;
   }, []);
 
