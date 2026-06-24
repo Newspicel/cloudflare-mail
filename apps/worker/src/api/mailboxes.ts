@@ -460,18 +460,37 @@ export function mailboxesRoutes() {
     const parsedDate = parsed.date ? new Date(parsed.date) : null;
     const when = parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate : new Date();
 
+    // Optional per-message state hints (e.g. a Proton export carries read/star
+    // and folder placement in sidecar metadata). Absent for plain .eml/.mbox,
+    // where mail defaults to read so it doesn't inflate badges.
+    const seen = c.req.query("seen") !== "0";
+    const starred = c.req.query("starred") === "1";
+    const wantTrash = c.req.query("trashed") === "1";
+    const wantSpam = c.req.query("spam") === "1" && !wantTrash;
+
+    let flags = direction === "out" ? Flag.SENT : 0;
+    if (seen) flags |= Flag.SEEN;
+    if (starred) flags |= Flag.STARRED;
+
     const result = await ingestRaw(c.env, db, {
       mailboxId: id,
       raw,
       parsed,
       direction,
       deliveredTo: direction === "in" ? ownAddr || null : null,
-      // Imported historical mail is marked read so it doesn't inflate badges.
-      flags: direction === "out" ? Flag.SENT | Flag.SEEN : Flag.SEEN,
+      flags,
       receivedAt: direction === "in" ? when : null,
       sentAt: direction === "out" ? when : null,
       spam: null,
     });
+
+    // Trash and spam are thread-level, mutually-exclusive buckets (see threads.ts).
+    if (wantTrash || wantSpam) {
+      await db
+        .update(thread)
+        .set({ trashed: wantTrash, trashedAt: wantTrash ? when : null, spam: wantSpam })
+        .where(eq(thread.id, result.threadId));
+    }
 
     return c.json({ messageId: result.messageId, threadId: result.threadId, duplicate: false });
   });
