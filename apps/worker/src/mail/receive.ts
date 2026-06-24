@@ -26,6 +26,7 @@ import {
   unwrapSecret,
 } from "./pgp.ts";
 import { notifyMailbox } from "./push.ts";
+import { runRuleSends } from "./rule-sends.ts";
 import { evaluateRules, type RuleOutcome } from "./rules.ts";
 import { evaluateSpam, type SpamEvaluation } from "./spam.ts";
 
@@ -226,6 +227,17 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
   });
 
   await applyRuleActions(db, outcome, mb.id, messageId, threadId);
+
+  // Best-effort outbound rule actions (forward / auto-reply). Never block
+  // delivery — the message is already stored (invariant 8).
+  await runRuleSends(env, db, {
+    mailboxId: mb.id,
+    selfAddr: `${baseLocal}@${domainName}`,
+    domainName,
+    outcome,
+    parsed: effectiveParsed,
+    envelopeFrom: msg.from,
+  }).catch(() => {});
 
   const memberIds = await db
     .select({ userId: mailboxMember.userId })

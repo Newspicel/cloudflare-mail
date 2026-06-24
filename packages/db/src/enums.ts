@@ -72,12 +72,16 @@ export const RULE_CONDITION_MODES = ["all", "any"] as const;
 export type RuleConditionMode = (typeof RULE_CONDITION_MODES)[number];
 
 // What a matched rule does. `stopProcessing` halts evaluation of lower-priority
-// rules; `hardBlock` SMTP-rejects the message (nothing stored).
+// rules; `hardBlock` SMTP-rejects the message (nothing stored). `forward` and
+// `autoReply` are best-effort outbound sends fired after the message is stored —
+// they never block delivery (see mail/rule-sends.ts).
 export const RULE_ACTION_TYPES = [
   "applyLabel",
   "moveFolder",
   "markRead",
   "markSpam",
+  "forward",
+  "autoReply",
   "hardBlock",
   "stopProcessing",
 ] as const;
