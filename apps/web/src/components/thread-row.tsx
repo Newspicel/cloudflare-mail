@@ -1,13 +1,31 @@
 import { Link } from "@tanstack/react-router";
-import { Mails } from "lucide-react";
-import * as React from "react";
+import { type LucideIcon, Mails } from "lucide-react";
+import type * as React from "react";
 import { useCallback, useLayoutEffect, useRef } from "react";
 import { cn } from "@/lib/cn.ts";
 import { clearThreadDragGhost, setThreadDrag } from "@/lib/dnd.ts";
 import { useDateTimeFmt, useUserPrefs } from "@/lib/prefs.ts";
 import type { MailView, MessageLabel, ThreadRow } from "@/lib/queries.ts";
 import { formatStamp } from "@/lib/time.ts";
+import { useSwipeRow } from "@/lib/use-swipe-row.ts";
 import { LabelChip } from "./ui.tsx";
+
+/** One side of a swipe gesture: the reveal colour/icon and the action to run. */
+export interface SwipeAction {
+  icon: LucideIcon;
+  label: string;
+  /** Background colour class for the revealed panel, e.g. "bg-destructive". */
+  className: string;
+  onCommit: () => void;
+}
+
+export interface RowSwipe {
+  /** Dragging the row right (→). */
+  right?: SwipeAction;
+  /** Dragging the row left (←). */
+  left?: SwipeAction;
+  onLongPress?: () => void;
+}
 
 // Subtle per-category chip colours for the AI auto-category. Kept muted so they
 // don't compete with user labels; `other` is never rendered.
@@ -46,6 +64,8 @@ interface Props {
   dataIndex?: number;
   /** Force a fresh height re-measure for this row (async content changed it). */
   remeasure?: (index: number, el: HTMLLIElement) => void;
+  /** Touch swipe + long-press gestures (mailbox lists only). */
+  swipe?: RowSwipe;
 }
 
 export function ThreadRowView({
@@ -60,6 +80,7 @@ export function ThreadRowView({
   style,
   dataIndex,
   remeasure,
+  swipe,
 }: Props) {
   const { prefs } = useUserPrefs();
   const fmt = useDateTimeFmt();
@@ -96,6 +117,13 @@ export function ThreadRowView({
       mailboxId: thread.mailboxId,
       fromFolderId: link.kind === "folder" ? link.folderId : undefined,
     });
+
+  const { state: sw, handlers } = useSwipeRow({
+    onSwipeRight: swipe?.right?.onCommit,
+    onSwipeLeft: swipe?.left?.onCommit,
+    onLongPress: swipe?.onLongPress,
+    disabled: !swipe,
+  });
 
   // Without a leading column the body provides its own left padding.
   const linkClassName = cn(
@@ -155,7 +183,9 @@ export function ThreadRowView({
               {category}
             </span>
           )}
-          {labels?.map((l) => <LabelChip key={l.id} name={l.name} color={l.color} />)}
+          {labels?.map((l) => (
+            <LabelChip key={l.id} name={l.name} color={l.color} />
+          ))}
         </div>
       )}
     </>
@@ -169,44 +199,91 @@ export function ThreadRowView({
       draggable
       onDragStart={onDragStart}
       onDragEnd={clearThreadDragGhost}
-      className={cn(
-        "group relative flex items-stretch border-b",
-        active
-          ? "bg-accent text-accent-foreground"
-          : selected
-            ? "bg-accent/40"
-            : "hover:bg-muted/60",
-      )}
+      className="group relative flex items-stretch overflow-hidden border-b bg-card"
     >
-      {active && <span aria-hidden className="absolute inset-y-0 left-0 z-10 w-0.5 bg-primary" />}
-      {leading}
-      {link.kind === "mailbox" ? (
-        <Link
-          to="/app/m/$mailboxId/t/$threadId"
-          params={{ mailboxId: link.mailboxId, threadId: thread.id }}
-          search={{ view: link.view }}
-          draggable={false}
-          className={linkClassName}
-        >
-          {body}
-        </Link>
-      ) : (
-        <Link
-          to="/app/folder/$folderId/t/$threadId"
-          params={{ folderId: link.folderId, threadId: thread.id }}
-          draggable={false}
-          className={linkClassName}
-        >
-          {body}
-        </Link>
+      {swipe?.right && sw.dx > 0 && (
+        <SwipeReveal action={swipe.right} side="left" width={sw.dx} armed={sw.armed} />
       )}
-      {actions && (
-        <div className="absolute inset-y-0 right-2 flex items-center opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
-          <div className="flex items-center gap-0.5 rounded-md border bg-card p-0.5 text-muted-foreground shadow-sm">
-            {actions}
+      {swipe?.left && sw.dx < 0 && (
+        <SwipeReveal action={swipe.left} side="right" width={-sw.dx} armed={sw.armed} />
+      )}
+      <div
+        className={cn(
+          "relative z-10 flex min-w-0 flex-1 items-stretch",
+          sw.dragging ? "" : "transition-transform duration-200",
+          active
+            ? "bg-accent text-accent-foreground"
+            : selected
+              ? "bg-accent/40"
+              : "bg-card hover:bg-muted/60",
+        )}
+        style={swipe ? { transform: `translateX(${sw.dx}px)`, touchAction: "pan-y" } : undefined}
+        onPointerDown={handlers.onPointerDown}
+        onPointerMove={handlers.onPointerMove}
+        onPointerUp={handlers.onPointerUp}
+        onPointerCancel={handlers.onPointerCancel}
+        onClickCapture={handlers.onClickCapture}
+      >
+        {active && <span aria-hidden className="absolute inset-y-0 left-0 z-10 w-0.5 bg-primary" />}
+        {leading}
+        {link.kind === "mailbox" ? (
+          <Link
+            to="/app/m/$mailboxId/t/$threadId"
+            params={{ mailboxId: link.mailboxId, threadId: thread.id }}
+            search={{ view: link.view }}
+            draggable={false}
+            className={linkClassName}
+          >
+            {body}
+          </Link>
+        ) : (
+          <Link
+            to="/app/folder/$folderId/t/$threadId"
+            params={{ folderId: link.folderId, threadId: thread.id }}
+            draggable={false}
+            className={linkClassName}
+          >
+            {body}
+          </Link>
+        )}
+        {actions && (
+          <div className="absolute inset-y-0 right-2 flex items-center opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+            <div className="flex items-center gap-0.5 rounded-md border bg-card p-0.5 text-muted-foreground shadow-sm">
+              {actions}
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </li>
+  );
+}
+
+// The coloured panel revealed behind a row mid-swipe. Its icon hugs the edge the
+// finger is pulling from and brightens once the swipe passes the commit point.
+function SwipeReveal({
+  action,
+  side,
+  width,
+  armed,
+}: {
+  action: SwipeAction;
+  side: "left" | "right";
+  width: number;
+  armed: boolean;
+}) {
+  const Icon = action.icon;
+  return (
+    <div
+      aria-hidden
+      className={cn(
+        "absolute inset-y-0 flex items-center text-white transition-opacity",
+        action.className,
+        side === "left" ? "left-0 justify-start pl-5" : "right-0 justify-end pr-5",
+        armed ? "opacity-100" : "opacity-70",
+      )}
+      style={{ width: Math.max(width, 0) }}
+    >
+      <Icon className={cn("h-5 w-5 shrink-0 transition-transform", armed && "scale-125")} />
+    </div>
   );
 }

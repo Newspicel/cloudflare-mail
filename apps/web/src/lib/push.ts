@@ -18,6 +18,15 @@ function urlBase64ToUint8Array(base64: string): Uint8Array {
   return out;
 }
 
+// Ask the service worker to close this thread's notification (read elsewhere).
+// Best-effort: no-op when the SW isn't controlling the page yet.
+export function dismissThreadNotification(threadId: string): void {
+  if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
+  navigator.serviceWorker.ready
+    .then((reg) => reg.active?.postMessage({ type: "dismiss-thread", threadId }))
+    .catch(() => {});
+}
+
 // True when this device already has an active push subscription.
 export async function isPushEnabled(): Promise<boolean> {
   if (!pushSupported()) return false;

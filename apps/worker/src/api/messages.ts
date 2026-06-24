@@ -11,6 +11,7 @@ import { z } from "zod";
 import { getOrCreateAuthSecret } from "../config.ts";
 import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
+import { broadcastToUsers } from "../hub.ts";
 import { generateSmartReply } from "../mail/ai.ts";
 import { assertOwnedAttachmentKeys } from "../mail/attachment-keys.ts";
 import { collectMessageBlobKeys, deleteBlobs } from "../mail/blobs.ts";
@@ -88,8 +89,18 @@ export function messagesRoutes() {
     await db.update(message).set({ flags }).where(eq(message.id, id));
     // SEEN drives the thread's unread badge, and a trashed message drops out of
     // the count — keep the cached total in sync after either changes.
-    if (patch.seen !== undefined || patch.trash !== undefined)
-      await recomputeThreadUnread(db, msg.threadId);
+    if (patch.seen !== undefined || patch.trash !== undefined) {
+      const unread = await recomputeThreadUnread(db, msg.threadId);
+      // Mirror the read state to the reader's other devices (badge sync +
+      // notification dismissal) when this clears/sets the thread's last unread.
+      if (patch.seen !== undefined)
+        await broadcastToUsers(c.env, [user.id], {
+          type: "thread_read",
+          mailboxId: msg.mailboxId,
+          threadId: msg.threadId,
+          read: unread === 0,
+        });
+    }
     return c.json({ flags });
   });
 

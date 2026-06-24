@@ -9,6 +9,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
+import { broadcastToUsers } from "../hub.ts";
 import { generateThreadSummary } from "../mail/ai.ts";
 import { collectThreadBlobKeys, deleteBlobs } from "../mail/blobs.ts";
 import { recomputeThreadUnread } from "../mail/threads.ts";
@@ -278,6 +279,14 @@ export function threadsRoutes() {
         .set({ flags: body.read ? seenBit : clearBit })
         .where(and(eq(message.threadId, id), eq(message.direction, "in")));
       unreadCount = await recomputeThreadUnread(db, id);
+      // Sync the reader's other devices: update their unread badge and dismiss
+      // the thread's push notification once it's been read somewhere.
+      await broadcastToUsers(c.env, [user.id], {
+        type: "thread_read",
+        mailboxId: th.mailboxId,
+        threadId: id,
+        read: body.read,
+      });
     }
 
     return c.json({

@@ -46,6 +46,9 @@ export interface MailNotification {
   title: string;
   body: string;
   url: string;
+  // Stable per-thread tag so peers can dismiss this notification when the thread
+  // is read elsewhere, and repeat notifications for a thread coalesce.
+  threadId: string;
 }
 
 // Best-effort push fan-out. Sends to every device of every user who opted into
@@ -80,7 +83,7 @@ export async function notifyMailbox(db: DB, n: MailNotification): Promise<void> 
     if (subs.length === 0) return;
 
     const { privateJWK } = await getOrCreateVapid(db);
-    const payload = { title: n.title, body: n.body, url: n.url };
+    const payload = { title: n.title, body: n.body, url: n.url, threadId: n.threadId };
     const dead: string[] = [];
 
     await Promise.all(
