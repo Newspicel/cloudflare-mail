@@ -34,6 +34,7 @@ import { Separator } from "@/components/ui/separator.tsx";
 import { Switch } from "@/components/ui/switch.tsx";
 import { EmptyState, ThreadListSkeleton } from "@/components/ui.tsx";
 import { cn } from "@/lib/cn.ts";
+import { useDateTimeFmt } from "@/lib/prefs.ts";
 import {
   ALL_MAILBOXES,
   hasSearchCriteria,
@@ -41,6 +42,7 @@ import {
   type SearchFilterInput,
   searchQuery,
 } from "@/lib/queries.ts";
+import { type DateTimeFmt, formatStamp } from "@/lib/time.ts";
 
 // Every filter lives in the URL so a search is shareable and back/forward works.
 type SearchParams = Omit<Partial<SearchFilters>, "limit" | "page"> & { page?: number };
@@ -627,6 +629,7 @@ function Results({
 }
 
 function ResultRow({ r }: { r: SearchResultDto }) {
+  const fmt = useDateTimeFmt();
   const unread = !hasFlag(r.flags, Flag.SEEN);
   const who = r.direction === "out" ? `To ${r.fromName ?? r.fromAddr}` : (r.fromName ?? r.fromAddr);
   return (
@@ -640,7 +643,7 @@ function ResultRow({ r }: { r: SearchResultDto }) {
         <div className="flex items-center justify-between gap-2">
           <span className={cn("truncate", unread && "font-semibold")}>{who}</span>
           <span className="shrink-0 text-[11px] text-muted-foreground">
-            {formatWhen(r.receivedAt ?? r.sentAt)}
+            {formatWhen(r.receivedAt ?? r.sentAt, fmt)}
           </span>
         </div>
         <div className="flex items-center gap-1.5">
@@ -694,15 +697,6 @@ function buildChips(form: SearchParams, mailboxes?: { id: string; address: strin
   return chips;
 }
 
-function formatWhen(iso: string | null): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  const now = new Date();
-  if (d.toDateString() === now.toDateString()) {
-    return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  }
-  if (d.getFullYear() === now.getFullYear()) {
-    return d.toLocaleDateString([], { month: "short", day: "numeric" });
-  }
-  return d.toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
+function formatWhen(iso: string | null, fmt: DateTimeFmt): string {
+  return iso ? formatStamp(iso, fmt) : "";
 }

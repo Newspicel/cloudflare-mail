@@ -4,8 +4,10 @@ import { type CSSProperties, useRef } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
+import { useDateTimeFmt } from "@/lib/prefs.ts";
 import type { DraftRow, MailView } from "@/lib/queries.ts";
 import { keys } from "@/lib/query-keys.ts";
+import { formatStamp } from "@/lib/time.ts";
 import { useListVirtualizer } from "@/lib/use-list-virtualizer.ts";
 import { openCompose } from "./compose-dock.tsx";
 import { FOLDER_META, FolderTabs } from "./folder-tabs.tsx";
@@ -46,6 +48,7 @@ export function DraftList({
 }: Props) {
   const meta = FOLDER_META.drafts;
   const qc = useQueryClient();
+  const fmt = useDateTimeFmt();
   const { confirmDelete } = useConfirmHelpers();
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -100,7 +103,7 @@ export function DraftList({
                       <div className="flex items-center justify-between gap-2">
                         <span className="truncate text-muted-foreground">To: {recipients}</span>
                         <span className="ml-2 shrink-0 text-[11px] text-muted-foreground">
-                          {formatTime(d.updatedAt)}
+                          {formatStamp(d.updatedAt, fmt)}
                         </span>
                       </div>
                       <div className="truncate font-medium text-[12px] text-foreground">
@@ -140,13 +143,4 @@ export function DraftList({
       </div>
     </TooltipProvider>
   );
-}
-
-function formatTime(iso: string): string {
-  const d = new Date(iso);
-  const now = new Date();
-  if (d.toDateString() === now.toDateString()) {
-    return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  }
-  return d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
