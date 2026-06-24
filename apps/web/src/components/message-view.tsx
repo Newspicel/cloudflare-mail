@@ -358,6 +358,7 @@ export function MessageView({
                     onClick={remove}
                     disabled={del.isPending}
                     label="Delete permanently"
+                    className="hover:bg-destructive/10 hover:text-destructive"
                   />
                 </>
               ) : (
@@ -375,6 +376,7 @@ export function MessageView({
                       onClick={() => act({ spam: true }, "Marked as spam", { spam: false })}
                       disabled={setState.isPending}
                       label="Mark as spam (!)"
+                      className="hover:bg-yellow-500/10 hover:text-yellow-600 dark:hover:text-yellow-500"
                     />
                   )}
                   <IconButton
@@ -382,6 +384,7 @@ export function MessageView({
                     onClick={() => act({ trashed: true }, "Moved to Trash", { trashed: false })}
                     disabled={setState.isPending}
                     label="Trash (#)"
+                    className="hover:bg-destructive/10 hover:text-destructive"
                   />
                 </>
               )}
