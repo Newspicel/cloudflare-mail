@@ -12,6 +12,7 @@ import { getOrCreateAuthSecret } from "../config.ts";
 import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
 import { assertOwnedAttachmentKeys } from "../mail/attachment-keys.ts";
+import { extractCalendar } from "../mail/calendar.ts";
 import {
   bareCid,
   MAX_IMAGE_BYTES,
@@ -187,7 +188,12 @@ export function messagesRoutes() {
     }
     // The raw `.eml` never changes once stored, so the parsed body is immutable.
     c.header("Cache-Control", "private, max-age=31536000, immutable");
-    return c.json({ html, text: parsed.text ?? null, attachments: atts } satisfies MessageBodyDto);
+    return c.json({
+      html,
+      text: parsed.text ?? null,
+      attachments: atts,
+      calendar: extractCalendar(parsed),
+    } satisfies MessageBodyDto);
   });
 
   // Fetches a remote image referenced by a message body. Only URLs we signed
