@@ -15,8 +15,10 @@ import {
 import { useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api.ts";
+import { useDateTimeFmt } from "@/lib/prefs.ts";
 import type { MessageRow } from "@/lib/queries.ts";
 import { sanitizeEmailHtml } from "@/lib/sanitize-email.ts";
+import { type DateTimeFmt, formatDateTime } from "@/lib/time.ts";
 import { Button } from "./ui/button.tsx";
 import {
   Dialog,
@@ -45,10 +47,10 @@ function escapeHtml(s: string): string {
 // Renders the message body in a hidden same-origin iframe and prints it. Using
 // `srcdoc` + the load event lets proxied (same-origin) images settle before the
 // print dialog opens; the frame is torn down afterwards.
-function printMessage(msg: MessageRow, body: MessageBodyDto | undefined) {
+function printMessage(msg: MessageRow, body: MessageBodyDto | undefined, fmt: DateTimeFmt) {
   const html = body?.html ? sanitizeEmailHtml(body.html) : null;
   const content = html ?? `<pre>${escapeHtml(body?.text ?? msg.snippet ?? "")}</pre>`;
-  const when = new Date(msg.sentAt ?? msg.receivedAt ?? msg.createdAt).toLocaleString();
+  const when = formatDateTime(new Date(msg.sentAt ?? msg.receivedAt ?? msg.createdAt), fmt);
   const head = `
     <div style="font-size:12px;color:#444;border-bottom:1px solid #ddd;padding-bottom:8px;margin-bottom:12px">
       <div><strong>${escapeHtml(msg.subject || "(no subject)")}</strong></div>
@@ -100,6 +102,7 @@ export function MessageMenu({
   onDelete?: () => void;
   busy?: boolean;
 }) {
+  const fmt = useDateTimeFmt();
   const [source, setSource] = useState<Source | null>(null);
   const [loadingRaw, setLoadingRaw] = useState(false);
 
@@ -168,7 +171,7 @@ export function MessageMenu({
             <Code2 /> View HTML source
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => printMessage(msg, body)}>
+          <DropdownMenuItem onClick={() => printMessage(msg, body, fmt)}>
             <Printer /> Print
           </DropdownMenuItem>
           <DropdownMenuItem onClick={exportEml}>

@@ -3,9 +3,9 @@ import { Mails } from "lucide-react";
 import type * as React from "react";
 import { cn } from "@/lib/cn.ts";
 import { clearThreadDragGhost, setThreadDrag } from "@/lib/dnd.ts";
-import { useUserPrefs } from "@/lib/prefs.ts";
+import { useDateTimeFmt, useUserPrefs } from "@/lib/prefs.ts";
 import type { MailView, MessageLabel, ThreadRow } from "@/lib/queries.ts";
-import { formatTime } from "@/lib/time.ts";
+import { formatStamp } from "@/lib/time.ts";
 
 // Where the row links to. The shape also decides the drag payload (folder rows
 // carry their origin) so both list flavors share one row body.
@@ -44,6 +44,7 @@ export function ThreadRowView({
   dataIndex,
 }: Props) {
   const { prefs } = useUserPrefs();
+  const fmt = useDateTimeFmt();
   const compact = prefs.density === "compact";
   const firstParticipant = thread.participants[0];
   const label = firstParticipant?.name ?? firstParticipant?.address ?? "(unknown)";
@@ -68,7 +69,7 @@ export function ThreadRowView({
       <div className="flex items-center justify-between gap-2">
         <span className={cn("truncate", unread && "font-semibold")}>{label}</span>
         <span className="ml-2 shrink-0 text-[11px] text-muted-foreground">
-          {formatTime(thread.lastMsgAt)}
+          {formatStamp(thread.lastMsgAt, fmt)}
         </span>
       </div>
       <div className="flex items-center gap-2">

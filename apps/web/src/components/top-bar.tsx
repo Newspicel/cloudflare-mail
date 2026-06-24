@@ -15,8 +15,10 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { authClient } from "@/lib/auth-client.ts";
 import { cn } from "@/lib/cn.ts";
+import { useDateTimeFmt } from "@/lib/prefs.ts";
 import { meQuery, type SearchResult, searchQuery } from "@/lib/queries.ts";
 import { type Theme, useTheme } from "@/lib/theme.ts";
+import { type DateTimeFmt, formatStamp } from "@/lib/time.ts";
 import { Logo } from "./logo.tsx";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar.tsx";
 import { Button } from "./ui/button.tsx";
@@ -130,6 +132,7 @@ function AccountMenu({
 
 function SearchBox() {
   const nav = useNavigate();
+  const fmt = useDateTimeFmt();
   const [raw, setRaw] = useState("");
   const [debounced, setDebounced] = useState("");
   const [open, setOpen] = useState(false);
@@ -263,7 +266,7 @@ function SearchBox() {
                     <div className="flex items-center justify-between gap-2">
                       <span className="truncate font-medium">{r.fromName ?? r.fromAddr}</span>
                       <span className="shrink-0 text-[11px] text-muted-foreground">
-                        {formatWhen(r.receivedAt ?? r.sentAt)}
+                        {formatWhen(r.receivedAt ?? r.sentAt, fmt)}
                       </span>
                     </div>
                     <div className="truncate text-[12px]">{r.subject || "(no subject)"}</div>
@@ -298,12 +301,6 @@ function SearchBox() {
   );
 }
 
-function formatWhen(iso: string | null): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  const now = new Date();
-  if (d.toDateString() === now.toDateString()) {
-    return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  }
-  return d.toLocaleDateString([], { month: "short", day: "numeric" });
+function formatWhen(iso: string | null, fmt: DateTimeFmt): string {
+  return iso ? formatStamp(iso, fmt) : "";
 }
