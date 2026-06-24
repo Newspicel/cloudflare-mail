@@ -140,6 +140,29 @@ export const twoFactor = sqliteTable(
   (t) => [index("two_factor_user_idx").on(t.userId)],
 );
 
+// passkey plugin (WebAuthn). Keys are the Better Auth field names; column names
+// stay snake_case via the casing config. credentialID is the authenticator's
+// credential id; aaguid identifies the authenticator model (see settings UI).
+export const passkey = sqliteTable(
+  "passkey",
+  {
+    id: text("id").primaryKey(),
+    name: text("name"),
+    publicKey: text("public_key").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    credentialID: text("credential_id").notNull(),
+    counter: integer("counter").notNull().default(0),
+    deviceType: text("device_type").notNull(),
+    backedUp: integer("backed_up", { mode: "boolean" }).notNull().default(false),
+    transports: text("transports"),
+    aaguid: text("aaguid"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("passkey_user_idx").on(t.userId)],
+);
+
 // ─── App-level user invites (admin-controlled signup) ───────────────────────
 
 export const userInvite = sqliteTable(

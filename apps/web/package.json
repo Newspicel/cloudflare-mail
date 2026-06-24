@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@base-ui/react": "1.6.0",
+    "@better-auth/passkey": "1.6.20",
     "@cfmail/shared": "workspace:*",
     "@tanstack/react-query": "5.101.1",
     "@tanstack/react-router": "1.170.16",

@@ -12,6 +12,7 @@
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
+    "@better-auth/passkey": "1.6.20",
     "@cfmail/db": "workspace:*",
     "@cfmail/shared": "workspace:*",
     "@hono/zod-validator": "0.8.0",

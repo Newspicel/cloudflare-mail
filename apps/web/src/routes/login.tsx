@@ -1,8 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { KeyRound } from "lucide-react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { CardShell, Field, PrimaryButton } from "@/components/auth-card.tsx";
+import { Button } from "@/components/ui/button.tsx";
 import { authClient } from "@/lib/auth-client.ts";
 import { bootstrapQuery } from "@/lib/queries.ts";
 
@@ -95,10 +97,44 @@ function SignInForm() {
     }
   }
 
+  // Conditional UI: preload passkeys so the browser can offer one in the
+  // email field's autofill. No-op on browsers without conditional mediation.
+  useEffect(() => {
+    if (
+      typeof PublicKeyCredential === "undefined" ||
+      !PublicKeyCredential.isConditionalMediationAvailable
+    ) {
+      return;
+    }
+    PublicKeyCredential.isConditionalMediationAvailable().then((ok) => {
+      if (ok) void authClient.signIn.passkey({ autoFill: true });
+    });
+  }, []);
+
+  async function passkeySignIn() {
+    setBusy(true);
+    try {
+      const res = await authClient.signIn.passkey();
+      if (res?.error) throw new Error(res.error.message ?? "passkey sign-in failed");
+      nav({ to: "/app" });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "passkey sign-in failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <CardShell title="Sign in">
       <form onSubmit={submit}>
-        <Field label="Email" type="email" value={email} onChange={setEmail} required />
+        <Field
+          label="Email"
+          type="email"
+          value={email}
+          onChange={setEmail}
+          required
+          autoComplete="username webauthn"
+        />
         <Field
           label="Password"
           type="password"
@@ -106,9 +142,21 @@ function SignInForm() {
           value={password}
           onChange={setPassword}
           required
+          autoComplete="current-password webauthn"
         />
         <PrimaryButton busy={busy}>Sign in</PrimaryButton>
       </form>
+      <Button
+        type="button"
+        variant="outline"
+        size="lg"
+        disabled={busy}
+        onClick={passkeySignIn}
+        className="mt-1 w-full"
+      >
+        <KeyRound className="size-4" />
+        Sign in with a passkey
+      </Button>
       <Link
         to="/forgot-password"
         className="mt-3 block w-full text-center text-sm text-muted-foreground hover:text-foreground"

@@ -1,3 +1,4 @@
+import { passkey } from "@better-auth/passkey";
 import { type DB, makeDB, schema } from "@cfmail/db";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { betterAuth } from "better-auth/minimal";
@@ -40,6 +41,7 @@ export async function createAuth({ env, db, baseURL }: CreateAuthOpts) {
         account: schema.account,
         verification: schema.verification,
         twoFactor: schema.twoFactor,
+        passkey: schema.passkey,
       },
       usePlural: false,
     }),
@@ -93,6 +95,13 @@ export async function createAuth({ env, db, baseURL }: CreateAuthOpts) {
         adminRoles: ["admin"],
       }),
       twoFactor(),
+      // rpID/origin derive from the request-scoped baseURL (no hardcoded host),
+      // so passkeys bind to whatever domain the deployment is served on.
+      passkey({
+        rpID: new URL(baseURL).hostname,
+        rpName: "cfmail",
+        origin: baseURL,
+      }),
     ],
   });
 }
