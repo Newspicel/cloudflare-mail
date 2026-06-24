@@ -7,6 +7,19 @@ import { useDateTimeFmt, useUserPrefs } from "@/lib/prefs.ts";
 import type { MailView, MessageLabel, ThreadRow } from "@/lib/queries.ts";
 import { formatStamp } from "@/lib/time.ts";
 
+// Subtle per-category chip colours for the AI auto-category. Kept muted so they
+// don't compete with user labels; `other` is never rendered.
+const CATEGORY_CLASS: Record<string, string> = {
+  newsletter: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
+  receipt: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+  travel: "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
+  finance: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  social: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
+  personal: "bg-rose-500/10 text-rose-600 dark:text-rose-400",
+  notification: "bg-slate-500/10 text-slate-600 dark:text-slate-400",
+  promotion: "bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400",
+};
+
 // Where the row links to. The shape also decides the drag payload (folder rows
 // carry their origin) so both list flavors share one row body.
 type RowLink =
@@ -49,6 +62,8 @@ export function ThreadRowView({
   const firstParticipant = thread.participants[0];
   const label = firstParticipant?.name ?? firstParticipant?.address ?? "(unknown)";
   const unread = thread.unreadCount > 0;
+  const showSummary = prefs.aiSummaries !== false && !!thread.aiSummary;
+  const category = thread.aiCategory && thread.aiCategory !== "other" ? thread.aiCategory : null;
 
   const onDragStart = (e: React.DragEvent) =>
     setThreadDrag(e, {
@@ -98,9 +113,24 @@ export function ThreadRowView({
           </span>
         )}
       </div>
-      {labels && labels.length > 0 && (
-        <div className="flex flex-wrap gap-1">
-          {labels.map((l) => (
+      {showSummary && (
+        <span className="truncate text-[12px] text-muted-foreground/90 italic">
+          {thread.aiSummary}
+        </span>
+      )}
+      {(category || (labels && labels.length > 0)) && (
+        <div className="flex flex-wrap items-center gap-1">
+          {category && (
+            <span
+              className={cn(
+                "inline-flex items-center rounded-full px-1.5 py-px font-medium text-[10px] capitalize",
+                CATEGORY_CLASS[category],
+              )}
+            >
+              {category}
+            </span>
+          )}
+          {labels?.map((l) => (
             <span
               key={l.id}
               className="inline-flex items-center gap-1 rounded-full border px-1.5 py-px font-medium text-[10px]"

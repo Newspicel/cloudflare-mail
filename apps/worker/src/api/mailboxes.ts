@@ -3,6 +3,7 @@ import {
   contactKey,
   domain,
   mailbox,
+  mailboxAiUsage,
   mailboxInvite,
   mailboxMember,
   mailboxSpamUsage,
@@ -68,6 +69,7 @@ export function mailboxesRoutes() {
         expiresAt: mailbox.expiresAt,
         domainName: domain.name,
         pgpMode: mailbox.pgpMode,
+        aiFeatures: mailbox.aiFeatures,
         access: mailbox.ownerUserId,
       })
       .from(mailbox)
@@ -84,6 +86,7 @@ export function mailboxesRoutes() {
         expiresAt: mailbox.expiresAt,
         domainName: domain.name,
         pgpMode: mailbox.pgpMode,
+        aiFeatures: mailbox.aiFeatures,
         perms: mailboxMember.perms,
       })
       .from(mailboxMember)
@@ -98,6 +101,7 @@ export function mailboxesRoutes() {
       type: m.type,
       expiresAt: m.expiresAt,
       pgpMode: m.pgpMode,
+      aiFeatures: m.aiFeatures,
       role: "owner" as const,
       perms: 7,
     }));
@@ -111,6 +115,7 @@ export function mailboxesRoutes() {
         type: m.type,
         expiresAt: m.expiresAt,
         pgpMode: m.pgpMode,
+        aiFeatures: m.aiFeatures,
         role: "member" as const,
         perms: m.perms,
       }));
@@ -189,6 +194,8 @@ export function mailboxesRoutes() {
         type: true,
         spamFilter: true,
         spamAiTokenCap: true,
+        aiFeatures: true,
+        aiTokenCap: true,
         pgpMode: true,
         pgpFingerprint: true,
         pgpPublicKey: true,
@@ -197,6 +204,10 @@ export function mailboxesRoutes() {
     if (!mb) throw new HTTPException(404, { message: "not found" });
     const usage = await db.query.mailboxSpamUsage.findFirst({
       where: eq(mailboxSpamUsage.mailboxId, id),
+      columns: { period: true, calls: true, tokensIn: true, tokensOut: true },
+    });
+    const aiUsage = await db.query.mailboxAiUsage.findFirst({
+      where: eq(mailboxAiUsage.mailboxId, id),
       columns: { period: true, calls: true, tokensIn: true, tokensOut: true },
     });
     return c.json({
@@ -212,6 +223,15 @@ export function mailboxesRoutes() {
             period: usage.period,
             calls: usage.calls,
             tokens: usage.tokensIn + usage.tokensOut,
+          }
+        : null,
+      aiFeatures: mb.aiFeatures,
+      aiTokenCap: mb.aiTokenCap,
+      aiUsage: aiUsage
+        ? {
+            period: aiUsage.period,
+            calls: aiUsage.calls,
+            tokens: aiUsage.tokensIn + aiUsage.tokensOut,
           }
         : null,
       pgpMode: mb.pgpMode,

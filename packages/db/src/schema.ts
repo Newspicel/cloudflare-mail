@@ -8,6 +8,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 import {
+  AI_CATEGORIES,
   BLOCK_ENTRY_TYPES,
   BLOCK_REQUEST_STATUS,
   CONTACT_KEY_SOURCES,
@@ -241,6 +242,12 @@ export const mailbox = sqliteTable(
     // Monthly Workers AI token budget for spam classification; null = unlimited.
     // When exceeded, the ai level silently falls back to standard.
     spamAiTokenCap: integer("spam_ai_token_cap"),
+    // Reader AI features (summary + category on inbound, smart reply, thread
+    // summarize). Off by default; gated separately from spam so spend is opt-in.
+    aiFeatures: integer("ai_features", { mode: "boolean" }).notNull().default(false),
+    // Monthly Workers AI token budget for the reader features; null = unlimited.
+    // When exceeded the features silently no-op (mail still delivers, ivt 8).
+    aiTokenCap: integer("ai_token_cap"),
     // service mailboxes only — SHA-256 (hex) of the bearer API key. Null until a
     // key is issued; rotating replaces it (single key, instant cutover).
     serviceKeyHash: text("service_key_hash"),
@@ -345,6 +352,10 @@ export const thread = sqliteTable(
       .notNull()
       .default(sql`'[]'`),
     unreadCount: integer("unread_count").notNull().default(0),
+    // AI summary/category of the latest inbound message, denormalized here so the
+    // list query needs no join. Null until the best-effort AI job fills them in.
+    aiSummary: text("ai_summary"),
+    aiCategory: text("ai_category", { enum: AI_CATEGORIES }),
     trashed: integer("trashed", { mode: "boolean" }).notNull().default(false),
     // When the thread entered the trash; null unless trashed. The cron purges
     // threads trashed longer than the retention window.
@@ -389,6 +400,11 @@ export const message = sqliteTable(
     // Full plaintext body (HTML normalized to text), capped, for FTS body search.
     // Null on pre-migration rows; the raw message always lives in R2.
     bodyText: text("body_text"),
+    // Best-effort Workers AI insights (inbound only; null until the job runs or
+    // when AI features are off). `aiSummary` is a one-line gist for the list;
+    // `aiCategory` is the auto-category chip.
+    aiSummary: text("ai_summary"),
+    aiCategory: text("ai_category", { enum: AI_CATEGORIES }),
     // Recipient names+addresses concatenated, so search matches To/Cc too.
     toText: text("to_text"),
     flags: integer("flags").notNull().default(0),
@@ -453,6 +469,20 @@ export const attachment = sqliteTable(
 // Cumulative Workers AI spam-classification usage per mailbox. `period`
 // (YYYY-MM) lets the monthly cap reset without deleting rows.
 export const mailboxSpamUsage = sqliteTable("mailbox_spam_usage", {
+  mailboxId: text("mailbox_id")
+    .primaryKey()
+    .references(() => mailbox.id, { onDelete: "cascade" }),
+  period: text("period").notNull().default(""),
+  calls: integer("calls").notNull().default(0),
+  tokensIn: integer("tokens_in").notNull().default(0),
+  tokensOut: integer("tokens_out").notNull().default(0),
+  updatedAt: updatedAt(),
+});
+
+// Cumulative Workers AI usage for the reader features (summary/category, smart
+// reply, thread summarize) per mailbox. Mirrors `mailboxSpamUsage`; tracked
+// separately so the reader cap and the spam cap don't share a budget.
+export const mailboxAiUsage = sqliteTable("mailbox_ai_usage", {
   mailboxId: text("mailbox_id")
     .primaryKey()
     .references(() => mailbox.id, { onDelete: "cascade" }),

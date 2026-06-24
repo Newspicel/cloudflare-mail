@@ -15,6 +15,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { getOrCreatePgpMasterKey } from "../config.ts";
 import type { Env } from "../env.ts";
 import { broadcastToUsers } from "../hub.ts";
+import { generateMessageInsights } from "./ai.ts";
 import { isSenderBlocked } from "./blocklist.ts";
 import { type IngestOptions, ingestRaw, isAuthenticated, MAX_EMAIL_BYTES } from "./ingest.ts";
 import { bodyForIndex, parseMime, streamToArrayBuffer } from "./mime.ts";
@@ -30,7 +31,11 @@ import { runRuleSends } from "./rule-sends.ts";
 import { evaluateRules, type RuleOutcome } from "./rules.ts";
 import { evaluateSpam, type SpamEvaluation } from "./spam.ts";
 
-export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Promise<void> {
+export async function handleInbound(
+  msg: ForwardableEmailMessage,
+  env: Env,
+  ctx?: ExecutionContext,
+): Promise<void> {
   const db = makeDB(env.DB);
 
   const [localPart, domainName] = splitAddr(msg.to);
@@ -62,6 +67,8 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
       expiresAt: true,
       spamFilter: true,
       spamAiTokenCap: true,
+      aiFeatures: true,
+      aiTokenCap: true,
       pgpMode: true,
       pgpPublicKey: true,
       pgpPrivateKeyWrapped: true,
@@ -92,6 +99,8 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
           expiresAt: true,
           spamFilter: true,
           spamAiTokenCap: true,
+          aiFeatures: true,
+          aiTokenCap: true,
           pgpMode: true,
           pgpPublicKey: true,
           pgpPrivateKeyWrapped: true,
@@ -252,6 +261,24 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
     messageId,
     threadId,
   });
+
+  // Best-effort AI summary + category. Runs after delivery is committed so it
+  // never adds latency to the SMTP accept, nor blocks on failure (invariant 8).
+  if (mb.aiFeatures && !outcome.markSpam && spam?.verdict !== "spam") {
+    const job = generateMessageInsights(env, db, {
+      mailboxId: mb.id,
+      messageId,
+      threadId,
+      cap: mb.aiTokenCap ?? null,
+      userIds: [...userIds],
+      from: effectiveParsed.from?.address ?? msg.from,
+      subject: effectiveParsed.subject ?? "",
+      text: effectiveParsed.text,
+      html: effectiveParsed.html,
+    });
+    if (ctx) ctx.waitUntil(job);
+    else await job;
+  }
 
   // Don't push-notify mail filed straight into Spam, nor mail a rule already
   // auto-read or auto-filed to spam on the user's behalf.

@@ -1,7 +1,7 @@
 import { draft, message, thread, threadFolder } from "@cfmail/db/schema";
 import { Flag } from "@cfmail/shared/flags";
 import { Perm } from "@cfmail/shared/permissions";
-import type { FolderCountsResponseDto } from "@cfmail/shared/responses";
+import type { FolderCountsResponseDto, ThreadSummaryDto } from "@cfmail/shared/responses";
 import { updateThread } from "@cfmail/shared/schemas";
 import { zValidator } from "@hono/zod-validator";
 import { and, asc, count, desc, eq, gt, inArray, or, type SQL, sql } from "drizzle-orm";
@@ -9,6 +9,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
+import { generateThreadSummary } from "../mail/ai.ts";
 import { collectThreadBlobKeys, deleteBlobs } from "../mail/blobs.ts";
 import { recomputeThreadUnread } from "../mail/threads.ts";
 import { requireUser } from "../middleware.ts";
@@ -177,6 +178,49 @@ export function threadsRoutes() {
       .orderBy(asc(message.createdAt));
 
     return c.json({ thread: serializeThread(th), messages: msgs.map(serializeMessage) });
+  });
+
+  // AI catch-up summary of a whole thread (best-effort, on-demand). READ only —
+  // it just condenses messages the caller can already see.
+  r.post("/:id/summary", async (c) => {
+    const db = dbFromCtx(c);
+    const user = c.get("user")!;
+    const id = c.req.param("id");
+    const th = await requireEntityAccess(db, user.id, thread, id, Perm.READ);
+
+    const mb = await db.query.mailbox.findFirst({
+      where: (m, { eq }) => eq(m.id, th.mailboxId),
+      columns: { aiFeatures: true, aiTokenCap: true },
+    });
+    if (!mb?.aiFeatures) throw new HTTPException(403, { message: "AI features are off" });
+
+    // Cap how many messages feed the model so a long thread can't blow the
+    // budget; keep the most recent ones, oldest-first for chronological context.
+    const msgs = await db
+      .select({
+        fromName: message.fromName,
+        fromAddr: message.fromAddr,
+        subject: message.subject,
+        bodyText: message.bodyText,
+      })
+      .from(message)
+      .where(and(eq(message.threadId, id), eq(message.mailboxId, th.mailboxId)))
+      .orderBy(desc(message.createdAt))
+      .limit(20);
+    msgs.reverse();
+
+    const bullets = await generateThreadSummary(
+      c.env,
+      db,
+      th.mailboxId,
+      mb.aiTokenCap ?? null,
+      msgs.map((m) => ({
+        from: m.fromName ? `${m.fromName} <${m.fromAddr}>` : m.fromAddr,
+        subject: m.subject,
+        body: m.bodyText ?? "",
+      })),
+    );
+    return c.json({ bullets } satisfies ThreadSummaryDto);
   });
 
   r.patch("/:id", zValidator("json", updateThread), async (c) => {

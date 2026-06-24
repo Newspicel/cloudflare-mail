@@ -22,6 +22,22 @@ export type ServiceMode = (typeof SERVICE_MODES)[number];
 export const SPAM_VERDICTS = ["clean", "suspicious", "spam"] as const;
 export type SpamVerdict = (typeof SPAM_VERDICTS)[number];
 
+// AI auto-category assigned to inbound mail (best-effort, Workers AI). A fixed
+// taxonomy kept small enough that a small model classifies it reliably; rendered
+// as a chip in the list. `other` is the fallback when nothing fits.
+export const AI_CATEGORIES = [
+  "newsletter",
+  "receipt",
+  "travel",
+  "finance",
+  "social",
+  "personal",
+  "notification",
+  "promotion",
+  "other",
+] as const;
+export type AiCategory = (typeof AI_CATEGORIES)[number];
+
 export const EDITOR_FORMATS = ["text", "markdown", "html"] as const;
 export type EditorFormat = (typeof EDITOR_FORMATS)[number];
 

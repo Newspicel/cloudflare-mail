@@ -39,6 +39,9 @@ interface MailboxSettings {
   spamFilter: SpamLevel;
   spamAiTokenCap: number | null;
   spamUsage: { period: string; calls: number; tokens: number } | null;
+  aiFeatures: boolean;
+  aiTokenCap: number | null;
+  aiUsage: { period: string; calls: number; tokens: number } | null;
   pgpMode: PgpMode;
   pgpFingerprint: string | null;
   pgpPublicKey: string | null;
@@ -112,6 +115,8 @@ export function MailboxSettingsForm({
   const [signature, setSignature] = useState("");
   const [spamFilter, setSpamFilter] = useState<SpamLevel>("standard");
   const [aiCap, setAiCap] = useState("");
+  const [aiFeatures, setAiFeatures] = useState(false);
+  const [aiFeatureCap, setAiFeatureCap] = useState("");
 
   useEffect(() => {
     if (settingsQ.data) {
@@ -120,6 +125,8 @@ export function MailboxSettingsForm({
       setSignature(settingsQ.data.signature ?? "");
       setSpamFilter(settingsQ.data.spamFilter ?? "standard");
       setAiCap(settingsQ.data.spamAiTokenCap ? String(settingsQ.data.spamAiTokenCap) : "");
+      setAiFeatures(settingsQ.data.aiFeatures ?? false);
+      setAiFeatureCap(settingsQ.data.aiTokenCap ? String(settingsQ.data.aiTokenCap) : "");
     }
   }, [settingsQ.data]);
 
@@ -131,7 +138,14 @@ export function MailboxSettingsForm({
           displayName: displayName.trim() || null,
           replyTo: replyTo.trim() || null,
           signature: signature.trim() ? signature : null,
-          ...(admin ? { spamFilter, spamAiTokenCap: aiCap.trim() ? Number(aiCap) : null } : {}),
+          ...(admin
+            ? {
+                spamFilter,
+                spamAiTokenCap: aiCap.trim() ? Number(aiCap) : null,
+                aiFeatures,
+                aiTokenCap: aiFeatureCap.trim() ? Number(aiFeatureCap) : null,
+              }
+            : {}),
         }),
       }),
     onSuccess: () => {
@@ -226,6 +240,50 @@ export function MailboxSettingsForm({
                   min={0}
                   value={aiCap}
                   onChange={(e) => setAiCap(e.target.value)}
+                  placeholder="Unlimited"
+                />
+              </Field>
+            )}
+            {type !== "service" && admin && (
+              <Field
+                label="AI features"
+                hint="Summarise & categorise inbound mail in the list, plus smart replies and thread summaries. Uses Workers AI."
+              >
+                <Select
+                  value={aiFeatures ? "on" : "off"}
+                  onValueChange={(v) => setAiFeatures(v === "on")}
+                >
+                  <SelectTrigger aria-label="AI features">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="off">Off</SelectItem>
+                    <SelectItem value="on">On</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+            )}
+            {type !== "service" && !admin && (
+              <Field label="AI features" hint="Set by your administrator.">
+                <div className="rounded-md border bg-muted/40 px-2.5 py-1.5 text-[13px] text-muted-foreground">
+                  {settingsQ.data?.aiFeatures ? "On" : "Off"}
+                </div>
+              </Field>
+            )}
+            {admin && aiFeatures && type !== "service" && (
+              <Field
+                label="AI monthly token budget"
+                hint={
+                  settingsQ.data?.aiUsage
+                    ? `Used ${settingsQ.data.aiUsage.tokens.toLocaleString()} tokens across ${settingsQ.data.aiUsage.calls} calls this month (${settingsQ.data.aiUsage.period}). Features pause when the budget is reached; mail still delivers.`
+                    : "Leave empty for unlimited. Summaries run once per inbound message; replies and thread summaries only when requested."
+                }
+              >
+                <Input
+                  type="number"
+                  min={0}
+                  value={aiFeatureCap}
+                  onChange={(e) => setAiFeatureCap(e.target.value)}
                   placeholder="Unlimited"
                 />
               </Field>

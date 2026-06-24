@@ -63,6 +63,8 @@ export interface ComposeState {
   replyAll?: boolean;
   forwardMessage: MessageRow | null;
   initialTo?: string;
+  // Pre-fills the body (plain text). Used by AI smart-reply to seed a draft.
+  initialBody?: string;
   // When set, the composer reopens an existing server-persisted draft.
   draft?: DraftRow | null;
 }
@@ -304,11 +306,14 @@ export function ComposeForm({
   );
   // Body editor format. Default is a plain-text email; it only becomes an HTML
   // mail once rich formatting is actually used (or markdown is rendered).
+  // A seeded body (AI smart-reply) opens in plain text so it lands in the text
+  // buffer regardless of the user's default editor.
   const initialFormat: BodyFormat =
-    d?.format ?? (d?.markdown ? "markdown" : (prefs.composeDefaultMode ?? "text"));
+    d?.format ??
+    (d?.markdown ? "markdown" : s.initialBody ? "text" : (prefs.composeDefaultMode ?? "text"));
   const [mode, setMode] = useState<BodyFormat>(initialFormat);
   // `text` holds the plain/markdown source; `html` holds the rich-mode body.
-  const [text, setText] = useState(d && initialFormat !== "html" ? d.body : "");
+  const [text, setText] = useState(d && initialFormat !== "html" ? d.body : (s.initialBody ?? ""));
   const [html, setHtml] = useState(d && initialFormat === "html" ? d.body : "");
   const editorRef = useRef<RichEditorHandle>(null);
   const bodyTextareaRef = useRef<HTMLTextAreaElement>(null);
