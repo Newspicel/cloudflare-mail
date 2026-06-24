@@ -660,7 +660,7 @@ function MessageCard({
           {linkifyText(body.data?.text ?? msg.snippet)}
         </pre>
       )}
-      {body.data && body.data.attachments.length > 0 && (
+      {body.data?.attachments && body.data.attachments.length > 0 && (
         <MessageAttachments
           messageId={msg.id}
           attachments={body.data.attachments}
