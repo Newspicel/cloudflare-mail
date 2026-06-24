@@ -11,6 +11,7 @@ import { ColorPicker } from "./ui/color-picker.tsx";
 import { useConfirm } from "./ui/confirm.tsx";
 import { Input } from "./ui/input.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
+import { LabelChip } from "./ui.tsx";
 
 const DEFAULT_COLOR = "#64748b";
 
@@ -306,14 +307,7 @@ export function LabelChips({ messageId, className }: { messageId: string; classN
   return (
     <div className={cn("flex flex-wrap gap-1", className)}>
       {labels.map((l) => (
-        <span
-          key={l.id}
-          className="inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 font-medium text-[10px]"
-          style={{ borderColor: l.color, color: l.color }}
-        >
-          <span className="h-1.5 w-1.5 rounded-sm" style={{ backgroundColor: l.color }} />
-          {l.name}
-        </span>
+        <LabelChip key={l.id} name={l.name} color={l.color} />
       ))}
     </div>
   );

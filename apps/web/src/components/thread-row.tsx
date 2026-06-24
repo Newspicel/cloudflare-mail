@@ -7,6 +7,7 @@ import { clearThreadDragGhost, setThreadDrag } from "@/lib/dnd.ts";
 import { useDateTimeFmt, useUserPrefs } from "@/lib/prefs.ts";
 import type { MailView, MessageLabel, ThreadRow } from "@/lib/queries.ts";
 import { formatStamp } from "@/lib/time.ts";
+import { LabelChip } from "./ui.tsx";
 
 // Subtle per-category chip colours for the AI auto-category. Kept muted so they
 // don't compete with user labels; `other` is never rendered.
@@ -154,16 +155,7 @@ export function ThreadRowView({
               {category}
             </span>
           )}
-          {labels?.map((l) => (
-            <span
-              key={l.id}
-              className="inline-flex items-center gap-1 rounded-full border px-1.5 py-px font-medium text-[10px]"
-              style={{ borderColor: l.color, color: l.color }}
-            >
-              <span className="h-1.5 w-1.5 rounded-sm" style={{ backgroundColor: l.color }} />
-              {l.name}
-            </span>
-          ))}
+          {labels?.map((l) => <LabelChip key={l.id} name={l.name} color={l.color} />)}
         </div>
       )}
     </>

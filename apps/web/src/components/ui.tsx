@@ -36,6 +36,47 @@ export function EmptyState({
   );
 }
 
+/** Unread-count pill. Clamps at 99+ and hides itself at zero. */
+export function UnreadBadge({ count, className }: { count: number; className?: string }) {
+  if (count <= 0) return null;
+  return (
+    <span
+      role="img"
+      aria-label={`${count} unread`}
+      className={cn(
+        "flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 font-semibold text-[10px] text-primary-foreground tabular-nums leading-none",
+        className,
+      )}
+    >
+      {count > 99 ? "99+" : count}
+    </span>
+  );
+}
+
+/** Pill for a user-defined label, tinted with the label's own color. */
+export function LabelChip({
+  name,
+  color,
+  className,
+}: {
+  name: string;
+  color: string;
+  className?: string;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full border px-1.5 py-px font-medium text-[10px]",
+        className,
+      )}
+      style={{ borderColor: color, color }}
+    >
+      <span className="h-1.5 w-1.5 rounded-sm" style={{ backgroundColor: color }} />
+      {name}
+    </span>
+  );
+}
+
 const ROW_KEYS = ["r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8"];
 const CARD_KEYS = ["c1", "c2"];
 
