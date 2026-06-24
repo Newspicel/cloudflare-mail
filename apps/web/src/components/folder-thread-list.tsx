@@ -161,7 +161,7 @@ function FolderRowItem({
   ];
 
   return (
-    <RowContextMenu title={thread.subjectNorm || "(no subject)"} actions={menuActions}>
+    <RowContextMenu actions={menuActions}>
       <ThreadRowView
         thread={thread}
         link={{ kind: "folder", folderId }}
