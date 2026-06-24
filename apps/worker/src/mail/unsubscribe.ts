@@ -26,11 +26,29 @@ function parseTargets(header: string): { mailto?: string; https?: string } {
   return out;
 }
 
+// True when `deliveredTo` is this mailbox's address (base local part + domain),
+// optionally carrying a "+tag". Mirrors the plus-addressing match in receive.ts
+// so we only ever send from an address we actually own.
+function deliveredToMatches(
+  deliveredTo: string | null,
+  baseLocal: string,
+  domainName: string,
+): boolean {
+  if (!deliveredTo) return false;
+  const at = deliveredTo.lastIndexOf("@");
+  if (at < 1) return false;
+  const local = deliveredTo.slice(0, at);
+  const dom = deliveredTo.slice(at + 1);
+  if (dom.toLowerCase() !== domainName.toLowerCase()) return false;
+  return (local.split("+")[0] || local).toLowerCase() === baseLocal.toLowerCase();
+}
+
 export async function performUnsubscribe(
   env: Env,
   db: DB,
   msg: {
     mailboxId: string;
+    deliveredTo: string | null;
     listUnsubscribe: string | null;
     listUnsubscribePost: string | null;
   },
@@ -44,7 +62,7 @@ export async function performUnsubscribe(
   }
 
   if (targets.mailto) {
-    await sendMailto(env, db, msg.mailboxId, targets.mailto);
+    await sendMailto(env, db, msg.mailboxId, msg.deliveredTo, targets.mailto);
     return { status: "unsubscribed", method: "email" };
   }
 
@@ -74,7 +92,13 @@ async function oneClickPost(rawUrl: string): Promise<void> {
 
 // Send the unsubscribe request as a plain email from the mailbox. The target is
 // the sender's (often per-subscriber) unsubscribe address.
-async function sendMailto(env: Env, db: DB, mailboxId: string, mailto: string): Promise<void> {
+async function sendMailto(
+  env: Env,
+  db: DB,
+  mailboxId: string,
+  deliveredTo: string | null,
+  mailto: string,
+): Promise<void> {
   let url: URL;
   try {
     url = new URL(mailto);
@@ -99,7 +123,15 @@ async function sendMailto(env: Env, db: DB, mailboxId: string, mailto: string): 
     columns: { name: true },
   });
   if (!dom) throw new HTTPException(500, { message: "domain missing" });
-  const fromAddr = `${mb.localPart}@${dom.name}`;
+
+  // Newsletters are often subscribed under a plus/sub-address ("hi+tag@…") and
+  // the sender keys the opt-out on that exact address. Send from the address the
+  // mail was actually delivered to when it resolves back to this mailbox; fall
+  // back to the bare base address otherwise.
+  const baseAddr = `${mb.localPart}@${dom.name}`;
+  const fromAddr = deliveredToMatches(deliveredTo, mb.localPart, dom.name)
+    ? (deliveredTo as string)
+    : baseAddr;
 
   try {
     await env.EMAIL.send({
