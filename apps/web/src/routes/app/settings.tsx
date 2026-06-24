@@ -2,7 +2,7 @@ import type { MailView, UserPrefs } from "@cfmail/shared";
 import { has, Perm } from "@cfmail/shared/permissions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { KeyRound, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, KeyRound, Trash2 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -456,15 +456,16 @@ function PasskeyRowEditor({
         />
         <div className="mt-1 text-[12px] text-muted-foreground">Added {created}</div>
       </div>
-      <button
-        type="button"
+      <Button
+        variant="ghost"
+        size="icon-sm"
         aria-label="Delete passkey"
         disabled={busy}
         onClick={onDelete}
-        className="rounded p-1.5 text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+        className="hover:bg-destructive/10 hover:text-destructive"
       >
-        <Trash2 className="size-3.5" />
-      </button>
+        <Trash2 />
+      </Button>
     </li>
   );
 }
@@ -841,33 +842,34 @@ function FolderRowEditor({
         className="min-w-0 flex-1"
       />
       <div className="flex shrink-0 items-center gap-0.5">
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="icon-sm"
           aria-label="Move up"
           disabled={isFirst || busy}
           onClick={onMoveUp}
-          className="rounded px-1.5 py-1 text-[13px] text-muted-foreground transition hover:bg-muted disabled:opacity-30"
         >
-          ↑
-        </button>
-        <button
-          type="button"
+          <ArrowUp />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-sm"
           aria-label="Move down"
           disabled={isLast || busy}
           onClick={onMoveDown}
-          className="rounded px-1.5 py-1 text-[13px] text-muted-foreground transition hover:bg-muted disabled:opacity-30"
         >
-          ↓
-        </button>
-        <button
-          type="button"
+          <ArrowDown />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-sm"
           aria-label={`Delete ${folder.name}`}
           disabled={busy}
           onClick={onDelete}
-          className="rounded p-1.5 text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+          className="hover:bg-destructive/10 hover:text-destructive"
         >
-          <Trash2 className="size-3.5" />
-        </button>
+          <Trash2 />
+        </Button>
       </div>
     </li>
   );
