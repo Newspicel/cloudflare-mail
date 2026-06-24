@@ -504,8 +504,8 @@ export const searchFilters = z.object({
   direction: MessageDirection.optional(),
   hasAttachment: boolParam,
   folder: SearchFolder.optional().default("any"),
-  // Blank / "all" → every readable mailbox; a real id → just that one.
-  mailboxId: z.string().trim().max(64).optional(),
+  // Blank / "all" → every readable mailbox; a comma-separated list of ids → just those.
+  mailboxId: z.string().trim().max(2048).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional().default(25),
   page: z.coerce.number().int().min(0).max(1000).optional().default(0),
 });

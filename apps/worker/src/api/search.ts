@@ -45,12 +45,19 @@ export function searchRoutes() {
       if (has(m.perms, Perm.READ)) addressById.set(m.id, `${m.localPart}@${m.domainName}`);
     }
 
-    // Scope to a single mailbox when requested ("all"/blank = every readable one).
+    // Scope to the requested mailbox(es) ("all"/blank = every readable one; a
+    // comma-separated list of ids = just those, intersected with what's readable).
     if (f.mailboxId && f.mailboxId !== "all") {
-      const addr = addressById.get(f.mailboxId);
-      if (!addr) throw new HTTPException(403, { message: "forbidden" });
-      addressById.clear();
-      addressById.set(f.mailboxId, addr);
+      const wanted = new Set(
+        f.mailboxId
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+      );
+      for (const id of addressById.keys()) {
+        if (!wanted.has(id)) addressById.delete(id);
+      }
+      if (addressById.size === 0) throw new HTTPException(403, { message: "forbidden" });
     }
     if (addressById.size === 0) {
       return c.json({ results: [], hasMore: false } satisfies SearchResultsDto);
