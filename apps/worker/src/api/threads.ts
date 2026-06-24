@@ -9,6 +9,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
+import { collectThreadBlobKeys, deleteBlobs } from "../mail/blobs.ts";
 import { recomputeThreadUnread } from "../mail/threads.ts";
 import { requireUser } from "../middleware.ts";
 import {
@@ -216,6 +217,23 @@ export function threadsRoutes() {
       spam: patch.spam ?? th.spam,
       unreadCount,
     });
+  });
+
+  // Permanent delete: drop the thread for good (used by the Trash folder).
+  // Deleting the row cascades to messages/attachments via FKs; R2 blobs have no
+  // cascade, so collect and delete them first.
+  r.delete("/:id", async (c) => {
+    const db = dbFromCtx(c);
+    const user = c.get("user")!;
+    const id = c.req.param("id");
+
+    await requireEntityAccess(db, user.id, thread, id, Perm.WRITE);
+
+    const keys = await collectThreadBlobKeys(db, [id]);
+    await deleteBlobs(c.env, keys);
+    await db.delete(thread).where(eq(thread.id, id));
+
+    return c.json({ deleted: true });
   });
 
   return r;
