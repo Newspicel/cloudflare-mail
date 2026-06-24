@@ -22,6 +22,32 @@ interface CreateAuthOpts {
   baseURL: string;
 }
 
+// App preferences ride on the session user so /api/me returns them and
+// authClient.updateUser persists them. Value is a JSON string (UserPrefs).
+export const userAdditionalFields = {
+  preferences: { type: "string", required: false, input: true },
+} as const;
+
+// The Better Auth plugin list. Kept here (not inlined below) so the schema
+// drift test can ask Better Auth for the exact tables/columns these plugins
+// require and diff them against schema.ts. This is the single source of truth.
+export function authPlugins(baseURL: string) {
+  return [
+    admin({
+      defaultRole: "user",
+      adminRoles: ["admin"],
+    }),
+    twoFactor(),
+    // rpID/origin derive from the request-scoped baseURL (no hardcoded host),
+    // so passkeys bind to whatever domain the deployment is served on.
+    passkey({
+      rpID: new URL(baseURL).hostname,
+      rpName: "cfmail",
+      origin: baseURL,
+    }),
+  ];
+}
+
 export async function createAuth({ env, db, baseURL }: CreateAuthOpts) {
   const database = db ?? makeDB(env.DB);
   const secret = await getOrCreateAuthSecret(database);
@@ -72,11 +98,7 @@ export async function createAuth({ env, db, baseURL }: CreateAuthOpts) {
       resetPasswordTokenExpiresIn: 3600,
     },
     user: {
-      // App preferences ride on the session user so /api/me returns them and
-      // authClient.updateUser persists them. Value is a JSON string (UserPrefs).
-      additionalFields: {
-        preferences: { type: "string", required: false, input: true },
-      },
+      additionalFields: userAdditionalFields,
     },
     advanced: {
       crossSubDomainCookies: { enabled: false },
@@ -89,20 +111,7 @@ export async function createAuth({ env, db, baseURL }: CreateAuthOpts) {
       // read. Short TTL so admin bans / role changes still take effect fast.
       cookieCache: { enabled: true, maxAge: 60 },
     },
-    plugins: [
-      admin({
-        defaultRole: "user",
-        adminRoles: ["admin"],
-      }),
-      twoFactor(),
-      // rpID/origin derive from the request-scoped baseURL (no hardcoded host),
-      // so passkeys bind to whatever domain the deployment is served on.
-      passkey({
-        rpID: new URL(baseURL).hostname,
-        rpName: "cfmail",
-        origin: baseURL,
-      }),
-    ],
+    plugins: authPlugins(baseURL),
   });
 }
 
