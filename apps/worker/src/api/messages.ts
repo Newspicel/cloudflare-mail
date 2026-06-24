@@ -1,4 +1,4 @@
-import { blocklist, blockRequest, message } from "@cfmail/db/schema";
+import { attachment, blocklist, blockRequest, message } from "@cfmail/db/schema";
 import { Flag, setFlag } from "@cfmail/shared/flags";
 import { Perm } from "@cfmail/shared/permissions";
 import type { MessageBodyDto } from "@cfmail/shared/responses";
@@ -13,8 +13,10 @@ import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
 import { assertOwnedAttachmentKeys } from "../mail/attachment-keys.ts";
 import {
+  bareCid,
   MAX_IMAGE_BYTES,
   proxyRemoteContent,
+  rewriteInlineCids,
   safeRedirectFetch,
   verifyProxyUrl,
 } from "../mail/img-proxy.ts";
@@ -159,14 +161,33 @@ export function messagesRoutes() {
     const obj = await c.env.BLOBS.get(bodyKey);
     if (!obj) throw new HTTPException(404, { message: "blob missing" });
     const parsed = await parseMime(await obj.arrayBuffer());
+
+    const atts = await db
+      .select({
+        id: attachment.id,
+        filename: attachment.filename,
+        contentType: attachment.contentType,
+        sizeBytes: attachment.sizeBytes,
+        inline: attachment.inline,
+        contentId: attachment.contentId,
+      })
+      .from(attachment)
+      .where(eq(attachment.messageId, id));
+
     // Remote images are routed through `/proxy-image` so opening a message
-    // never leaks the reader's IP to the sender (tracking pixels).
-    const html = parsed.html
-      ? await proxyRemoteContent(parsed.html, await getOrCreateAuthSecret(db))
-      : null;
+    // never leaks the reader's IP to the sender (tracking pixels); inline `cid:`
+    // images are rewritten to the same-origin attachment route so they render.
+    let html: string | null = null;
+    if (parsed.html) {
+      html = await proxyRemoteContent(parsed.html, await getOrCreateAuthSecret(db));
+      const cidMap = new Map(
+        atts.filter((a) => a.contentId).map((a) => [bareCid(a.contentId!), a.id]),
+      );
+      html = await rewriteInlineCids(html, id, cidMap);
+    }
     // The raw `.eml` never changes once stored, so the parsed body is immutable.
     c.header("Cache-Control", "private, max-age=31536000, immutable");
-    return c.json({ html, text: parsed.text ?? null } satisfies MessageBodyDto);
+    return c.json({ html, text: parsed.text ?? null, attachments: atts } satisfies MessageBodyDto);
   });
 
   // Fetches a remote image referenced by a message body. Only URLs we signed
@@ -232,5 +253,46 @@ export function messagesRoutes() {
     return new Response(obj.body, { headers });
   });
 
+  // Serve a stored attachment's bytes. Inline (cid) images load this directly in
+  // the body iframe; `?download` forces a save dialog with the real filename.
+  r.get("/:id/attachments/:attId/raw", async (c) => {
+    const db = dbFromCtx(c);
+    const user = c.get("user")!;
+    const id = c.req.param("id");
+    const attId = c.req.param("attId");
+    // Gate on the parent message's mailbox RBAC, then confirm the attachment
+    // belongs to it — an attacker can't graft another message's attachment id on.
+    await requireEntityAccess(db, user.id, message, id, Perm.READ);
+    const att = await db.query.attachment.findFirst({
+      where: and(eq(attachment.id, attId), eq(attachment.messageId, id)),
+    });
+    if (!att) throw new HTTPException(404, { message: "not found" });
+    const obj = await c.env.BLOBS.get(att.r2Key);
+    if (!obj) throw new HTTPException(404, { message: "blob missing" });
+
+    const headers: Record<string, string> = {
+      "content-type": att.contentType,
+      // The bytes are opaque user data — forbid sniffing them into active content
+      // and deny any sub-resource loads if a viewer ever renders them as a doc.
+      "content-security-policy": "default-src 'none'; sandbox",
+      "x-content-type-options": "nosniff",
+      "cache-control": "private, max-age=31536000, immutable",
+    };
+    if (c.req.query("download") !== undefined) {
+      headers["content-disposition"] = contentDisposition(att.filename);
+    }
+    return new Response(obj.body, { headers });
+  });
+
   return r;
+}
+
+// RFC 6266 Content-Disposition for a download: an ASCII-folded fallback plus a
+// UTF-8 `filename*` so non-ASCII names survive. CR/LF/quotes are stripped to
+// keep a crafted filename from injecting headers.
+function contentDisposition(filename: string): string {
+  const clean = filename.replace(/[\r\n"\\]/g, "").trim() || "attachment";
+  const ascii = clean.replace(/[^\x20-\x7e]/g, "_");
+  const encoded = encodeURIComponent(clean);
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`;
 }

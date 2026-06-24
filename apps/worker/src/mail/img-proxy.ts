@@ -173,6 +173,106 @@ export async function proxyRemoteContent(html: string, secret: string): Promise<
   return await res.text();
 }
 
+// ─── Inline (cid:) image rewriting ──────────────────────────────────────────
+
+// Bare Content-ID: strip the surrounding angle brackets the header carries so a
+// `cid:foo@bar` reference matches a stored `<foo@bar>`.
+function bareCid(id: string): string {
+  return id.trim().replace(/^<|>$/g, "");
+}
+
+// Resolve a single `cid:` reference to its same-origin attachment route, or null
+// if it isn't a cid (e.g. an already-proxied http url, a data: uri) or no stored
+// attachment carries that Content-ID.
+function cidToUrl(raw: string, messageId: string, cidMap: Map<string, string>): string | null {
+  const trimmed = raw.trim();
+  if (!/^cid:/i.test(trimmed)) return null;
+  const attId = cidMap.get(bareCid(trimmed.slice(4)));
+  return attId ? `/api/messages/${messageId}/attachments/${attId}/raw` : null;
+}
+
+// Rewrite each `cid:` candidate in a `srcset` (`url descriptor, …`), leaving the
+// descriptors and any non-cid candidates untouched.
+function rewriteCidSrcset(srcset: string, messageId: string, cidMap: Map<string, string>): string {
+  return srcset
+    .split(",")
+    .map((candidate) => {
+      const trimmed = candidate.trim();
+      if (!trimmed) return null;
+      const [url, ...rest] = trimmed.split(/\s+/);
+      const mapped = url ? cidToUrl(url, messageId, cidMap) : null;
+      return [mapped ?? url, ...rest].join(" ");
+    })
+    .filter(Boolean)
+    .join(", ");
+}
+
+// Rewrite `cid:` references inside a CSS string (a `style` attribute or `<style>`
+// block) — i.e. `background:url(cid:…)`. Non-cid `url(…)` were already proxied.
+function rewriteCidCss(css: string, messageId: string, cidMap: Map<string, string>): string {
+  return css.replace(CSS_URL_RE, (full, _q, u) => {
+    const mapped = cidToUrl(u, messageId, cidMap);
+    return mapped ? `url("${mapped}")` : full;
+  });
+}
+
+/**
+ * Rewrite every inline `cid:` reference in a body to its same-origin attachment
+ * route so embedded images render: `<img>` `src`/`srcset`, the legacy
+ * `background` attribute, and CSS `url(cid:…)` in inline `style` attributes and
+ * `<style>` blocks. `cidMap` maps bare Content-IDs to their attachment id;
+ * unmatched cids are left as-is (they just won't load). Remote `http(s)` refs
+ * are untouched here — `proxyRemoteContent` already handled those.
+ */
+export async function rewriteInlineCids(
+  html: string,
+  messageId: string,
+  cidMap: Map<string, string>,
+): Promise<string> {
+  if (cidMap.size === 0) return html;
+  let styleBuf = "";
+  const res = new HTMLRewriter()
+    .on("img", {
+      element(el) {
+        const src = el.getAttribute("src");
+        const mapped = src ? cidToUrl(src, messageId, cidMap) : null;
+        if (mapped) el.setAttribute("src", mapped);
+        const srcset = el.getAttribute("srcset");
+        if (srcset?.includes("cid:")) {
+          el.setAttribute("srcset", rewriteCidSrcset(srcset, messageId, cidMap));
+        }
+      },
+    })
+    .on("*", {
+      element(el) {
+        const style = el.getAttribute("style");
+        if (style?.includes("cid:")) {
+          el.setAttribute("style", rewriteCidCss(style, messageId, cidMap));
+        }
+        const bg = el.getAttribute("background");
+        const mapped = bg ? cidToUrl(bg, messageId, cidMap) : null;
+        if (mapped) el.setAttribute("background", mapped);
+      },
+    })
+    .on("style", {
+      // Text arrives in chunks; buffer the whole node, then rewrite once.
+      text(chunk) {
+        styleBuf += chunk.text;
+        if (chunk.lastInTextNode) {
+          const rewritten = rewriteCidCss(styleBuf, messageId, cidMap);
+          styleBuf = "";
+          chunk.replace(rewritten, { html: true });
+        } else {
+          chunk.remove();
+        }
+      },
+    })
+    .transform(new Response(html));
+  return await res.text();
+}
+
+export { bareCid };
+
 // ─── SSRF guard ─────────────────────────────────────────────────────────────
 
 // The SSRF host guard lives in `../ssrf.ts` so the push validator shares it.

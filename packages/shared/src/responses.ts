@@ -128,10 +128,22 @@ export interface MessageLabelDto {
   color: string;
 }
 
+/** A stored attachment's metadata (bytes are fetched from the `/raw` route). */
+export interface AttachmentDto {
+  id: string;
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
+  /** Inline (cid) part embedded in the HTML body rather than a real attachment. */
+  inline: boolean;
+  contentId: string | null;
+}
+
 /** Full message body, parsed on demand from the raw `.eml` in R2. */
 export interface MessageBodyDto {
   html: string | null;
   text: string | null;
+  attachments: AttachmentDto[];
 }
 
 /**
