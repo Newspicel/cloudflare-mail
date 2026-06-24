@@ -93,6 +93,46 @@ describe("parseICalendar", () => {
     expect(event?.rrule).toBe("FREQ=WEEKLY;BYDAY=MO");
   });
 
+  it("extracts a Google Meet link from X-GOOGLE-CONFERENCE", () => {
+    const event = parseICalendar(
+      ics([
+        "BEGIN:VEVENT",
+        "SUMMARY:Sync",
+        "DTSTART:20260101T090000Z",
+        "LOCATION:https://meet.google.com/abc-defg-hij",
+        "X-GOOGLE-CONFERENCE:https://meet.google.com/abc-defg-hij",
+        "END:VEVENT",
+      ]),
+    );
+    expect(event?.meetingUrl).toBe("https://meet.google.com/abc-defg-hij");
+  });
+
+  it("finds a Zoom link buried in the description", () => {
+    const event = parseICalendar(
+      ics([
+        "BEGIN:VEVENT",
+        "SUMMARY:Call",
+        "DTSTART:20260101T090000Z",
+        "DESCRIPTION:Join here: https://example.zoom.us/j/123456789?pwd=abc and dial in.",
+        "END:VEVENT",
+      ]),
+    );
+    expect(event?.meetingUrl).toBe("https://example.zoom.us/j/123456789?pwd=abc");
+  });
+
+  it("leaves meetingUrl null for a plain location", () => {
+    const event = parseICalendar(
+      ics([
+        "BEGIN:VEVENT",
+        "SUMMARY:Lunch",
+        "DTSTART:20260101T090000Z",
+        "LOCATION:Cafe downtown",
+        "END:VEVENT",
+      ]),
+    );
+    expect(event?.meetingUrl).toBeNull();
+  });
+
   it("returns null when there is no VEVENT", () => {
     expect(parseICalendar("BEGIN:VCALENDAR\r\nEND:VCALENDAR")).toBeNull();
     expect(parseICalendar("not a calendar")).toBeNull();

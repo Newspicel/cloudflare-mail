@@ -86,6 +86,37 @@ function parseDate(
   return { iso: `${y}-${mo}-${d}T${h}:${mi}:${s}${z ?? ""}`, allDay: false };
 }
 
+// Hosts whose URLs we surface as a "Join meeting" action. Clients stash the
+// join link in different places — Google in X-GOOGLE-CONFERENCE, others in
+// LOCATION or DESCRIPTION — so we scan all of them for a known provider.
+const MEETING_HOSTS = [
+  /\bzoom\.us\b/i,
+  /\bzoomgov\.com\b/i,
+  /\bmeet\.google\.com\b/i,
+  /\bteams\.microsoft\.com\b/i,
+  /\bteams\.live\.com\b/i,
+  /\bmeet\.jit\.si\b/i,
+  /\bwebex\.com\b/i,
+  /\bwhereby\.com\b/i,
+  /\bgotomeeting\.com\b/i,
+  /\bgotomeet\.me\b/i,
+  /\bbluejeans\.com\b/i,
+  /\bchime\.aws\b/i,
+];
+
+const URL_RE = /https?:\/\/[^\s<>"]+/gi;
+
+function findMeetingUrl(...texts: (string | null)[]): string | null {
+  for (const text of texts) {
+    if (!text) continue;
+    for (const raw of text.match(URL_RE) ?? []) {
+      const url = raw.replace(/[)\].,;]+$/, "");
+      if (MEETING_HOSTS.some((re) => re.test(url))) return url;
+    }
+  }
+  return null;
+}
+
 function parsePerson(line: Line): {
   name: string | null;
   email: string | null;
@@ -115,7 +146,9 @@ export function parseICalendar(ics: string): CalendarEventDto | null {
     organizer: null,
     attendees: [],
     rrule: null,
+    meetingUrl: null,
   };
+  let conference: string | null = null;
 
   for (const line of lines) {
     if (line.name === "METHOD") {
@@ -162,10 +195,14 @@ export function parseICalendar(ics: string): CalendarEventDto | null {
       case "RRULE":
         event.rrule = line.value;
         break;
+      case "X-GOOGLE-CONFERENCE":
+        conference = line.value.trim();
+        break;
     }
   }
 
   if (!sawEvent || (!event.start && !event.summary)) return null;
   event.method = method;
+  event.meetingUrl = findMeetingUrl(conference, event.location, event.description);
   return event;
 }
