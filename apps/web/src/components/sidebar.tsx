@@ -26,6 +26,7 @@ import { Badge } from "./ui/badge.tsx";
 import { Button } from "./ui/button.tsx";
 import { useConfirmHelpers } from "./ui/confirm.tsx";
 import { Sheet, SheetContent } from "./ui/sheet.tsx";
+import { UnreadBadge } from "./ui.tsx";
 
 const GROUP_META: Record<
   MailboxSummary["type"],
@@ -167,15 +168,7 @@ function SidebarBody({ onClose }: { onClose?: () => void }) {
                 <span className={cn("flex items-center gap-2", totalUnread > 0 && "font-medium")}>
                   <Mails className="h-3.5 w-3.5 text-muted-foreground" /> All Mail
                 </span>
-                {totalUnread > 0 && (
-                  <span
-                    className="ml-2 flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-primary px-1 font-semibold text-[10px] text-primary-foreground tabular-nums leading-none"
-                    role="img"
-                    aria-label={`${totalUnread} unread`}
-                  >
-                    {totalUnread > 99 ? "99+" : totalUnread}
-                  </span>
-                )}
+                <UnreadBadge count={totalUnread} className="ml-2 shrink-0" />
               </Link>
             </li>
           </ul>
@@ -224,15 +217,7 @@ function SidebarBody({ onClose }: { onClose?: () => void }) {
                             </span>
                           )}
                           {m.expiresAt && <TtlBadge expiresAt={m.expiresAt} />}
-                          {m.unread > 0 && (
-                            <span
-                              className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 font-semibold text-[10px] text-primary-foreground tabular-nums leading-none"
-                              role="img"
-                              aria-label={`${m.unread} unread`}
-                            >
-                              {m.unread > 99 ? "99+" : m.unread}
-                            </span>
-                          )}
+                          <UnreadBadge count={m.unread} />
                         </span>
                       </Link>
                       {canDelete && (

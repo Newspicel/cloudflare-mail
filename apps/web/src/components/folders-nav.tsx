@@ -11,6 +11,7 @@ import { keys } from "@/lib/query-keys.ts";
 import { useFileThread } from "@/lib/use-folder-mutations.ts";
 import { useConfirmHelpers } from "./ui/confirm.tsx";
 import { Input } from "./ui/input.tsx";
+import { UnreadBadge } from "./ui.tsx";
 
 export function FoldersNav({ onClose }: { onClose?: () => void }) {
   const { data } = useQuery(foldersQuery);
@@ -142,15 +143,7 @@ export function FoldersNav({ onClose }: { onClose?: () => void }) {
                     <span className="truncate">{f.name}</span>
                   </span>
                   <span className="ml-2 flex shrink-0 items-center gap-1 group-hover/row:invisible">
-                    {f.unread > 0 && (
-                      <span
-                        className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 font-semibold text-[10px] text-primary-foreground tabular-nums leading-none"
-                        role="img"
-                        aria-label={`${f.unread} unread`}
-                      >
-                        {f.unread > 99 ? "99+" : f.unread}
-                      </span>
-                    )}
+                    <UnreadBadge count={f.unread} />
                   </span>
                 </Link>
               )}

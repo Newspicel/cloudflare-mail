@@ -13,6 +13,7 @@ import {
 import { folderCountsQuery, MAIL_VIEWS, type MailView } from "@/lib/queries.ts";
 import { Tabs, TabsIndicator, TabsList, TabsTab } from "./ui/tabs.tsx";
 import { Tooltip } from "./ui/tooltip.tsx";
+import { UnreadBadge } from "./ui.tsx";
 
 export const FOLDER_META: Record<MailView, { label: string; icon: LucideIcon; empty: string }> = {
   inbox: { label: "Inbox", icon: Inbox, empty: "No conversations yet." },
@@ -45,11 +46,10 @@ export function FolderTabs({ mailboxId, view }: { mailboxId: string; view: MailV
                 }
               >
                 <m.icon />
-                {unread > 0 && (
-                  <span className="-top-1 -right-1 absolute flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-1 font-medium text-[9px] text-primary-foreground tabular-nums leading-none">
-                    {unread > 99 ? "99+" : unread}
-                  </span>
-                )}
+                <UnreadBadge
+                  count={unread}
+                  className="-top-1 -right-1 absolute h-3.5 min-w-3.5 font-medium text-[9px]"
+                />
               </TabsTab>
             </Tooltip>
           );
