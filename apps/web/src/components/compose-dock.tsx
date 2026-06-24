@@ -297,13 +297,13 @@ export function ComposeForm({
     [sendable],
   );
   // Custom plus-aliases the user typed in compose, so they stay selectable.
-  const [customAliases, setCustomAliases] = useState<
-    { address: string; mailboxId: string }[]
-  >(() => {
-    if (d?.fromAddress && plusBase(d.fromAddress))
-      return [{ address: d.fromAddress, mailboxId: d.mailboxId }];
-    return [];
-  });
+  const [customAliases, setCustomAliases] = useState<{ address: string; mailboxId: string }[]>(
+    () => {
+      if (d?.fromAddress && plusBase(d.fromAddress))
+        return [{ address: d.fromAddress, mailboxId: d.mailboxId }];
+      return [];
+    },
+  );
   const [plusOpen, setPlusOpen] = useState(false);
   const [plusTag, setPlusTag] = useState("");
   // Selectable "From" addresses: each sendable mailbox, the plus-addressed
@@ -320,8 +320,7 @@ export function ComposeForm({
     )
       opts.push({ address: dt, mailboxId: mb.id });
     for (const c of customAliases)
-      if (!opts.some((o) => o.address.toLowerCase() === c.address.toLowerCase()))
-        opts.push(c);
+      if (!opts.some((o) => o.address.toLowerCase() === c.address.toLowerCase())) opts.push(c);
     return opts;
   }, [sendable, rep, customAliases]);
   const currentFrom = fromAddress ?? baseAddr(mailboxId);
