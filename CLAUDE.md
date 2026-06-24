@@ -40,3 +40,5 @@ Edit `schema.ts`, then `pnpm --filter @cfmail/db generate` to emit the `drizzle/
 - Push directly to `main`.
 - When a change touches an invariant above, ask before coding.
 - New rule worth keeping? Add it here as a rule, never as a state snapshot.
+- Always use Shadcn wherever possible for UI consistency. Don't invent new components or styles. (Also Search online for Components if missing before implementing new ones.)
+- Ignore changes you didn't make. Because multiple parrallel agents can run. Only commit your changes.
