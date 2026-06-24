@@ -10,7 +10,7 @@ export function Calendar({ className, classNames, showOutsideDays = true, ...pro
     <DayPicker
       showOutsideDays={showOutsideDays}
       weekStartsOn={1}
-      className={cn("p-2", className)}
+      className={cn("relative p-2", className)}
       classNames={{
         months: "flex flex-col gap-3",
         month: "relative flex flex-col gap-3",
