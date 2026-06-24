@@ -9,25 +9,30 @@ import { useFileThread } from "@/lib/use-folder-mutations.ts";
 import { Button } from "./ui/button.tsx";
 import { Input } from "./ui/input.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
+import { Tooltip } from "./ui/tooltip.tsx";
 
 interface Props {
   threadIds: string[];
   mailboxId: string;
   size?: "icon" | "icon-sm";
+  tooltip?: string;
   onMoved?: (folderName: string) => void;
 }
 
-export function MoveToFolderMenu({ threadIds, mailboxId, size = "icon", onMoved }: Props) {
+export function MoveToFolderMenu({ threadIds, mailboxId, size = "icon", tooltip, onMoved }: Props) {
   const [open, setOpen] = useState(false);
+  const trigger = (
+    <PopoverTrigger
+      render={
+        <Button variant="ghost" size={size} aria-label="Move to folder">
+          <FolderInput />
+        </Button>
+      }
+    />
+  );
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        render={
-          <Button variant="ghost" size={size} aria-label="Move to folder">
-            <FolderInput />
-          </Button>
-        }
-      />
+      {tooltip ? <Tooltip label={tooltip}>{trigger}</Tooltip> : trigger}
       <PopoverContent align="end" className="w-64 p-2">
         <MovePopover
           threadIds={threadIds}

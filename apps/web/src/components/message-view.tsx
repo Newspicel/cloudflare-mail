@@ -18,10 +18,12 @@ import {
   Download,
   Forward,
   Inbox,
+  Loader2,
   Lock,
   LockOpen,
   MailMinus,
   MapPin,
+  MessageSquareReply,
   Paperclip,
   Repeat,
   Reply,
@@ -272,6 +274,8 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
     return messages.filter((m) => !hasFlag(m.flags, Flag.TRASH));
   }, [messages, view, thread.trashed]);
 
+  const ai = useThreadAi(thread, visibleMessages);
+
   // Per-message actions depend on its state: a trashed message can be restored or
   // permanently deleted; a live message in a trashed thread can only be purged;
   // otherwise it can be soft-deleted into the Trash.
@@ -291,13 +295,19 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
           <h1 className="flex-1 truncate font-semibold text-[14px] tracking-tight">
             {messages[0]?.subject || thread.subjectNorm || "(no subject)"}
           </h1>
+          {!readOnly && ai.aiOn && <ThreadAiActions ai={ai} />}
           {!readOnly && messages.at(-1) && (
-            <LabelsMenu mailboxId={thread.mailboxId} messageId={messages.at(-1)!.id} />
+            <LabelsMenu
+              mailboxId={thread.mailboxId}
+              messageId={messages.at(-1)!.id}
+              tooltip="Labels"
+            />
           )}
           {!readOnly && (
             <MoveToFolderMenu
               threadIds={[thread.id]}
               mailboxId={thread.mailboxId}
+              tooltip="Move to folder"
               onMoved={(folderName) => {
                 toast.success(`Moved to ${folderName}`);
                 nav({
@@ -360,10 +370,9 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
           )}
         </div>
 
+        {!readOnly && ai.aiOn && <ThreadAiResults ai={ai} />}
+
         <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-3 sm:p-4">
-          {!readOnly && (
-            <ThreadAiPanel key={thread.id} thread={thread} messages={visibleMessages} />
-          )}
           {visibleMessages.map((m, i) => (
             <MessageCard
               key={m.id}
@@ -387,9 +396,13 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
 }
 
 // AI helpers for an open thread: a one-tap thread summary and smart-reply
-// suggestions for the latest inbound message. Only shown when the mailbox has
-// AI features enabled; both calls are best-effort and degrade to a toast.
-function ThreadAiPanel({ thread, messages }: { thread: ThreadRow; messages: MessageRow[] }) {
+// suggestions for the latest inbound message. The triggers live in the thread
+// top bar (always visible) while results render just below it. Mutations reset
+// on thread change since MessageView stays mounted across threads. Both calls
+// are best-effort and degrade to a toast.
+type ThreadAi = ReturnType<typeof useThreadAi>;
+
+function useThreadAi(thread: ThreadRow, messages: MessageRow[]) {
   const { data: mbData } = useQuery(mailboxesQuery);
   const aiOn = mbData?.mailboxes.find((m) => m.id === thread.mailboxId)?.aiFeatures ?? false;
   const lastInbound = useMemo(
@@ -408,42 +421,61 @@ function ThreadAiPanel({ thread, messages }: { thread: ThreadRow; messages: Mess
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Couldn't draft replies"),
   });
 
-  if (!aiOn) return null;
+  const reset = summarize.reset;
+  const resetReply = smartReply.reset;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset on thread switch
+  useEffect(() => {
+    reset();
+    resetReply();
+  }, [thread.id, reset, resetReply]);
+
+  return { aiOn, lastInbound, summarize, smartReply };
+}
+
+function ThreadAiActions({ ai }: { ai: ThreadAi }) {
+  const { lastInbound, summarize, smartReply } = ai;
+  return (
+    <>
+      <IconButton
+        icon={summarize.isPending ? Loader2 : Sparkles}
+        onClick={() => summarize.mutate()}
+        disabled={summarize.isPending}
+        label={summarize.isPending ? "Summarizing…" : "Summarize thread"}
+        className={summarize.isPending ? "[&_svg]:animate-spin" : undefined}
+      />
+      {lastInbound && (
+        <IconButton
+          icon={smartReply.isPending ? Loader2 : MessageSquareReply}
+          onClick={() => smartReply.mutate()}
+          disabled={smartReply.isPending}
+          label={smartReply.isPending ? "Drafting…" : "Suggest replies"}
+          className={smartReply.isPending ? "[&_svg]:animate-spin" : undefined}
+        />
+      )}
+    </>
+  );
+}
+
+function ThreadAiResults({ ai }: { ai: ThreadAi }) {
+  const { lastInbound, summarize, smartReply } = ai;
+  if (!summarize.isSuccess && !smartReply.isSuccess) return null;
 
   const bullets = summarize.data?.bullets ?? [];
   const suggestions = smartReply.data?.suggestions ?? [];
 
   return (
-    <div className="space-y-2 rounded-lg border border-dashed bg-muted/30 p-2.5 text-[13px]">
-      <div className="flex flex-wrap items-center gap-2">
-        <Sparkles className="h-3.5 w-3.5 text-muted-foreground" />
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={summarize.isPending}
-          onClick={() => summarize.mutate()}
-        >
-          {summarize.isPending ? "Summarizing…" : "Summarize thread"}
-        </Button>
-        {lastInbound && (
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={smartReply.isPending}
-            onClick={() => smartReply.mutate()}
-          >
-            {smartReply.isPending ? "Drafting…" : "Suggest replies"}
-          </Button>
-        )}
-      </div>
+    <div className="shrink-0 space-y-2 border-b bg-muted/30 px-3 py-2.5 text-[13px] sm:px-4">
       {summarize.isSuccess && (
-        <ul className="ml-1 list-disc space-y-0.5 pl-4 text-muted-foreground">
-          {bullets.length ? (
-            bullets.map((b) => <li key={b}>{b}</li>)
-          ) : (
-            <li className="list-none">No summary available.</li>
-          )}
-        </ul>
+        <div className="flex items-start gap-2">
+          <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground">
+            {bullets.length ? (
+              bullets.map((b) => <li key={b}>{b}</li>)
+            ) : (
+              <li className="list-none">No summary available.</li>
+            )}
+          </ul>
+        </div>
       )}
       {smartReply.isSuccess && lastInbound && (
         <div className="flex flex-col gap-1.5">
