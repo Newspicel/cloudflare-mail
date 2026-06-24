@@ -3,7 +3,6 @@ import { type LucideIcon, Mails } from "lucide-react";
 import type * as React from "react";
 import { useCallback, useLayoutEffect, useRef } from "react";
 import { cn } from "@/lib/cn.ts";
-import { clearThreadDragGhost, setThreadDrag } from "@/lib/dnd.ts";
 import { useDateTimeFmt, useUserPrefs } from "@/lib/prefs.ts";
 import type { MailView, MessageLabel, ThreadRow } from "@/lib/queries.ts";
 import { formatStamp } from "@/lib/time.ts";
@@ -40,8 +39,7 @@ const CATEGORY_CLASS: Record<string, string> = {
   promotion: "bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400",
 };
 
-// Where the row links to. The shape also decides the drag payload (folder rows
-// carry their origin) so both list flavors share one row body.
+// Where the row links to; both list flavors share one row body.
 type RowLink =
   | { kind: "mailbox"; mailboxId: string; view: MailView }
   | { kind: "folder"; folderId: string };
@@ -110,13 +108,6 @@ export function ThreadRowView({
   useLayoutEffect(() => {
     if (node.current && dataIndex !== undefined) remeasure?.(dataIndex, node.current);
   }, [heightKey, dataIndex, remeasure]);
-
-  const onDragStart = (e: React.DragEvent) =>
-    setThreadDrag(e, {
-      threadId: thread.id,
-      mailboxId: thread.mailboxId,
-      fromFolderId: link.kind === "folder" ? link.folderId : undefined,
-    });
 
   const { state: sw, handlers } = useSwipeRow({
     onSwipeRight: swipe?.right?.onCommit,
@@ -196,9 +187,6 @@ export function ThreadRowView({
       ref={setRow}
       data-index={dataIndex}
       style={style}
-      draggable
-      onDragStart={onDragStart}
-      onDragEnd={clearThreadDragGhost}
       className="group relative flex items-stretch overflow-hidden border-b bg-card"
     >
       {swipe?.right && sw.dx > 0 && (

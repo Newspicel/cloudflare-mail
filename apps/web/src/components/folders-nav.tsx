@@ -1,14 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { Folder, FolderPlus, Trash2 } from "lucide-react";
-import { type DragEvent, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
-import { isThreadDrag, readThreadDrag } from "@/lib/dnd.ts";
 import { type FolderRow, foldersQuery } from "@/lib/queries.ts";
 import { keys } from "@/lib/query-keys.ts";
-import { useFileThread } from "@/lib/use-folder-mutations.ts";
 import { useConfirmHelpers } from "./ui/confirm.tsx";
 import { Input } from "./ui/input.tsx";
 import { UnreadBadge } from "./ui.tsx";
@@ -24,8 +22,6 @@ export function FoldersNav({ onClose }: { onClose?: () => void }) {
 
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
-
-  const file = useFileThread();
 
   const create = useMutation({
     mutationFn: () =>
@@ -56,22 +52,6 @@ export function FoldersNav({ onClose }: { onClose?: () => void }) {
       "The folder is removed; its conversations return to their mailboxes.",
     );
     if (ok) remove.mutate(f.id);
-  }
-
-  function onDrop(e: DragEvent, folderId: string) {
-    e.preventDefault();
-    const drag = readThreadDrag(e);
-    if (!drag || drag.fromFolderId === folderId) return;
-    const folderName = folders.find((f) => f.id === folderId)?.name ?? "folder";
-    file.mutate(
-      {
-        folderId,
-        threadIds: [drag.threadId],
-        mailboxId: drag.mailboxId,
-        fromFolderId: drag.fromFolderId,
-      },
-      { onSuccess: () => toast.success(`Moved to ${folderName}`) },
-    );
   }
 
   return (
@@ -117,37 +97,31 @@ export function FoldersNav({ onClose }: { onClose?: () => void }) {
       <ul className="flex flex-col gap-0.5">
         {folders.map((f) => (
           <li key={f.id} className="group/row relative">
-            <FolderDropTarget onDrop={(e) => onDrop(e, f.id)}>
-              {(over) => (
-                <Link
-                  to="/app/folder/$folderId"
-                  params={{ folderId: f.id }}
-                  onClick={() => onClose?.()}
-                  data-active-nav={(!over && activeId === f.id) || undefined}
-                  className={cn(
-                    "relative z-10 flex items-center justify-between rounded-md px-2 py-1.5 text-[13px] transition-colors",
-                    over
-                      ? "bg-primary/15 ring-1 ring-primary/40"
-                      : activeId === f.id
-                        ? "font-medium text-sidebar-accent-foreground"
-                        : "text-sidebar-foreground hover:bg-sidebar-accent/60",
-                  )}
-                >
-                  <span
-                    className={cn("flex min-w-0 items-center gap-2", f.unread > 0 && "font-medium")}
-                  >
-                    <span
-                      className="h-2.5 w-2.5 shrink-0 rounded-sm"
-                      style={{ backgroundColor: f.color }}
-                    />
-                    <span className="truncate">{f.name}</span>
-                  </span>
-                  <span className="ml-2 flex shrink-0 items-center gap-1 group-hover/row:invisible">
-                    <UnreadBadge count={f.unread} />
-                  </span>
-                </Link>
+            <Link
+              to="/app/folder/$folderId"
+              params={{ folderId: f.id }}
+              onClick={() => onClose?.()}
+              data-active-nav={activeId === f.id || undefined}
+              className={cn(
+                "relative z-10 flex items-center justify-between rounded-md px-2 py-1.5 text-[13px] transition-colors",
+                activeId === f.id
+                  ? "font-medium text-sidebar-accent-foreground"
+                  : "text-sidebar-foreground hover:bg-sidebar-accent/60",
               )}
-            </FolderDropTarget>
+            >
+              <span
+                className={cn("flex min-w-0 items-center gap-2", f.unread > 0 && "font-medium")}
+              >
+                <span
+                  className="h-2.5 w-2.5 shrink-0 rounded-sm"
+                  style={{ backgroundColor: f.color }}
+                />
+                <span className="truncate">{f.name}</span>
+              </span>
+              <span className="ml-2 flex shrink-0 items-center gap-1 group-hover/row:invisible">
+                <UnreadBadge count={f.unread} />
+              </span>
+            </Link>
             <button
               type="button"
               aria-label={`Delete ${f.name}`}
@@ -162,34 +136,5 @@ export function FoldersNav({ onClose }: { onClose?: () => void }) {
         ))}
       </ul>
     </section>
-  );
-}
-
-// Wraps a drop zone, tracking drag-over state and only accepting thread drags.
-function FolderDropTarget({
-  onDrop,
-  children,
-}: {
-  onDrop: (e: DragEvent) => void;
-  children: (over: boolean) => React.ReactNode;
-}) {
-  const [over, setOver] = useState(false);
-  return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: drag-and-drop zone; the link inside stays the keyboard-accessible target
-    <div
-      onDragOver={(e) => {
-        if (!isThreadDrag(e)) return;
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
-        if (!over) setOver(true);
-      }}
-      onDragLeave={() => setOver(false)}
-      onDrop={(e) => {
-        setOver(false);
-        onDrop(e);
-      }}
-    >
-      {children(over)}
-    </div>
   );
 }
