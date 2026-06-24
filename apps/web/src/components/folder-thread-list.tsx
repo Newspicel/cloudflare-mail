@@ -39,9 +39,8 @@ export function FolderThreadList({
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const virtualizer = useListVirtualizer(scrollRef, threads.length, {
-    hasMore,
-    loadingMore,
-    loadMore: () => loadMore?.(),
+    infinite: { hasMore, loadingMore, loadMore: () => loadMore?.() },
+    cacheKey: `f:${folderId}`,
   });
   const vItems = virtualizer.getVirtualItems();
 

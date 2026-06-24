@@ -52,9 +52,8 @@ export function ThreadList({
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const virtualizer = useListVirtualizer(scrollRef, threads.length, {
-    hasMore,
-    loadingMore,
-    loadMore: () => loadMore?.(),
+    infinite: { hasMore, loadingMore, loadMore: () => loadMore?.() },
+    cacheKey: `m:${mailboxId}:${view}`,
   });
   const vItems = virtualizer.getVirtualItems();
 
