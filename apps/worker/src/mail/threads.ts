@@ -156,11 +156,37 @@ export async function recomputeThreadUnread(db: DB, threadId: string): Promise<n
         eq(message.threadId, threadId),
         eq(message.direction, "in"),
         sql`(${message.flags} & ${Flag.SEEN}) = 0`,
+        // A trashed message shouldn't keep the thread's unread badge lit.
+        sql`(${message.flags} & ${Flag.TRASH}) = 0`,
       ),
     );
   const n = rows[0]?.c ?? 0;
   await db.update(thread).set({ unreadCount: n }).where(eq(thread.id, threadId));
   return n;
+}
+
+// Reconcile a thread's cached aggregates with its surviving messages after one
+// is permanently removed: message count, last-activity time, and unread badge.
+// Participants aren't pruned — like bumpThread, the list only ever grows.
+export async function recomputeThreadAfterMessageDelete(db: DB, threadId: string): Promise<void> {
+  const rows = await db.select({ c: count() }).from(message).where(eq(message.threadId, threadId));
+  const msgCount = rows[0]?.c ?? 0;
+
+  // lastMsgAt drives list ordering; deleting the newest message must move it
+  // back to the next survivor (mirrors bumpThread's sent/received timestamp).
+  const latest = await db.query.message.findFirst({
+    where: eq(message.threadId, threadId),
+    orderBy: desc(message.createdAt),
+    columns: { sentAt: true, receivedAt: true, createdAt: true },
+  });
+  const lastMsgAt = latest?.sentAt ?? latest?.receivedAt ?? latest?.createdAt;
+
+  await db
+    .update(thread)
+    .set({ msgCount, ...(lastMsgAt ? { lastMsgAt } : {}) })
+    .where(eq(thread.id, threadId));
+
+  await recomputeThreadUnread(db, threadId);
 }
 
 export async function bumpThread(

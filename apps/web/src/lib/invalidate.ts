@@ -154,6 +154,17 @@ export function bumpMailboxUnread(qc: QueryClient, mailboxId: string, delta: num
   );
 }
 
+/** Drop a single message from the open thread detail (per-message delete). */
+export function removeMessageFromThread(
+  qc: QueryClient,
+  threadId: string,
+  messageId: string,
+): void {
+  qc.setQueryData<ThreadDetail>(keys.thread(threadId), (old) =>
+    old ? { ...old, messages: old.messages.filter((m) => m.id !== messageId) } : old,
+  );
+}
+
 /** Optimistically rewrite a single message's flags in the open thread detail. */
 export function patchMessageFlags(
   qc: QueryClient,
