@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Trash2 } from "lucide-react";
+import { CalendarClock, CalendarX2, Trash2 } from "lucide-react";
 import { type CSSProperties, useRef } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api.ts";
@@ -53,9 +53,8 @@ export function DraftList({
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const virtualizer = useListVirtualizer(scrollRef, drafts.length, {
-    hasMore,
-    loadingMore,
-    loadMore: () => loadMore?.(),
+    infinite: { hasMore, loadingMore, loadMore: () => loadMore?.() },
+    cacheKey: `m:${mailboxId}:drafts`,
   });
   const vItems = virtualizer.getVirtualItems();
 
@@ -67,6 +66,26 @@ export function DraftList({
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
+
+  // Cancel a scheduled send — the draft reverts to an ordinary editable draft.
+  const unschedule = useMutation({
+    mutationFn: (id: string) => api(`/api/drafts/${id}/schedule`, { method: "DELETE" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.drafts(mailboxId) });
+      toast.success("Scheduled send canceled");
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
+  // Opening a scheduled draft cancels its schedule first — editing a draft whose
+  // payload is already queued to send would otherwise fire the stale version.
+  function openDraft(d: DraftRow) {
+    if (d.scheduledFor) {
+      unschedule.mutate(d.id);
+      toast("Scheduled send canceled — editing draft");
+    }
+    openCompose({ draft: d });
+  }
 
   return (
     <TooltipProvider delay={400}>
@@ -95,7 +114,7 @@ export function DraftList({
                   >
                     <button
                       type="button"
-                      onClick={() => openCompose({ draft: d })}
+                      onClick={() => openDraft(d)}
                       className={cn(
                         "flex min-w-0 flex-1 flex-col gap-0.5 py-2.5 pr-4 pl-3 text-left text-[13px] transition-colors hover:bg-muted/60",
                       )}
@@ -109,11 +128,36 @@ export function DraftList({
                       <div className="truncate font-medium text-[12px] text-foreground">
                         {d.subject || "(no subject)"}
                       </div>
-                      {d.body.trim() && (
-                        <div className="truncate text-[12px] text-muted-foreground">{d.body}</div>
+                      {d.scheduledFor ? (
+                        <div className="flex items-center gap-1 font-medium text-[11px] text-amber-600 dark:text-amber-500">
+                          <CalendarClock className="h-3 w-3" />
+                          Sends {formatStamp(d.scheduledFor, fmt)}
+                        </div>
+                      ) : (
+                        d.body.trim() && (
+                          <div className="truncate text-[12px] text-muted-foreground">{d.body}</div>
+                        )
                       )}
                     </button>
-                    <div className="flex w-9 shrink-0 items-center justify-center opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+                    <div
+                      className={cn(
+                        "flex shrink-0 items-center justify-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100",
+                        d.scheduledFor ? "w-[4.25rem]" : "w-9",
+                      )}
+                    >
+                      {d.scheduledFor && (
+                        <Tooltip label="Cancel scheduled send">
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            disabled={unschedule.isPending}
+                            onClick={() => unschedule.mutate(d.id)}
+                            aria-label="Cancel scheduled send"
+                          >
+                            <CalendarX2 />
+                          </Button>
+                        </Tooltip>
+                      )}
                       <Tooltip label="Discard draft">
                         <Button
                           variant="ghost"
