@@ -459,7 +459,7 @@ function ThreadRowItem({
         onSpam={(spam) => patch.mutate({ spam })}
         onSelect={onRequestSelect}
       />
-      <RowContextMenu title={thread.subjectNorm || "(no subject)"} actions={menuActions}>
+      <RowContextMenu actions={menuActions}>
         <ThreadRowView
           swipe={swipe}
           thread={thread}
