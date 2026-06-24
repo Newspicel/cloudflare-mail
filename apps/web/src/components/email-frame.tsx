@@ -96,6 +96,9 @@ export function EmailFrame({ html, className }: { html: string; className?: stri
       srcDoc={doc}
       onLoad={onLoad}
       sandbox={SANDBOX}
+      // The frame is sized to its full content, so it must never scroll
+      // internally — only the surrounding thread pane scrolls.
+      scrolling="no"
       referrerPolicy="no-referrer"
       className={cn("block w-full", className)}
       style={{ height: height ? `${height}px` : undefined }}
