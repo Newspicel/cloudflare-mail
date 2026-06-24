@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArchiveRestore,
+  Flag,
   Inbox,
   Loader2,
   Mail,
@@ -30,7 +31,13 @@ import { FOLDER_META, FolderTabs } from "./folder-tabs.tsx";
 import { BulkLabelsMenu } from "./labels-menu.tsx";
 import { MoveToFolderMenu } from "./move-to-folder-menu.tsx";
 import { ThreadActionSheet } from "./thread-action-sheet.tsx";
-import { type RowAction, RowContextMenu } from "./thread-context-menu.tsx";
+import {
+  FolderSubmenu,
+  LabelsSubmenu,
+  ReminderSubmenu,
+  type RowAction,
+  RowContextMenu,
+} from "./thread-context-menu.tsx";
 import { type RowSwipe, ThreadRowView } from "./thread-row.tsx";
 import { Checkbox } from "./ui/checkbox.tsx";
 import { useConfirmHelpers } from "./ui/confirm.tsx";
@@ -436,6 +443,13 @@ function ThreadRowItem({
       label: view === "spam" ? "Not spam" : "Mark as spam",
       onClick: () => patch.mutate({ spam: view !== "spam" }),
     });
+    if (view !== "spam") {
+      menuActions.push({
+        icon: Flag,
+        label: "Report",
+        onClick: () => patch.mutate({ spam: true }),
+      });
+    }
     menuActions.push({
       icon: Trash2,
       label: "Trash",
@@ -459,7 +473,22 @@ function ThreadRowItem({
         onSpam={(spam) => patch.mutate({ spam })}
         onSelect={onRequestSelect}
       />
-      <RowContextMenu actions={menuActions}>
+      <RowContextMenu
+        leading={
+          view === "trash" ? undefined : (
+            <>
+              <LabelsSubmenu
+                mailboxId={mailboxId}
+                threadId={thread.id}
+                applied={new Set((labels ?? []).map((l) => l.id))}
+              />
+              <FolderSubmenu mailboxId={mailboxId} threadId={thread.id} />
+              <ReminderSubmenu mailboxId={mailboxId} threadId={thread.id} />
+            </>
+          )
+        }
+        actions={menuActions}
+      >
         <ThreadRowView
           swipe={swipe}
           thread={thread}
