@@ -296,7 +296,7 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
           )}
           {!readOnly && (
             <MoveToFolderMenu
-              threadId={thread.id}
+              threadIds={[thread.id]}
               mailboxId={thread.mailboxId}
               onMoved={(folderName) => {
                 toast.success(`Moved to ${folderName}`);
