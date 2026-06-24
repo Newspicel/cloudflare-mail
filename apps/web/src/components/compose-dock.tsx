@@ -301,6 +301,7 @@ export function ComposeForm({
   const [text, setText] = useState(d && initialFormat !== "html" ? d.body : "");
   const [html, setHtml] = useState(d && initialFormat === "html" ? d.body : "");
   const editorRef = useRef<RichEditorHandle>(null);
+  const bodyTextareaRef = useRef<HTMLTextAreaElement>(null);
   // A format command queued while still in plain text — applied once the editor
   // mounts after promotion to HTML.
   const pendingCmdRef = useRef<PendingCmd | null>(null);
@@ -836,6 +837,14 @@ export function ComposeForm({
           <input
             value={subject}
             onChange={(e) => setSubject(e.target.value)}
+            onKeyDown={(e) => {
+              // Skip the format toolbar — Tab from Subject lands in the body.
+              if (e.key !== "Tab" || e.shiftKey) return;
+              const body = mode === "html" ? editorRef.current : bodyTextareaRef.current;
+              if (!body) return;
+              e.preventDefault();
+              body.focus();
+            }}
             className={FIELD_INPUT}
           />
         </label>
@@ -863,6 +872,7 @@ export function ComposeForm({
           />
         ) : (
           <Textarea
+            ref={bodyTextareaRef}
             value={text}
             onChange={(e) => setText(e.target.value)}
             className={cn(
