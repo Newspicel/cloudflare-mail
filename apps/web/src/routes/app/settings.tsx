@@ -666,7 +666,10 @@ function SecuritySection() {
               onRename={(name) =>
                 name && name !== (p.name ?? "") && renamePasskey.mutate({ id: p.id, name })
               }
-              onDelete={() => removePasskey.mutate(p.id)}
+              onDelete={async () => {
+                if (await confirmDelete(`passkey "${p.name || "Passkey"}"`))
+                  removePasskey.mutate(p.id);
+              }}
             />
           ))}
         </ul>
@@ -679,7 +682,17 @@ function SecuritySection() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => revokeOthers.mutate()}
+              onClick={async () => {
+                if (
+                  await confirm({
+                    title: "Sign out all other devices?",
+                    description: "Every session except this one will be revoked.",
+                    confirmLabel: "Sign out",
+                    destructive: true,
+                  })
+                )
+                  revokeOthers.mutate();
+              }}
               disabled={revokeOthers.isPending}
               className="text-destructive hover:bg-destructive/10 hover:text-destructive"
             >
@@ -708,7 +721,17 @@ function SecuritySection() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => revoke.mutate(s.token)}
+                    onClick={async () => {
+                      if (
+                        await confirm({
+                          title: "Revoke this session?",
+                          description: `${shortUA(s.userAgent)} will be signed out.`,
+                          confirmLabel: "Revoke",
+                          destructive: true,
+                        })
+                      )
+                        revoke.mutate(s.token);
+                    }}
                     disabled={revoke.isPending}
                   >
                     Revoke
