@@ -139,11 +139,41 @@ export interface AttachmentDto {
   contentId: string | null;
 }
 
+/** One participant of a calendar invite (organizer or attendee). */
+export interface CalendarPersonDto {
+  name: string | null;
+  email: string | null;
+  /** RFC 5545 PARTSTAT (NEEDS-ACTION/ACCEPTED/DECLINED/…); attendees only. */
+  status: string | null;
+}
+
+/**
+ * A calendar invite (RFC 5545 VEVENT) carried by a message, surfaced for the
+ * event banner. `start`/`end` are strings `new Date()` can parse; `allDay`
+ * means a date-only event. Display-only — we don't manage calendars.
+ */
+export interface CalendarEventDto {
+  /** Calendar METHOD: REQUEST (invite), REPLY, CANCEL, PUBLISH, … */
+  method: string | null;
+  summary: string | null;
+  description: string | null;
+  location: string | null;
+  start: string | null;
+  end: string | null;
+  allDay: boolean;
+  organizer: CalendarPersonDto | null;
+  attendees: CalendarPersonDto[];
+  /** Raw RRULE when the event recurs (presence ⇒ "Repeats"). */
+  rrule: string | null;
+}
+
 /** Full message body, parsed on demand from the raw `.eml` in R2. */
 export interface MessageBodyDto {
   html: string | null;
   text: string | null;
   attachments: AttachmentDto[];
+  /** Present when the message carries an iCalendar invite. */
+  calendar?: CalendarEventDto | null;
 }
 
 /**

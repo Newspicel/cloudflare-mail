@@ -1,20 +1,29 @@
 import { Flag, hasFlag, setFlag } from "@cfmail/shared/flags";
-import type { AttachmentDto, UnsubscribeResultDto } from "@cfmail/shared/responses";
+import type {
+  AttachmentDto,
+  CalendarEventDto,
+  UnsubscribeResultDto,
+} from "@cfmail/shared/responses";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
   ArchiveRestore,
   ArrowLeft,
+  CalendarClock,
+  CalendarX2,
   Download,
   Forward,
   Inbox,
   MailMinus,
+  MapPin,
   Paperclip,
+  Repeat,
   Reply,
   ReplyAll,
   ShieldAlert,
   Star,
   Trash2,
+  Users,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -430,6 +439,108 @@ function MessageAttachments({
   );
 }
 
+// Render a calendar invite's start/end window. All-day events show the date(s)
+// only; timed events show the day plus a start–end time range.
+function formatEventWhen(event: CalendarEventDto): string | null {
+  if (!event.start) return null;
+  const start = new Date(event.start);
+  if (Number.isNaN(start.getTime())) return null;
+  const end = event.end ? new Date(event.end) : null;
+  const endValid = end && !Number.isNaN(end.getTime());
+
+  if (event.allDay) {
+    const date = start.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
+    return date;
+  }
+
+  const day = start.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
+  const from = start.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (!endValid) return `${day} · ${from}`;
+  const sameDay = start.toDateString() === end.toDateString();
+  const to = sameDay
+    ? end.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    : end.toLocaleString([], {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
+  return `${day} · ${from} – ${to}`;
+}
+
+// Banner for a message carrying an iCalendar invite (Invitation.ics / event.ics).
+// Display-only: we surface the event details; we don't RSVP or manage a calendar.
+function CalendarBanner({ event }: { event: CalendarEventDto }) {
+  const when = formatEventWhen(event);
+  const cancelled = event.method === "CANCEL";
+  const isReply = event.method === "REPLY";
+  const label = cancelled
+    ? "Event cancelled"
+    : isReply
+      ? "Invitation response"
+      : "Calendar invitation";
+  const attendees = event.attendees.filter((a) => a.email || a.name);
+
+  return (
+    <div
+      className={cn(
+        "border-b px-4 py-3 text-[12px]",
+        cancelled
+          ? "bg-destructive/10 text-destructive"
+          : "bg-primary/5 text-foreground dark:bg-primary/10",
+      )}
+    >
+      <div className="flex items-start gap-2.5">
+        {cancelled ? (
+          <CalendarX2 className="mt-0.5 size-4 shrink-0" />
+        ) : (
+          <CalendarClock className="mt-0.5 size-4 shrink-0 text-primary" />
+        )}
+        <div className="min-w-0 space-y-1">
+          <div className="flex items-center gap-1.5">
+            <span className="font-semibold uppercase tracking-wide text-[10px] text-muted-foreground">
+              {label}
+            </span>
+          </div>
+          <div className={cn("font-semibold text-[14px]", cancelled && "line-through")}>
+            {event.summary || "(no title)"}
+          </div>
+          {when && (
+            <div className="text-muted-foreground">
+              {when}
+              {event.rrule && (
+                <span className="ml-1.5 inline-flex items-center gap-1">
+                  <Repeat className="size-3" /> Repeats
+                </span>
+              )}
+            </div>
+          )}
+          {event.location && (
+            <div className="flex items-center gap-1.5 text-muted-foreground">
+              <MapPin className="size-3.5 shrink-0" />
+              <span className="truncate">{event.location}</span>
+            </div>
+          )}
+          {event.organizer && (event.organizer.name || event.organizer.email) && (
+            <div className="text-muted-foreground">
+              <span className="text-muted-foreground/70">Organizer:</span>{" "}
+              {event.organizer.name ?? event.organizer.email}
+            </div>
+          )}
+          {attendees.length > 0 && (
+            <div className="flex items-center gap-1.5 text-muted-foreground">
+              <Users className="size-3.5 shrink-0" />
+              <span className="truncate">
+                {attendees.length} {attendees.length === 1 ? "guest" : "guests"}
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MessageCard({
   msg,
   readOnly,
@@ -504,6 +615,7 @@ function MessageCard({
       </header>
       <SpamBanner msg={msg} />
       <UnsubscribeBanner msg={msg} readOnly={readOnly} />
+      {body.data?.calendar && <CalendarBanner event={body.data.calendar} />}
       {bodyHtml ? (
         // Untrusted HTML renders in a sandboxed, scriptless iframe so a
         // sanitizer bypass can't reach the app origin or the session.
