@@ -11,6 +11,7 @@ import {
 import { useThreadListMutation } from "@/lib/thread-mutations.ts";
 import { useUnfileThread } from "@/lib/use-folder-mutations.ts";
 import { useListVirtualizer, visibleBlock } from "@/lib/use-list-virtualizer.ts";
+import { type RowAction, RowContextMenu } from "./thread-context-menu.tsx";
 import { ThreadRowView } from "./thread-row.tsx";
 import { IconButton } from "./ui/icon-button.tsx";
 import { TooltipProvider } from "./ui/tooltip.tsx";
@@ -146,38 +147,53 @@ function FolderRowItem({
       api(`/api/threads/${thread.id}`, { method: "PATCH", body: JSON.stringify({ read }) }),
   });
 
+  const menuActions: RowAction[] = [
+    {
+      icon: unread ? MailOpen : Mail,
+      label: unread ? "Mark as read" : "Mark as unread",
+      onClick: () => setRead.mutate(unread),
+    },
+    {
+      icon: FolderInput,
+      label: "Remove from folder",
+      onClick: () => unfile.mutate({ folderId, threadId: thread.id, mailboxId: thread.mailboxId }),
+    },
+  ];
+
   return (
-    <ThreadRowView
-      thread={thread}
-      link={{ kind: "folder", folderId }}
-      active={active}
-      labels={labels}
-      rowRef={rowRef}
-      remeasure={remeasure}
-      style={style}
-      dataIndex={dataIndex}
-      actions={
-        <>
-          <IconButton
-            icon={unread ? MailOpen : Mail}
-            label={unread ? "Mark as read" : "Mark as unread"}
-            size="icon-sm"
-            className="h-6 w-6 hover:text-foreground"
-            disabled={setRead.isPending}
-            onClick={() => setRead.mutate(unread)}
-          />
-          <IconButton
-            icon={FolderInput}
-            label="Remove from folder"
-            size="icon-sm"
-            className="h-6 w-6 hover:text-foreground"
-            disabled={unfile.isPending}
-            onClick={() =>
-              unfile.mutate({ folderId, threadId: thread.id, mailboxId: thread.mailboxId })
-            }
-          />
-        </>
-      }
-    />
+    <RowContextMenu title={thread.subjectNorm || "(no subject)"} actions={menuActions}>
+      <ThreadRowView
+        thread={thread}
+        link={{ kind: "folder", folderId }}
+        active={active}
+        labels={labels}
+        rowRef={rowRef}
+        remeasure={remeasure}
+        style={style}
+        dataIndex={dataIndex}
+        actions={
+          <>
+            <IconButton
+              icon={unread ? MailOpen : Mail}
+              label={unread ? "Mark as read" : "Mark as unread"}
+              size="icon-sm"
+              className="h-6 w-6 hover:text-foreground"
+              disabled={setRead.isPending}
+              onClick={() => setRead.mutate(unread)}
+            />
+            <IconButton
+              icon={FolderInput}
+              label="Remove from folder"
+              size="icon-sm"
+              className="h-6 w-6 hover:text-foreground"
+              disabled={unfile.isPending}
+              onClick={() =>
+                unfile.mutate({ folderId, threadId: thread.id, mailboxId: thread.mailboxId })
+              }
+            />
+          </>
+        }
+      />
+    </RowContextMenu>
   );
 }
