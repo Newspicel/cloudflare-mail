@@ -33,6 +33,7 @@ import {
   Star,
   Trash2,
   Users,
+  Video,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -876,6 +877,17 @@ function CalendarBanner({ event }: { event: CalendarEventDto }) {
                 {attendees.length} {attendees.length === 1 ? "guest" : "guests"}
               </span>
             </div>
+          )}
+          {!cancelled && event.meetingUrl && (
+            <a
+              href={event.meetingUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-1.5 inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 font-medium text-[12px] text-primary-foreground transition-colors hover:bg-primary/90"
+            >
+              <Video className="size-3.5 shrink-0" />
+              Join meeting
+            </a>
           )}
         </div>
       </div>

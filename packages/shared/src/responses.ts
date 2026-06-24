@@ -204,6 +204,8 @@ export interface CalendarEventDto {
   attendees: CalendarPersonDto[];
   /** Raw RRULE when the event recurs (presence ⇒ "Repeats"). */
   rrule: string | null;
+  /** Video-conference join URL (Zoom/Meet/Teams/Jitsi/…) when one is found. */
+  meetingUrl: string | null;
 }
 
 /** Full message body, parsed on demand from the raw `.eml` in R2. */
