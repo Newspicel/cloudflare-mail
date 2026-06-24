@@ -48,6 +48,7 @@ import { LabelChips, LabelsMenu } from "./labels-menu.tsx";
 import { MessageMenu } from "./message-menu.tsx";
 import { MoveToFolderMenu } from "./move-to-folder-menu.tsx";
 import { Button } from "./ui/button.tsx";
+import { useConfirmHelpers } from "./ui/confirm.tsx";
 import { IconButton } from "./ui/icon-button.tsx";
 import { Tooltip, TooltipProvider } from "./ui/tooltip.tsx";
 
@@ -61,6 +62,7 @@ interface Props {
 export function MessageView({ thread, messages, view = "inbox", readOnly = false }: Props) {
   const nav = useNavigate();
   const qc = useQueryClient();
+  const { confirmDelete } = useConfirmHelpers();
 
   const invalidate = useCallback(
     () => invalidateThreadChange(qc, thread.mailboxId, thread.id),
@@ -75,6 +77,14 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
     mutationFn: (patch) =>
       api(`/api/threads/${thread.id}`, { method: "PATCH", body: JSON.stringify(patch) }),
     optimistic: (_patch, client) => removeThreadsFromLists(client, thread.mailboxId, [thread.id]),
+  });
+
+  // Permanent delete: irreversible, so no undo — confirm then drop the row.
+  const del = useThreadListMutation<void>({
+    mailboxId: thread.mailboxId,
+    threadId: thread.id,
+    mutationFn: () => api(`/api/threads/${thread.id}`, { method: "DELETE" }),
+    optimistic: (_v, client) => removeThreadsFromLists(client, thread.mailboxId, [thread.id]),
   });
 
   const setMsg = useMutation({
@@ -130,6 +140,20 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
     });
   }
 
+  async function remove() {
+    if (!(await confirmDelete("this conversation"))) return;
+    del.mutate(undefined, {
+      onSuccess: () => {
+        toast.success("Deleted permanently");
+        nav({
+          to: "/app/m/$mailboxId",
+          params: { mailboxId: thread.mailboxId },
+          search: { view },
+        });
+      },
+    });
+  }
+
   function markUnread() {
     const last = messages.findLast((m) => m.direction === "in");
     if (last) setMsg.mutate({ id: last.id, patch: { seen: false } });
@@ -169,12 +193,20 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
                 label="Mark unread (u)"
               />
               {view === "trash" ? (
-                <IconButton
-                  icon={ArchiveRestore}
-                  onClick={() => act({ trashed: false }, "Restored", { trashed: true })}
-                  disabled={setState.isPending}
-                  label="Restore"
-                />
+                <>
+                  <IconButton
+                    icon={ArchiveRestore}
+                    onClick={() => act({ trashed: false }, "Restored", { trashed: true })}
+                    disabled={setState.isPending}
+                    label="Restore"
+                  />
+                  <IconButton
+                    icon={Trash2}
+                    onClick={remove}
+                    disabled={del.isPending}
+                    label="Delete permanently"
+                  />
+                </>
               ) : (
                 <>
                   {view === "spam" ? (

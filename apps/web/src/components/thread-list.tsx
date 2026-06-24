@@ -16,6 +16,7 @@ import { useListVirtualizer, visibleBlock } from "@/lib/use-list-virtualizer.ts"
 import { FOLDER_META, FolderTabs } from "./folder-tabs.tsx";
 import { ThreadRowView } from "./thread-row.tsx";
 import { Checkbox } from "./ui/checkbox.tsx";
+import { useConfirmHelpers } from "./ui/confirm.tsx";
 import { IconButton } from "./ui/icon-button.tsx";
 import { TooltipProvider } from "./ui/tooltip.tsx";
 import { EmptyState, ThreadListSkeleton } from "./ui.tsx";
@@ -44,6 +45,7 @@ export function ThreadList({
   loadMore,
 }: Props) {
   const meta = FOLDER_META[view];
+  const { confirmDelete } = useConfirmHelpers();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const selecting = selected.size > 0;
 
@@ -74,6 +76,21 @@ export function ThreadList({
     onApply: () => setSelected(new Set()),
   });
 
+  const bulkDel = useThreadListMutation<string[]>({
+    mailboxId,
+    mutationFn: (ids) =>
+      Promise.all(ids.map((id) => api(`/api/threads/${id}`, { method: "DELETE" }))),
+    optimistic: (ids, qc) => removeThreadsFromLists(qc, mailboxId, ids),
+    onApply: () => setSelected(new Set()),
+  });
+
+  async function deleteSelected() {
+    const ids = [...selected];
+    const subject = ids.length === 1 ? "this conversation" : `${ids.length} conversations`;
+    if (!(await confirmDelete(subject))) return;
+    bulkDel.mutate(ids);
+  }
+
   function toggle(id: string) {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -97,13 +114,22 @@ export function ThreadList({
             <span className="font-medium text-[12px]">{selected.size} selected</span>
             <div className="ml-auto flex items-center gap-0.5">
               {view === "trash" ? (
-                <IconButton
-                  icon={Inbox}
-                  label="Restore"
-                  size="icon-sm"
-                  disabled={bulk.isPending}
-                  onClick={() => bulk.mutate({ trashed: false })}
-                />
+                <>
+                  <IconButton
+                    icon={Inbox}
+                    label="Restore"
+                    size="icon-sm"
+                    disabled={bulk.isPending}
+                    onClick={() => bulk.mutate({ trashed: false })}
+                  />
+                  <IconButton
+                    icon={Trash2}
+                    label="Delete permanently"
+                    size="icon-sm"
+                    disabled={bulkDel.isPending}
+                    onClick={deleteSelected}
+                  />
+                </>
               ) : view === "spam" ? (
                 <IconButton
                   icon={Inbox}
@@ -214,6 +240,7 @@ function ThreadRowItem({
   dataIndex: number;
 }) {
   const unread = thread.unreadCount > 0;
+  const { confirmDelete } = useConfirmHelpers();
 
   const patch = useThreadListMutation<{ trashed?: boolean; read?: boolean }>({
     mailboxId,
@@ -226,6 +253,17 @@ function ThreadRowItem({
         patchThreadsInLists(qc, mailboxId, [thread.id], { unreadCount: body.read ? 0 : 1 });
     },
   });
+
+  const del = useThreadListMutation<void>({
+    mailboxId,
+    threadId: thread.id,
+    mutationFn: () => api(`/api/threads/${thread.id}`, { method: "DELETE" }),
+    optimistic: (_v, qc) => removeThreadsFromLists(qc, mailboxId, [thread.id]),
+  });
+
+  async function remove() {
+    if (await confirmDelete("this conversation")) del.mutate();
+  }
 
   return (
     <ThreadRowView
@@ -267,14 +305,24 @@ function ThreadRowItem({
               onClick={() => patch.mutate({ read: unread })}
             />
             {view === "trash" ? (
-              <IconButton
-                icon={ArchiveRestore}
-                label="Restore"
-                size="icon-sm"
-                className="h-6 w-6 hover:text-foreground"
-                disabled={patch.isPending}
-                onClick={() => patch.mutate({ trashed: false })}
-              />
+              <>
+                <IconButton
+                  icon={ArchiveRestore}
+                  label="Restore"
+                  size="icon-sm"
+                  className="h-6 w-6 hover:text-foreground"
+                  disabled={patch.isPending}
+                  onClick={() => patch.mutate({ trashed: false })}
+                />
+                <IconButton
+                  icon={Trash2}
+                  label="Delete permanently"
+                  size="icon-sm"
+                  className="h-6 w-6 hover:text-foreground"
+                  disabled={del.isPending}
+                  onClick={remove}
+                />
+              </>
             ) : (
               <IconButton
                 icon={Trash2}
