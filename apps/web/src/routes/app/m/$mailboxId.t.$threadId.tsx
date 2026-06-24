@@ -3,7 +3,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { MessageView } from "@/components/message-view.tsx";
 import { ThreadList } from "@/components/thread-list.tsx";
 import { MessageSkeleton } from "@/components/ui.tsx";
-import { mailboxesQuery, threadQuery, threadsQuery } from "@/lib/queries.ts";
+import { mailboxesQuery, threadQuery } from "@/lib/queries.ts";
+import { useThreadFeed } from "@/lib/use-feeds.ts";
 
 export const Route = createFileRoute("/app/m/$mailboxId/t/$threadId")({
   loader: ({ params, context }) =>
@@ -14,7 +15,7 @@ export const Route = createFileRoute("/app/m/$mailboxId/t/$threadId")({
 function ThreadPage() {
   const { mailboxId, threadId } = Route.useParams();
   const { view } = Route.useSearch();
-  const threads = useQuery(threadsQuery(mailboxId, view));
+  const feed = useThreadFeed(mailboxId, view);
   const thread = useQuery(threadQuery(threadId));
   const mailboxes = useQuery(mailboxesQuery);
   const mailbox = mailboxes.data?.mailboxes.find((m) => m.id === mailboxId);
@@ -25,8 +26,11 @@ function ThreadPage() {
         <ThreadList
           mailboxId={mailboxId}
           view={view}
-          threads={threads.data?.threads ?? []}
-          loading={threads.isLoading}
+          threads={feed.items}
+          loading={feed.loading}
+          hasMore={feed.hasMore}
+          loadingMore={feed.loadingMore}
+          loadMore={feed.loadMore}
           selectedThreadId={threadId}
           expiresAt={mailbox?.expiresAt ?? null}
         />

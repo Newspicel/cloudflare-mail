@@ -25,6 +25,10 @@ interface Props {
   leading?: React.ReactNode;
   /** Hover action cluster; omit to hide it (e.g. while selecting). */
   actions?: React.ReactNode;
+  /** Virtualizer measurement ref + position; set together when windowed. */
+  rowRef?: (el: HTMLLIElement | null) => void;
+  style?: React.CSSProperties;
+  dataIndex?: number;
 }
 
 export function ThreadRowView({
@@ -35,6 +39,9 @@ export function ThreadRowView({
   labels,
   leading,
   actions,
+  rowRef,
+  style,
+  dataIndex,
 }: Props) {
   const { prefs } = useUserPrefs();
   const compact = prefs.density === "compact";
@@ -109,6 +116,9 @@ export function ThreadRowView({
 
   return (
     <li
+      ref={rowRef}
+      data-index={dataIndex}
+      style={style}
       draggable
       onDragStart={onDragStart}
       onDragEnd={clearThreadDragGhost}

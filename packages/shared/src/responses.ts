@@ -152,6 +152,8 @@ export type FolderCountsDto = Record<MailView, { total: number; unread: number }
 
 export interface ThreadListDto {
   threads: ThreadDto[];
+  /** Keyset cursor for the next (older) page, or null when the list is exhausted. */
+  nextCursor?: string | null;
 }
 export interface ThreadDetailDto {
   thread: ThreadDto;
@@ -215,6 +217,8 @@ export interface MailboxInvitesDto {
 }
 export interface DraftListDto {
   drafts: DraftDto[];
+  /** Keyset cursor for the next (older) page, or null when the list is exhausted. */
+  nextCursor?: string | null;
 }
 export interface DraftDetailDto {
   draft: DraftDto;

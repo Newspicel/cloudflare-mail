@@ -17,6 +17,7 @@ import {
   requireEntityAccess,
   requirePerm,
 } from "../permissions.ts";
+import { cursorBefore, decodeCursor, nextCursor } from "./pagination.ts";
 import { serializeMessage, serializeThread } from "./serialize.ts";
 
 export function threadsRoutes() {
@@ -43,6 +44,7 @@ export function threadsRoutes() {
 
     const limit = Math.min(Number(c.req.query("limit") ?? 50), 200);
     const view = c.req.query("view") ?? "inbox";
+    const cursor = decodeCursor(c.req.query("cursor"));
 
     // Threads not in trash/spam and not filed into a custom folder by this user
     // — the basis for the active inbox/sent/marked views (filed = "moved away").
@@ -72,13 +74,19 @@ export function threadsRoutes() {
         filter = and(active, hasMessage(eq(message.direction, "in")));
     }
 
+    const where = and(scope, filter, cursorBefore(cursor, thread.lastMsgAt, thread.id));
     const rows = await db
       .select()
       .from(thread)
-      .where(filter ? and(scope, filter) : scope)
-      .orderBy(desc(thread.lastMsgAt))
+      .where(where)
+      // Keyset order must be deterministic: tie-break equal timestamps on id so
+      // the cursor never straddles or repeats a row across pages.
+      .orderBy(desc(thread.lastMsgAt), desc(thread.id))
       .limit(limit);
-    return c.json({ threads: rows.map(serializeThread) });
+    return c.json({
+      threads: rows.map(serializeThread),
+      nextCursor: nextCursor(rows, limit, (row) => ({ ts: row.lastMsgAt, id: row.id })),
+    });
   });
 
   // Per-folder badge counts for the icon bar. `unread` is only meaningful for
