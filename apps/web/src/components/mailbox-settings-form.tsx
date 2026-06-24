@@ -1,8 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import {
+  CardHeader,
+  cardClass,
+  Field,
+  fieldClass,
+  GroupLabel,
+  Input,
+  NativeSelect,
+  Region,
+  Section,
+  Textarea,
+} from "@/components/settings-ui.tsx";
+import { Badge } from "@/components/ui/badge.tsx";
 import { Button } from "@/components/ui/button.tsx";
-import { inputClass } from "@/components/ui/input.tsx";
 import { api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
 import { type ImportProgress, runImport } from "@/lib/import.ts";
@@ -126,111 +138,105 @@ export function MailboxSettingsForm({
   const spamLabel = SPAM_LEVELS.find((l) => l.value === spamFilter);
 
   return (
-    <div className="rounded-md border bg-card">
-      <header className="flex items-center justify-between border-b px-5 py-3">
-        <div className="min-w-0">
-          <div className="truncate font-medium">{address}</div>
-          <div className="text-[11px] text-muted-foreground">{type}</div>
-        </div>
-      </header>
+    <section className={cardClass}>
+      <CardHeader
+        title={address}
+        action={
+          <Badge variant="outline" className="uppercase tracking-wider">
+            {type}
+          </Badge>
+        }
+      />
       <form
         onSubmit={(e) => {
           e.preventDefault();
           save.mutate();
         }}
       >
-        <div className="grid gap-4 px-5 py-4 text-[13px]">
-          <label className="grid gap-1.5">
-            <span className="text-[11px] font-medium text-foreground">Display name</span>
-            <input
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="e.g. Support"
-              maxLength={200}
-              className={inputClass}
-            />
-          </label>
-          <label className="grid gap-1.5">
-            <span className="text-[11px] font-medium text-foreground">Reply-to address</span>
-            <input
-              type="email"
-              value={replyTo}
-              onChange={(e) => setReplyTo(e.target.value)}
-              placeholder="replies@example.com"
-              maxLength={320}
-              className={inputClass}
-            />
-          </label>
-          <label className="grid gap-1.5">
-            <span className="text-[11px] font-medium text-foreground">Signature</span>
-            <textarea
-              value={signature}
-              onChange={(e) => setSignature(e.target.value)}
-              rows={4}
-              placeholder="Appended to every outgoing message"
-              className={cn(inputClass, "h-auto min-h-[6rem] resize-y py-2 leading-normal")}
-              maxLength={5000}
-            />
-          </label>
-          {type !== "service" && admin && (
-            <label className="grid gap-1.5">
-              <span className="text-[11px] font-medium text-foreground">Spam filter</span>
-              <select
-                value={spamFilter}
-                onChange={(e) => setSpamFilter(e.target.value as SpamLevel)}
-                className={cn(inputClass, "cursor-pointer appearance-none")}
-              >
-                {SPAM_LEVELS.map((l) => (
-                  <option key={l.value} value={l.value}>
-                    {l.label}
-                  </option>
-                ))}
-              </select>
-              <span className="text-[11px] text-muted-foreground">{spamLabel?.hint}</span>
-            </label>
-          )}
-          {type !== "service" && !admin && (
-            <div className="grid gap-1.5">
-              <span className="text-[11px] font-medium text-foreground">Spam filter</span>
-              <div className="rounded-md border bg-muted/40 px-2.5 py-1.5 text-[13px] text-muted-foreground">
-                {spamLabel?.label ?? spamFilter}
-              </div>
-              <span className="text-[11px] text-muted-foreground">
-                Set by your administrator. {spamLabel?.hint}
-              </span>
-            </div>
-          )}
-          {admin && spamFilter === "ai" && type !== "service" && (
-            <label className="grid gap-1.5">
-              <span className="text-[11px] font-medium text-foreground">
-                AI monthly token budget
-              </span>
-              <input
-                type="number"
-                min={0}
-                value={aiCap}
-                onChange={(e) => setAiCap(e.target.value)}
-                placeholder="Unlimited"
-                className={inputClass}
+        <Region label="Identity">
+          <div className="space-y-4">
+            <Field label="Display name">
+              <Input
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                placeholder="e.g. Support"
+                maxLength={200}
               />
-              <span className="text-[11px] text-muted-foreground">
-                {settingsQ.data?.spamUsage
-                  ? `Used ${settingsQ.data.spamUsage.tokens.toLocaleString()} tokens across ${settingsQ.data.spamUsage.calls} checks this month (${settingsQ.data.spamUsage.period}). AI falls back to Standard when the budget is reached.`
-                  : "Leave empty for unlimited. AI runs only on uncertain mail to keep usage low."}
-              </span>
-            </label>
-          )}
-        </div>
-        <div className="flex justify-end border-t bg-muted/30 px-5 py-2.5">
-          <Button type="submit" variant="primary" disabled={save.isPending || settingsQ.isLoading}>
-            {save.isPending ? "Saving…" : "Save changes"}
-          </Button>
-        </div>
+            </Field>
+            <Field label="Reply-to address">
+              <Input
+                type="email"
+                value={replyTo}
+                onChange={(e) => setReplyTo(e.target.value)}
+                placeholder="replies@example.com"
+                maxLength={320}
+              />
+            </Field>
+            <Field label="Signature" hint="Appended to every outgoing message.">
+              <Textarea
+                value={signature}
+                onChange={(e) => setSignature(e.target.value)}
+                rows={4}
+                placeholder="Your name, role, links…"
+                className="min-h-[6rem] resize-y"
+                maxLength={5000}
+              />
+            </Field>
+            {type !== "service" && admin && (
+              <Field label="Spam filter" hint={spamLabel?.hint}>
+                <NativeSelect
+                  value={spamFilter}
+                  onChange={(e) => setSpamFilter(e.target.value as SpamLevel)}
+                >
+                  {SPAM_LEVELS.map((l) => (
+                    <option key={l.value} value={l.value}>
+                      {l.label}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </Field>
+            )}
+            {type !== "service" && !admin && (
+              <Field label="Spam filter" hint={`Set by your administrator. ${spamLabel?.hint}`}>
+                <div className="rounded-md border bg-muted/40 px-2.5 py-1.5 text-[13px] text-muted-foreground">
+                  {spamLabel?.label ?? spamFilter}
+                </div>
+              </Field>
+            )}
+            {admin && spamFilter === "ai" && type !== "service" && (
+              <Field
+                label="AI monthly token budget"
+                hint={
+                  settingsQ.data?.spamUsage
+                    ? `Used ${settingsQ.data.spamUsage.tokens.toLocaleString()} tokens across ${settingsQ.data.spamUsage.calls} checks this month (${settingsQ.data.spamUsage.period}). AI falls back to Standard when the budget is reached.`
+                    : "Leave empty for unlimited. AI runs only on uncertain mail to keep usage low."
+                }
+              >
+                <Input
+                  type="number"
+                  min={0}
+                  value={aiCap}
+                  onChange={(e) => setAiCap(e.target.value)}
+                  placeholder="Unlimited"
+                />
+              </Field>
+            )}
+            <div className="flex justify-end pt-1">
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={save.isPending || settingsQ.isLoading}
+              >
+                {save.isPending ? "Saving…" : "Save changes"}
+              </Button>
+            </div>
+          </div>
+        </Region>
       </form>
       {!admin && type !== "service" && type !== "temp" && (
         <MailboxPgpCard mailboxId={mailboxId} settingsKey={queryKey} />
       )}
-    </div>
+    </section>
   );
 }
 
@@ -332,102 +338,90 @@ function MailboxPgpCard({ mailboxId, settingsKey }: { mailboxId: string; setting
   const contacts = contactsQ.data?.keys ?? [];
 
   return (
-    <div className="border-t px-5 py-4">
-      <div className="mb-3">
-        <div className="font-medium">Encryption (PGP)</div>
-        <div className="text-[11px] text-muted-foreground">
-          Sign and encrypt mail for this mailbox. Keys are held on the server — this protects mail
-          in transit, not from the server itself.
-        </div>
-      </div>
-      <div className="grid gap-4 text-[13px]">
-        {/* Mode */}
-        <label className="grid gap-1.5">
-          <span className="text-[11px] font-medium text-foreground">Mode</span>
-          <select
+    <Region
+      label="Encryption (PGP)"
+      description="Sign and encrypt mail for this mailbox. Keys are held on the server — this protects mail in transit, not from the server itself."
+    >
+      <div className="space-y-4">
+        <Field
+          label="Mode"
+          hint={
+            configured
+              ? PGP_MODES.find((m) => m.value === (s?.pgpMode ?? "off"))?.hint
+              : "Generate or import a keypair below to enable signing or encryption."
+          }
+        >
+          <NativeSelect
             value={s?.pgpMode ?? "off"}
             disabled={!configured || setMode.isPending || settingsQ.isLoading}
             onChange={(e) => setMode.mutate(e.target.value as PgpMode)}
-            className={cn(inputClass, "cursor-pointer appearance-none disabled:opacity-60")}
           >
             {PGP_MODES.map((m) => (
               <option key={m.value} value={m.value}>
                 {m.label}
               </option>
             ))}
-          </select>
-          <span className="text-[11px] text-muted-foreground">
-            {configured
-              ? PGP_MODES.find((m) => m.value === (s?.pgpMode ?? "off"))?.hint
-              : "Generate or import a keypair below to enable signing or encryption."}
-          </span>
-        </label>
+          </NativeSelect>
+        </Field>
 
-        {/* Keypair */}
         {configured ? (
-          <div className="grid gap-1.5">
-            <span className="text-[11px] font-medium text-foreground">Mailbox key</span>
+          <Field label="Mailbox key">
             <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/40 px-2.5 py-1.5">
               <code className="truncate text-[12px]">{s?.pgpFingerprint}</code>
-              <button
-                type="button"
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => removeKey.mutate()}
                 disabled={removeKey.isPending}
-                className="shrink-0 rounded-md border px-2 py-1 text-[11px] font-medium text-destructive transition hover:bg-destructive/10 disabled:opacity-50"
+                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
               >
                 Remove
-              </button>
+              </Button>
             </div>
             {s?.pgpPublicKey && (
-              <details className="text-[11px] text-muted-foreground">
+              <details className="text-[12px] text-muted-foreground">
                 <summary className="cursor-pointer select-none">Public key</summary>
-                <textarea
+                <Textarea
                   readOnly
                   value={s.pgpPublicKey}
                   rows={6}
                   onFocus={(e) => e.currentTarget.select()}
-                  className={cn(
-                    inputClass,
-                    "mt-1 h-auto resize-y font-mono text-[10px] leading-tight",
-                  )}
+                  className="mt-1.5 resize-y font-mono text-[10px] leading-tight"
                 />
               </details>
             )}
-          </div>
+          </Field>
         ) : (
-          <div className="grid gap-2">
+          <div className="space-y-2">
             <div className="flex flex-wrap gap-2">
               <Button
-                type="button"
                 variant="primary"
                 disabled={generate.isPending}
                 onClick={() => generate.mutate()}
               >
                 {generate.isPending ? "Generating…" : "Generate keypair"}
               </Button>
-              <Button type="button" variant="outline" onClick={() => setShowImport((v) => !v)}>
+              <Button variant="outline" onClick={() => setShowImport((v) => !v)}>
                 Import existing
               </Button>
             </div>
             {showImport && (
-              <div className="grid gap-2 rounded-md border bg-muted/30 p-3">
-                <textarea
+              <div className="space-y-2 rounded-md border bg-muted/30 p-3">
+                <Textarea
                   value={importKey}
                   onChange={(e) => setImportKey(e.target.value)}
                   rows={5}
                   placeholder="-----BEGIN PGP PRIVATE KEY BLOCK-----"
-                  className={cn(inputClass, "h-auto resize-y font-mono text-[10px] leading-tight")}
+                  className="resize-y bg-background font-mono text-[10px] leading-tight"
                 />
-                <input
+                <Input
                   type="password"
                   value={importPass}
                   onChange={(e) => setImportPass(e.target.value)}
                   placeholder="Passphrase (if the key is protected)"
-                  className={inputClass}
                 />
                 <div className="flex justify-end">
                   <Button
-                    type="button"
                     variant="primary"
                     disabled={!importKey.trim() || doImport.isPending}
                     onClick={() => doImport.mutate()}
@@ -440,15 +434,14 @@ function MailboxPgpCard({ mailboxId, settingsKey }: { mailboxId: string; setting
           </div>
         )}
 
-        {/* Contact keys */}
-        <div className="grid gap-2 border-t pt-3">
-          <span className="text-[11px] font-medium text-foreground">Recipient keys</span>
-          <span className="text-[11px] text-muted-foreground">
+        <div className="space-y-2 border-t pt-4">
+          <GroupLabel>Recipient keys</GroupLabel>
+          <p className="text-[12px] leading-snug text-muted-foreground">
             Public keys of people you email. Needed to encrypt to them; captured automatically when
             a signed message includes one.
-          </span>
+          </p>
           {contacts.length > 0 && (
-            <ul className="divide-y rounded-md border">
+            <ul className="divide-y overflow-hidden rounded-md border">
               {contacts.map((k) => (
                 <li key={k.id} className="flex items-center justify-between gap-2 px-2.5 py-1.5">
                   <div className="min-w-0">
@@ -457,36 +450,35 @@ function MailboxPgpCard({ mailboxId, settingsKey }: { mailboxId: string; setting
                       {shortFp(k.fingerprint)} · {k.source}
                     </div>
                   </div>
-                  <button
-                    type="button"
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={() => removeContact.mutate(k.id)}
                     disabled={removeContact.isPending}
-                    className="shrink-0 rounded-md border px-2 py-1 text-[11px] font-medium text-muted-foreground transition hover:bg-muted disabled:opacity-50"
                   >
                     Remove
-                  </button>
+                  </Button>
                 </li>
               ))}
             </ul>
           )}
-          <div className="grid gap-2 rounded-md border bg-muted/30 p-3">
-            <input
+          <div className="space-y-2 rounded-md border bg-muted/30 p-3">
+            <Input
               type="email"
               value={contactEmail}
               onChange={(e) => setContactEmail(e.target.value)}
               placeholder="Email (optional — taken from the key if blank)"
-              className={inputClass}
+              className="bg-background"
             />
-            <textarea
+            <Textarea
               value={contactKey}
               onChange={(e) => setContactKey(e.target.value)}
               rows={4}
               placeholder="-----BEGIN PGP PUBLIC KEY BLOCK-----"
-              className={cn(inputClass, "h-auto resize-y font-mono text-[10px] leading-tight")}
+              className="resize-y bg-background font-mono text-[10px] leading-tight"
             />
             <div className="flex justify-end">
               <Button
-                type="button"
                 variant="primary"
                 disabled={!contactKey.trim() || addContact.isPending}
                 onClick={() => addContact.mutate()}
@@ -497,7 +489,7 @@ function MailboxPgpCard({ mailboxId, settingsKey }: { mailboxId: string; setting
           </div>
         </div>
       </div>
-    </div>
+    </Region>
   );
 }
 
@@ -555,71 +547,60 @@ export function MailboxImportSection({ mailboxes }: { mailboxes: ImportTarget[] 
   const pct = progress?.total ? Math.round((progress.done / progress.total) * 100) : 0;
 
   return (
-    <div className="rounded-md border bg-card">
-      <header className="border-b px-5 py-3">
-        <div className="font-medium">Import mail</div>
-        <div className="text-[11px] text-muted-foreground">
-          Upload exported messages — .eml, .mbox, or a .zip of either.
-        </div>
-      </header>
-      <div className="grid gap-3 px-5 py-4 text-[13px]">
-        <label className="grid gap-1.5">
-          <span className="text-[11px] font-medium text-foreground">Import into</span>
-          <select
-            value={mailboxId}
-            disabled={running}
-            onChange={(e) => setMailboxId(e.target.value)}
-            className={cn(inputClass, "cursor-pointer appearance-none disabled:opacity-60")}
-          >
-            {mailboxes.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.displayName ? `${m.displayName} (${m.address})` : m.address}
-              </option>
-            ))}
-          </select>
-        </label>
-        <input
-          ref={inputRef}
-          type="file"
-          accept=".eml,.mbox,.zip,message/rfc822"
-          multiple
-          disabled={running}
-          onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
-          className={cn(
-            inputClass,
-            "h-auto cursor-pointer py-1.5 file:mr-3 file:cursor-pointer file:rounded file:border-0 file:bg-muted file:px-2 file:py-1 file:text-foreground",
-          )}
-        />
-        {running && progress && (
-          <div className="grid gap-1.5">
-            <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-              <div
-                className="h-full rounded-full bg-primary transition-[width]"
-                style={{ width: `${pct}%` }}
-              />
-            </div>
-            <span className="text-[11px] text-muted-foreground">
-              {progress.done} / {progress.total} processed
-              {progress.duplicate ? ` · ${progress.duplicate} skipped` : ""}
-              {progress.failed ? ` · ${progress.failed} failed` : ""}
-            </span>
-          </div>
-        )}
-      </div>
-      <div className="flex justify-end border-t bg-muted/30 px-5 py-2.5">
-        <Button
-          type="button"
-          variant="primary"
-          disabled={!files.length || running || !mailboxId}
-          onClick={start}
-        >
+    <Section
+      title="Import mail"
+      description="Upload exported messages — .eml, .mbox, or a .zip of either."
+      footer={
+        <Button variant="primary" disabled={!files.length || running || !mailboxId} onClick={start}>
           {running
             ? "Importing…"
             : files.length
               ? `Import ${files.length} file${files.length === 1 ? "" : "s"}`
               : "Import"}
         </Button>
-      </div>
-    </div>
+      }
+      contentClassName="space-y-3"
+    >
+      <Field label="Import into">
+        <NativeSelect
+          value={mailboxId}
+          disabled={running}
+          onChange={(e) => setMailboxId(e.target.value)}
+        >
+          {mailboxes.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.displayName ? `${m.displayName} (${m.address})` : m.address}
+            </option>
+          ))}
+        </NativeSelect>
+      </Field>
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".eml,.mbox,.zip,message/rfc822"
+        multiple
+        disabled={running}
+        onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
+        className={cn(
+          fieldClass,
+          "cursor-pointer py-1.5 file:mr-3 file:cursor-pointer file:rounded file:border-0 file:bg-muted file:px-2 file:py-1 file:text-foreground",
+        )}
+      />
+      {running && progress && (
+        <div className="grid gap-1.5">
+          <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full bg-primary transition-[width]"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+          <span className="text-[12px] text-muted-foreground">
+            {progress.done} / {progress.total} processed
+            {progress.duplicate ? ` · ${progress.duplicate} skipped` : ""}
+            {progress.failed ? ` · ${progress.failed} failed` : ""}
+          </span>
+        </div>
+      )}
+    </Section>
   );
 }

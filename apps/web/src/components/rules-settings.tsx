@@ -8,7 +8,7 @@ import type {
 } from "@cfmail/shared";
 import { RULE_ACTION_TYPES, RULE_CONDITION_MODES, RULE_FIELDS, RULE_OPS } from "@cfmail/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, Pencil, Plus, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Copy, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api.ts";
@@ -20,6 +20,8 @@ import {
   rulesQuery,
 } from "@/lib/queries.ts";
 import { keys } from "@/lib/query-keys.ts";
+import { Section } from "./settings-ui.tsx";
+import { Button } from "./ui/button.tsx";
 import { useConfirmHelpers } from "./ui/confirm.tsx";
 import {
   Dialog,
@@ -80,16 +82,13 @@ export function RulesSection({ mailboxes }: { mailboxes: MailboxSummary[] }) {
   const selected = mailboxes.find((m) => m.id === mailboxId) ?? mailboxes[0];
 
   return (
-    <section id="rules" className="scroll-mt-8 rounded-md border bg-card">
-      <header className="flex items-center justify-between gap-4 border-b px-5 py-3">
-        <div>
-          <h2 className="text-[14px] font-semibold tracking-tight">Rules</h2>
-          <p className="mt-0.5 text-[12px] text-muted-foreground">
-            Automatically label, file, mark, or block incoming mail. Rules run top to bottom.
-          </p>
-        </div>
-        {mailboxes.length > 1 && (
-          <div className="w-48 shrink-0">
+    <Section
+      id="rules"
+      title="Rules"
+      description="Automatically label, file, mark, or block incoming mail. Rules run top to bottom."
+      action={
+        mailboxes.length > 1 ? (
+          <div className="w-48">
             <Select value={mailboxId} onValueChange={(v) => setMailboxId(v as string)}>
               <SelectTrigger aria-label="Mailbox">
                 <SelectValue>
@@ -108,16 +107,15 @@ export function RulesSection({ mailboxes }: { mailboxes: MailboxSummary[] }) {
               </SelectContent>
             </Select>
           </div>
-        )}
-      </header>
-      <div className="px-5 py-4">
-        {mailboxes.length === 0 ? (
-          <div className="text-[13px] text-muted-foreground">No editable mailboxes yet.</div>
-        ) : selected ? (
-          <RulesList mailbox={selected} mailboxes={mailboxes} />
-        ) : null}
-      </div>
-    </section>
+        ) : undefined
+      }
+    >
+      {mailboxes.length === 0 ? (
+        <div className="text-[13px] text-muted-foreground">No editable mailboxes yet.</div>
+      ) : selected ? (
+        <RulesList mailbox={selected} mailboxes={mailboxes} />
+      ) : null}
+    </Section>
   );
 }
 
@@ -187,110 +185,119 @@ function RulesList({
 
   return (
     <>
-      <div className="mb-3 flex justify-end">
-        <button
-          type="button"
-          onClick={() => setCreating(true)}
-          className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[13px] font-medium text-primary-foreground transition hover:brightness-105"
-        >
-          <Plus className="size-3.5" /> Add rule
-        </button>
-      </div>
-
       {rules.length === 0 ? (
-        <div className="text-[13px] text-muted-foreground">
-          No rules yet for this mailbox. Add one to automate incoming mail.
+        <div className="flex flex-col items-center gap-3 rounded-md border border-dashed px-5 py-8 text-center">
+          <p className="text-[13px] text-muted-foreground">
+            No rules yet. Add one to automate incoming mail.
+          </p>
+          <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
+            <Plus className="size-3.5" /> Add rule
+          </Button>
         </div>
       ) : (
-        <ul className="divide-y">
-          {rules.map((r, i) => (
-            <li key={r.id} className="flex items-center gap-3 py-2.5">
-              <Switch
-                checked={r.enabled}
-                disabled={update.isPending}
-                onCheckedChange={(checked) => update.mutate({ id: r.id, enabled: checked })}
-                aria-label={`Enable ${r.name}`}
-              />
-              <div className="min-w-0 flex-1">
-                <div
-                  className={
-                    r.enabled
-                      ? "text-[13px] font-medium"
-                      : "text-[13px] font-medium text-muted-foreground"
-                  }
-                >
-                  {r.name}
-                </div>
-                <div className="truncate text-[12px] text-muted-foreground">{summarize(r)}</div>
-              </div>
-              <div className="flex shrink-0 items-center gap-0.5">
-                <button
-                  type="button"
-                  aria-label="Move up"
-                  disabled={i === 0 || update.isPending}
-                  onClick={() => move(i, -1)}
-                  className="rounded px-1.5 py-1 text-[13px] text-muted-foreground transition hover:bg-muted disabled:opacity-30"
-                >
-                  ↑
-                </button>
-                <button
-                  type="button"
-                  aria-label="Move down"
-                  disabled={i === rules.length - 1 || update.isPending}
-                  onClick={() => move(i, 1)}
-                  className="rounded px-1.5 py-1 text-[13px] text-muted-foreground transition hover:bg-muted disabled:opacity-30"
-                >
-                  ↓
-                </button>
-                <button
-                  type="button"
-                  aria-label={`Edit ${r.name}`}
-                  onClick={() => setEditing(r)}
-                  className="rounded p-1.5 text-muted-foreground transition hover:bg-muted hover:text-foreground"
-                >
-                  <Pencil className="size-3.5" />
-                </button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    aria-label={`Clone ${r.name}`}
-                    className="rounded p-1.5 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-[12px] text-muted-foreground">
+              {rules.length} rule{rules.length === 1 ? "" : "s"}
+            </span>
+            <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
+              <Plus className="size-3.5" /> Add rule
+            </Button>
+          </div>
+          <ul className="divide-y overflow-hidden rounded-md border">
+            {rules.map((r, i) => (
+              <li
+                key={r.id}
+                className="flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-muted/40"
+              >
+                <Switch
+                  checked={r.enabled}
+                  disabled={update.isPending}
+                  onCheckedChange={(checked) => update.mutate({ id: r.id, enabled: checked })}
+                  aria-label={`Enable ${r.name}`}
+                />
+                <div className="min-w-0 flex-1">
+                  <div
+                    className={
+                      r.enabled
+                        ? "truncate text-[13px] font-medium"
+                        : "truncate text-[13px] font-medium text-muted-foreground"
+                    }
                   >
-                    <Copy className="size-3.5" />
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuLabel>Clone to…</DropdownMenuLabel>
-                    <DropdownMenuItem
-                      onClick={() => clone.mutate({ id: r.id, targetId: mailboxId })}
+                    {r.name}
+                  </div>
+                  <div className="truncate text-[12px] text-muted-foreground">{summarize(r)}</div>
+                </div>
+                <div className="flex shrink-0 items-center gap-0.5">
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Move up"
+                    disabled={i === 0 || update.isPending}
+                    onClick={() => move(i, -1)}
+                  >
+                    <ArrowUp />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Move down"
+                    disabled={i === rules.length - 1 || update.isPending}
+                    onClick={() => move(i, 1)}
+                  >
+                    <ArrowDown />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`Edit ${r.name}`}
+                    onClick={() => setEditing(r)}
+                  >
+                    <Pencil />
+                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      aria-label={`Clone ${r.name}`}
+                      className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground [&_svg]:size-3.5"
                     >
-                      This mailbox (duplicate)
-                    </DropdownMenuItem>
-                    {mailboxes.filter((m) => m.id !== mailboxId).length > 0 && (
-                      <DropdownMenuSeparator />
-                    )}
-                    {mailboxes
-                      .filter((m) => m.id !== mailboxId)
-                      .map((m) => (
-                        <DropdownMenuItem
-                          key={m.id}
-                          onClick={() => clone.mutate({ id: r.id, targetId: m.id })}
-                        >
-                          {m.displayName ?? m.address}
-                        </DropdownMenuItem>
-                      ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                <button
-                  type="button"
-                  aria-label={`Delete ${r.name}`}
-                  onClick={() => onDelete(r)}
-                  className="rounded p-1.5 text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
-                >
-                  <Trash2 className="size-3.5" />
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
+                      <Copy />
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuLabel>Clone to…</DropdownMenuLabel>
+                      <DropdownMenuItem
+                        onClick={() => clone.mutate({ id: r.id, targetId: mailboxId })}
+                      >
+                        This mailbox (duplicate)
+                      </DropdownMenuItem>
+                      {mailboxes.filter((m) => m.id !== mailboxId).length > 0 && (
+                        <DropdownMenuSeparator />
+                      )}
+                      {mailboxes
+                        .filter((m) => m.id !== mailboxId)
+                        .map((m) => (
+                          <DropdownMenuItem
+                            key={m.id}
+                            onClick={() => clone.mutate({ id: r.id, targetId: m.id })}
+                          >
+                            {m.displayName ?? m.address}
+                          </DropdownMenuItem>
+                        ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`Delete ${r.name}`}
+                    onClick={() => onDelete(r)}
+                    className="hover:bg-destructive/10 hover:text-destructive"
+                  >
+                    <Trash2 />
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
       {(creating || editing) && (
@@ -433,7 +440,7 @@ function RuleEditor({
 
         <div className="flex max-h-[60vh] flex-col gap-4 overflow-y-auto pr-1">
           <div>
-            <span className="mb-1 block text-[12px] font-medium text-muted-foreground">Name</span>
+            <span className="mb-1 block text-[12px] font-medium text-foreground">Name</span>
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -445,7 +452,7 @@ function RuleEditor({
 
           {/* Conditions */}
           <div>
-            <div className="mb-1.5 flex items-center gap-2 text-[12px] font-medium text-muted-foreground">
+            <div className="mb-1.5 flex items-center gap-2 text-[12px] font-medium text-foreground">
               Match
               <Select value={mode} onValueChange={(v) => setMode(v as RuleConditionMode)}>
                 <SelectTrigger className="h-7 w-24">
@@ -520,7 +527,7 @@ function RuleEditor({
 
           {/* Actions */}
           <div>
-            <div className="mb-1.5 text-[12px] font-medium text-muted-foreground">Then</div>
+            <div className="mb-1.5 text-[12px] font-medium text-foreground">Then</div>
             <div className="space-y-2">
               {actions.map((a, i) => (
                 <div key={a.rowId} className="flex flex-col gap-1.5">
