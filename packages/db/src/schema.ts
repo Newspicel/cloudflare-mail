@@ -18,6 +18,8 @@ import {
   PGP_MODES,
   PGP_VERIFY,
   QUOTE_KINDS,
+  REMINDER_KINDS,
+  REMINDER_STATUSES,
   RULE_CONDITION_MODES,
   type RuleField,
   type RuleOp,
@@ -848,6 +850,46 @@ export const blockRequest = sqliteTable(
   (t) => [
     index("block_request_status_idx").on(t.status),
     index("block_request_user_idx").on(t.requestedByUserId),
+  ],
+);
+
+// ─── Reminders ──────────────────────────────────────────────────────────────
+
+// A personal reminder about a thread. Two kinds (see REMINDER_KINDS): a manual
+// "remind me about this" set from a thread, or a follow-up "remind me if no
+// reply" created at send time and auto-cancelled when a reply arrives. The cron
+// scans pending rows whose `remindAt` has passed and fires them (SSE + push).
+// `subject` is snapshotted so the bell list and push body need no join.
+// Scoped by `userId` (reminders are personal); `mailboxId` is kept for the
+// nav link + push context only.
+export const reminder = sqliteTable(
+  "reminder",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    mailboxId: text("mailbox_id")
+      .notNull()
+      .references(() => mailbox.id, { onDelete: "cascade" }),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => thread.id, { onDelete: "cascade" }),
+    // Anchor message: the sent message for follow-ups, the acted-on message for
+    // manual reminders (optional).
+    messageId: text("message_id").references(() => message.id, { onDelete: "set null" }),
+    kind: text("kind", { enum: REMINDER_KINDS }).notNull(),
+    remindAt: integer("remind_at", { mode: "timestamp" }).notNull(),
+    subject: text("subject").notNull().default(""),
+    note: text("note"),
+    status: text("status", { enum: REMINDER_STATUSES }).notNull().default("pending"),
+    firedAt: integer("fired_at", { mode: "timestamp" }),
+    ...timestamps(),
+  },
+  (t) => [
+    index("reminder_status_remind_at_idx").on(t.status, t.remindAt),
+    index("reminder_user_status_idx").on(t.userId, t.status),
+    index("reminder_thread_kind_status_idx").on(t.threadId, t.kind, t.status),
   ],
 );
 

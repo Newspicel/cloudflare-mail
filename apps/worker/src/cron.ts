@@ -1,10 +1,11 @@
 import { type DB, makeDB } from "@cfmail/db";
-import { domain, draft, mailbox, thread } from "@cfmail/db/schema";
+import { domain, draft, mailbox, reminder, thread } from "@cfmail/db/schema";
 import { and, asc, eq, inArray, isNotNull, isNull, lte, or } from "drizzle-orm";
 import type { Env } from "./env.ts";
 import { broadcastToUsers } from "./hub.ts";
 import { collectMailboxBlobKeys, collectThreadBlobKeys, deleteBlobs } from "./mail/blobs.ts";
 import { checkDomainHealth } from "./mail/dns.ts";
+import { pushToUsers } from "./mail/push.ts";
 import { buildQuote } from "./mail/quote.ts";
 import { sendFromMailbox } from "./mail/send.ts";
 
@@ -19,6 +20,8 @@ const SERVICE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const SERVICE_PURGE_LIMIT = 500;
 // How many due scheduled sends to dispatch per cron tick.
 const SCHEDULED_SEND_LIMIT = 50;
+// How many due reminders to fire per cron tick.
+const REMINDER_LIMIT = 100;
 // A failing scheduled send is retried on subsequent ticks up to this many times
 // before it's marked failed.
 const SCHEDULED_SEND_MAX_ATTEMPTS = 3;
@@ -27,6 +30,7 @@ export async function runCron(env: Env, now: Date): Promise<void> {
   const db = makeDB(env.DB);
 
   await dispatchScheduledSends(env, db, now);
+  await dispatchReminders(env, db, now);
 
   const expired = await db
     .select({ id: mailbox.id, ownerUserId: mailbox.ownerUserId })
@@ -97,6 +101,47 @@ export async function runCron(env: Env, now: Date): Promise<void> {
           .where(eq(domain.id, d.id));
       } catch (err) {
         console.error(`dns check failed for ${d.name}`, err);
+      }
+    }),
+  );
+}
+
+// Fire reminders whose time has arrived: mark them fired, push a notification to
+// the owner's devices, and broadcast over SSE so the bell updates live. A
+// per-row failure is logged but never aborts the batch.
+async function dispatchReminders(env: Env, db: DB, now: Date): Promise<void> {
+  const due = await db
+    .select()
+    .from(reminder)
+    .where(and(eq(reminder.status, "pending"), lte(reminder.remindAt, now)))
+    .orderBy(asc(reminder.remindAt))
+    .limit(REMINDER_LIMIT);
+
+  await Promise.all(
+    due.map(async (row) => {
+      try {
+        await db
+          .update(reminder)
+          .set({ status: "fired", firedAt: now, updatedAt: now })
+          .where(eq(reminder.id, row.id));
+
+        await broadcastToUsers(env, [row.userId], {
+          type: "reminder_fired",
+          reminderId: row.id,
+          mailboxId: row.mailboxId,
+          threadId: row.threadId,
+          subject: row.subject,
+          note: row.note ?? undefined,
+        });
+
+        await pushToUsers(db, [row.userId], {
+          title: row.kind === "follow_up" ? "No reply yet" : "Reminder",
+          body: row.subject || "(no subject)",
+          url: `/app/m/${row.mailboxId}/t/${row.threadId}`,
+          threadId: row.threadId,
+        });
+      } catch (err) {
+        console.error(`reminder dispatch failed for ${row.id}`, err);
       }
     }),
   );

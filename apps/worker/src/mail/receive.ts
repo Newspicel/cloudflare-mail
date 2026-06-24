@@ -8,6 +8,7 @@ import {
   mailboxMember,
   messageLabel,
   redirect,
+  reminder,
   threadFolder,
 } from "@cfmail/db/schema";
 import { Flag } from "@cfmail/shared/flags";
@@ -237,6 +238,19 @@ export async function handleInbound(
   });
 
   await applyRuleActions(db, outcome, mb.id, messageId, threadId);
+
+  // A reply landed in this thread — satisfy any pending follow-up reminders
+  // ("remind me if no reply") so they never fire.
+  await db
+    .update(reminder)
+    .set({ status: "cancelled", updatedAt: new Date() })
+    .where(
+      and(
+        eq(reminder.threadId, threadId),
+        eq(reminder.kind, "follow_up"),
+        eq(reminder.status, "pending"),
+      ),
+    );
 
   // Best-effort outbound rule actions (forward / auto-reply). Never block
   // delivery — the message is already stored (invariant 8).

@@ -19,6 +19,7 @@ import { labelsRoutes } from "./labels.ts";
 import { mailboxesRoutes } from "./mailboxes.ts";
 import { messagesRoutes } from "./messages.ts";
 import { pushRoutes } from "./push.ts";
+import { remindersRoutes } from "./reminders.ts";
 import { rulesRoutes } from "./rules.ts";
 import { searchRoutes } from "./search.ts";
 import { streamRoute } from "./stream.ts";
@@ -89,6 +90,7 @@ export function buildApi() {
   app.route("/api/avatar", avatarRoutes());
   app.route("/api/temp", tempRoutes());
   app.route("/api/push", pushRoutes());
+  app.route("/api/reminders", remindersRoutes());
   app.route("/api/search", searchRoutes());
   app.get("/api/stream", streamRoute);
 

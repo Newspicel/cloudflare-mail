@@ -40,31 +40,27 @@ export async function getOrCreateVapid(db: DB): Promise<VapidKeys> {
   return { publicKey, privateJWK };
 }
 
-export interface MailNotification {
-  mailboxId: string;
-  userIds: string[];
+// The encrypted payload a service worker renders. `threadId` is the stable tag
+// peers use to dismiss/coalesce a notification per thread. A `type` (not
+// `interface`) so it satisfies the builder's Jsonifiable index signature.
+export type PushPayload = {
   title: string;
   body: string;
   url: string;
-  // Stable per-thread tag so peers can dismiss this notification when the thread
-  // is read elsewhere, and repeat notifications for a thread coalesce.
   threadId: string;
+};
+
+export interface MailNotification extends PushPayload {
+  mailboxId: string;
+  userIds: string[];
 }
 
-// Best-effort push fan-out. Sends to every device of every user who opted into
-// notifications for this mailbox; prunes subscriptions the push service has
-// retired (404/410). Never throws — a push failure must not fail mail delivery.
-export async function notifyMailbox(db: DB, n: MailNotification): Promise<void> {
+// Best-effort push fan-out to every device of the given users; prunes
+// subscriptions the push service has retired (404/410). Never throws — a push
+// failure must not fail the operation that triggered it.
+export async function pushToUsers(db: DB, userIds: string[], payload: PushPayload): Promise<void> {
   try {
-    if (n.userIds.length === 0) return;
-
-    const opted = await db
-      .select({ userId: mailboxNotify.userId })
-      .from(mailboxNotify)
-      .where(
-        and(eq(mailboxNotify.mailboxId, n.mailboxId), inArray(mailboxNotify.userId, n.userIds)),
-      );
-    if (opted.length === 0) return;
+    if (userIds.length === 0) return;
 
     const subs = await db
       .select({
@@ -74,16 +70,10 @@ export async function notifyMailbox(db: DB, n: MailNotification): Promise<void> 
         auth: pushSubscription.auth,
       })
       .from(pushSubscription)
-      .where(
-        inArray(
-          pushSubscription.userId,
-          opted.map((o) => o.userId),
-        ),
-      );
+      .where(inArray(pushSubscription.userId, userIds));
     if (subs.length === 0) return;
 
     const { privateJWK } = await getOrCreateVapid(db);
-    const payload = { title: n.title, body: n.body, url: n.url, threadId: n.threadId };
     const dead: string[] = [];
 
     await Promise.all(
@@ -116,6 +106,35 @@ export async function notifyMailbox(db: DB, n: MailNotification): Promise<void> 
     if (dead.length > 0) {
       await db.delete(pushSubscription).where(inArray(pushSubscription.id, dead));
     }
+  } catch (err) {
+    console.error("pushToUsers failed", err);
+  }
+}
+
+// Push fan-out gated on the per-mailbox opt-in: only users who opted into
+// notifications for this mailbox are notified. Never throws (invariant 8).
+export async function notifyMailbox(db: DB, n: MailNotification): Promise<void> {
+  try {
+    if (n.userIds.length === 0) return;
+
+    const opted = await db
+      .select({ userId: mailboxNotify.userId })
+      .from(mailboxNotify)
+      .where(
+        and(eq(mailboxNotify.mailboxId, n.mailboxId), inArray(mailboxNotify.userId, n.userIds)),
+      );
+    if (opted.length === 0) return;
+
+    await pushToUsers(
+      db,
+      opted.map((o) => o.userId),
+      {
+        title: n.title,
+        body: n.body,
+        url: n.url,
+        threadId: n.threadId,
+      },
+    );
   } catch (err) {
     console.error("notifyMailbox failed", err);
   }

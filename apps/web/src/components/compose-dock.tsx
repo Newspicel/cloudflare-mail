@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import DOMPurify from "dompurify";
 import {
   AlertTriangle,
+  BellPlus,
   ChevronDown,
   Clock,
   ExternalLink,
@@ -485,6 +486,10 @@ export function ComposeForm({
   const [expanded, setExpanded] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [followUpOpen, setFollowUpOpen] = useState(false);
+  // "Remind me if no reply" — off until the user opts in; days is the window.
+  const [followUp, setFollowUp] = useState(false);
+  const [followUpDays, setFollowUpDays] = useState(3);
   const [customDate, setCustomDate] = useState<Date | undefined>(undefined);
   const [customTime, setCustomTime] = useState("09:00");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -722,6 +727,7 @@ export function ComposeForm({
             ...(a.inline ? { inline: true, contentId: a.contentId } : {}),
           }))
         : undefined,
+      followUpDays: followUp ? followUpDays : undefined,
     };
   }, [
     buildBody,
@@ -737,6 +743,8 @@ export function ComposeForm({
     attachments,
     mode,
     html,
+    followUp,
+    followUpDays,
   ]);
 
   const send = useMutation({
@@ -1637,6 +1645,45 @@ export function ComposeForm({
                   </button>
                 ))
               )}
+            </PopoverContent>
+          </Popover>
+          <Popover open={followUpOpen} onOpenChange={setFollowUpOpen}>
+            <PopoverTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Remind me if no reply"
+                  aria-pressed={followUp}
+                  title={followUp ? `Remind if no reply in ${followUpDays}d` : "Remind if no reply"}
+                  className={followUp ? "text-primary" : undefined}
+                >
+                  <BellPlus />
+                </Button>
+              }
+            />
+            <PopoverContent side="top" align="start" className="w-60 p-2.5">
+              <Label className="flex cursor-pointer items-center gap-2 text-[13px]">
+                <Checkbox checked={followUp} onCheckedChange={(v) => setFollowUp(v === true)} />
+                Remind me if no reply
+              </Label>
+              <div className="mt-2 flex items-center gap-2 px-0.5 text-[12px] text-muted-foreground">
+                <Clock className="size-3.5" />
+                <span>after</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={30}
+                  value={followUpDays}
+                  onChange={(e) => {
+                    const n = Number.parseInt(e.target.value, 10);
+                    if (!Number.isNaN(n)) setFollowUpDays(Math.min(30, Math.max(1, n)));
+                  }}
+                  disabled={!followUp}
+                  className="w-14 rounded-md border bg-card px-2 py-1 text-[13px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50"
+                />
+                <span>days</span>
+              </div>
             </PopoverContent>
           </Popover>
         </div>

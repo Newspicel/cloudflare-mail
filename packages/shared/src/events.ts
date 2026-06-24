@@ -40,6 +40,15 @@ export const hubEvent = z.discriminatedUnion("type", [
     draftId: z.string(),
     error: z.string(),
   }),
+  // A reminder's time arrived: the bell badge increments and a toast/push fires.
+  z.object({
+    type: z.literal("reminder_fired"),
+    reminderId: z.string(),
+    mailboxId: z.string(),
+    threadId: z.string(),
+    subject: z.string(),
+    note: z.string().optional(),
+  }),
   z.object({
     type: z.literal("ping"),
     ts: z.number(),

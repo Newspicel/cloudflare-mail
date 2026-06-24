@@ -64,6 +64,18 @@ export type BlockEntryType = (typeof BLOCK_ENTRY_TYPES)[number];
 export const BLOCK_REQUEST_STATUS = ["pending", "approved", "denied"] as const;
 export type BlockRequestStatus = (typeof BLOCK_REQUEST_STATUS)[number];
 
+// ─── Reminders ──────────────────────────────────────────────────────────────
+
+// A reminder is either set manually on a thread ("remind me about this") or
+// created automatically when a mail is sent ("remind me if no reply").
+export const REMINDER_KINDS = ["manual", "follow_up"] as const;
+export type ReminderKind = (typeof REMINDER_KINDS)[number];
+
+// Lifecycle: pending until its time arrives → fired (surfaced in the bell) →
+// done (user dismissed it). A follow-up flips to cancelled when a reply lands.
+export const REMINDER_STATUSES = ["pending", "fired", "done", "cancelled"] as const;
+export type ReminderStatus = (typeof REMINDER_STATUSES)[number];
+
 // ─── Inbound rules / filters ────────────────────────────────────────────────
 
 // Message field a rule condition matches against. `deliveredTo` is the envelope
