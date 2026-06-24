@@ -4,7 +4,7 @@ import { domain, mailbox, message, thread, user } from "@cfmail/db/schema";
 import { eq } from "drizzle-orm";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Env } from "../src/env.ts";
-import { resolveThreadId } from "../src/mail/threads.ts";
+import { bumpThread, resolveThreadId } from "../src/mail/threads.ts";
 
 const e = env as unknown as Env & { TEST_MIGRATIONS: Parameters<typeof applyD1Migrations>[1] };
 
@@ -212,5 +212,74 @@ describe("resolveThreadId", () => {
       fromAddr: "x@example.com",
     });
     expect(b.threadId).toBe(a.threadId);
+  });
+});
+
+describe("bumpThread — trash resurfacing", () => {
+  async function seedTrashed(): Promise<string> {
+    const id = crypto.randomUUID();
+    await db.insert(thread).values({
+      id,
+      mailboxId: MAILBOX_ID,
+      subjectNorm: "hello",
+      lastMsgAt: new Date("2024-01-01T00:00:00Z"),
+      msgCount: 1,
+      participants: [{ address: "x@example.com" }],
+      trashed: true,
+      trashedAt: new Date("2024-01-01T00:00:00Z"),
+    });
+    return id;
+  }
+
+  it("resurfaces a trashed thread when untrash is set (live delivery / reply)", async () => {
+    const id = await seedTrashed();
+    await bumpThread(
+      db,
+      id,
+      new Date("2024-02-02T00:00:00Z"),
+      [{ address: "x@example.com" }],
+      1,
+      true,
+    );
+
+    const th = (await db.query.thread.findFirst({ where: eq(thread.id, id) }))!;
+    expect(th.trashed).toBe(false);
+    expect(th.trashedAt).toBeNull();
+    expect(th.msgCount).toBe(2);
+    expect(th.unreadCount).toBe(1);
+  });
+
+  it("leaves a trashed thread trashed when untrash is not set (import)", async () => {
+    const id = await seedTrashed();
+    await bumpThread(db, id, new Date("2024-02-02T00:00:00Z"), [{ address: "x@example.com" }], 0);
+
+    const th = (await db.query.thread.findFirst({ where: eq(thread.id, id) }))!;
+    expect(th.trashed).toBe(true);
+    expect(th.trashedAt).toEqual(new Date("2024-01-01T00:00:00Z"));
+    expect(th.msgCount).toBe(2);
+  });
+
+  it("does not touch trash state on a non-trashed thread", async () => {
+    const id = crypto.randomUUID();
+    await db.insert(thread).values({
+      id,
+      mailboxId: MAILBOX_ID,
+      subjectNorm: "hello",
+      lastMsgAt: new Date("2024-01-01T00:00:00Z"),
+      msgCount: 1,
+      participants: [{ address: "x@example.com" }],
+    });
+    await bumpThread(
+      db,
+      id,
+      new Date("2024-02-02T00:00:00Z"),
+      [{ address: "x@example.com" }],
+      1,
+      true,
+    );
+
+    const th = (await db.query.thread.findFirst({ where: eq(thread.id, id) }))!;
+    expect(th.trashed).toBe(false);
+    expect(th.trashedAt).toBeNull();
   });
 });

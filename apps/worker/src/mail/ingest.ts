@@ -33,6 +33,9 @@ export interface IngestOptions {
   // A matched markSpam rule files the thread to Spam regardless of the spam
   // verdict or new/existing-thread heuristic (explicit user intent).
   forceSpam?: boolean;
+  // Live delivery (the `email` handler) vs. historical import. A live message
+  // resurfaces a trashed thread; import must not resurrect old trash.
+  live?: boolean;
   // Gateway PGP (invariant 17). When `raw` is ciphertext we keep it at rawR2Key
   // as evidence and store the decrypted .eml (`pgp.plainRaw`) at plainR2Key, which
   // the body endpoint serves. `parsed` should already reflect the plaintext body.
@@ -181,7 +184,7 @@ export async function ingestRaw(env: Env, db: DB, opts: IngestOptions): Promise<
   // Unread badge only moves for inbound mail that arrives unseen.
   const unreadDelta = opts.direction === "in" && !(opts.flags & Flag.SEEN) ? 1 : 0;
   const at = opts.receivedAt ?? opts.sentAt ?? new Date();
-  await bumpThread(db, threadId, at, participants, unreadDelta);
+  await bumpThread(db, threadId, at, participants, unreadDelta, !!opts.live);
 
   return { messageId, threadId, isNewThread, joinedByHeader };
 }

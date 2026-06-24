@@ -169,10 +169,15 @@ export async function bumpThread(
   at: Date,
   newParticipants: { name?: string; address: string }[],
   unreadDelta: number,
+  // A live new message (inbound delivery or our own reply) resurfaces a trashed
+  // thread: trash is thread-wide, so without this a reply to a trashed
+  // conversation would stay buried in Trash. Off for historical import, which
+  // must not resurrect previously-trashed threads on re-import.
+  untrash = false,
 ): Promise<void> {
   const existing = await db.query.thread.findFirst({
     where: eq(thread.id, threadId),
-    columns: { participants: true, msgCount: true, unreadCount: true },
+    columns: { participants: true, msgCount: true, unreadCount: true, trashed: true },
   });
   const prev = existing?.participants ?? [];
   const seen = new Set(prev.map((p) => p.address.toLowerCase()));
@@ -191,6 +196,7 @@ export async function bumpThread(
       msgCount: (existing?.msgCount ?? 0) + 1,
       unreadCount: Math.max(0, (existing?.unreadCount ?? 0) + unreadDelta),
       participants: merged,
+      ...(untrash && existing?.trashed ? { trashed: false, trashedAt: null } : {}),
     })
     .where(eq(thread.id, threadId));
 }

@@ -224,6 +224,7 @@ export async function handleInbound(msg: ForwardableEmailMessage, env: Env): Pro
     spam,
     forceSpam: outcome.markSpam,
     pgp,
+    live: true,
   });
 
   await applyRuleActions(db, outcome, mb.id, messageId, threadId);
