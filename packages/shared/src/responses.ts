@@ -40,7 +40,9 @@ export type Serialized<T> = {
 
 export type ThreadDto = Serialized<typeof thread.$inferSelect>;
 export type MessageDto = Serialized<typeof message.$inferSelect>;
-export type DraftDto = Serialized<typeof draft.$inferSelect>;
+// The resolved outbound payload never leaves the server — drafts only expose
+// `scheduledFor` so the UI can show/cancel a pending scheduled send.
+export type DraftDto = Omit<Serialized<typeof draft.$inferSelect>, "scheduledPayload">;
 export type LabelDto = typeof label.$inferSelect; // no date columns
 
 /** An inbound rule; `conditions`/`actions` keep their typed JSON shape. */

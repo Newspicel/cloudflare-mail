@@ -1,6 +1,6 @@
 import { draft } from "@cfmail/db/schema";
 import { Perm } from "@cfmail/shared/permissions";
-import { createDraft, updateDraft } from "@cfmail/shared/schemas";
+import { createDraft, scheduleDraft, updateDraft } from "@cfmail/shared/schemas";
 import { zValidator } from "@hono/zod-validator";
 import { and, desc, eq } from "drizzle-orm";
 import { Hono } from "hono";
@@ -123,6 +123,49 @@ export function draftsRoutes() {
     const [row] = await db.update(draft).set(patch).where(eq(draft.id, id)).returning();
     if (!row) throw new HTTPException(404, { message: "not found" });
     return c.json({ draft: serializeDraft(row) });
+  });
+
+  // Defer this draft's send to `sendAt`. The draft itself is the scheduled
+  // record (so it stays visible/cancelable in the Drafts list); the cron replays
+  // the stored payload at the chosen time and deletes the draft. WRITE on the
+  // mailbox is the same bar as an immediate send.
+  r.post("/:id/schedule", zValidator("json", scheduleDraft), async (c) => {
+    const db = dbFromCtx(c);
+    const user = c.get("user")!;
+    const id = c.req.param("id");
+    const { sendAt, payload } = c.req.valid("json");
+    const row = await loadOwn(db, id, user.id);
+    await requirePerm(db, user.id, row.mailboxId, Perm.WRITE);
+    assertOwnedAttachmentKeys(user.id, payload.attachments);
+
+    const [updated] = await db
+      .update(draft)
+      .set({
+        scheduledFor: new Date(sendAt),
+        // Pin the payload's mailbox to the draft's own — never let a body sneak
+        // a send out of a mailbox the caller didn't pass the WRITE check for.
+        scheduledPayload: { ...payload, mailboxId: row.mailboxId },
+        updatedAt: new Date(),
+      })
+      .where(eq(draft.id, id))
+      .returning();
+    if (!updated) throw new HTTPException(404, { message: "not found" });
+    return c.json({ draft: serializeDraft(updated) });
+  });
+
+  // Cancel a scheduled send — the row reverts to an ordinary editable draft.
+  r.delete("/:id/schedule", async (c) => {
+    const db = dbFromCtx(c);
+    const user = c.get("user")!;
+    const id = c.req.param("id");
+    await loadOwn(db, id, user.id);
+    const [updated] = await db
+      .update(draft)
+      .set({ scheduledFor: null, scheduledPayload: null, updatedAt: new Date() })
+      .where(eq(draft.id, id))
+      .returning();
+    if (!updated) throw new HTTPException(404, { message: "not found" });
+    return c.json({ draft: serializeDraft(updated) });
   });
 
   r.delete("/:id", async (c) => {

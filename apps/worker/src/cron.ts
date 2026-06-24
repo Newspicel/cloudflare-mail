@@ -1,10 +1,12 @@
-import { makeDB } from "@cfmail/db";
-import { domain, mailbox, thread } from "@cfmail/db/schema";
-import { and, eq, inArray, isNotNull, isNull, lte, or } from "drizzle-orm";
+import { type DB, makeDB } from "@cfmail/db";
+import { domain, draft, mailbox, thread } from "@cfmail/db/schema";
+import { and, asc, eq, inArray, isNotNull, isNull, lte, or } from "drizzle-orm";
 import type { Env } from "./env.ts";
 import { broadcastToUsers } from "./hub.ts";
 import { collectMailboxBlobKeys, collectThreadBlobKeys, deleteBlobs } from "./mail/blobs.ts";
 import { checkDomainHealth } from "./mail/dns.ts";
+import { buildQuote } from "./mail/quote.ts";
+import { sendFromMailbox } from "./mail/send.ts";
 
 const DNS_RECHECK_INTERVAL_MS = 60 * 60 * 1000;
 const DNS_BATCH_LIMIT = 10;
@@ -15,9 +17,13 @@ const TRASH_PURGE_LIMIT = 500;
 // there is no user inbox, so retention is automatic rather than user-driven.
 const SERVICE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const SERVICE_PURGE_LIMIT = 500;
+// How many due scheduled sends to dispatch per cron tick.
+const SCHEDULED_SEND_LIMIT = 50;
 
 export async function runCron(env: Env, now: Date): Promise<void> {
   const db = makeDB(env.DB);
+
+  await dispatchScheduledSends(env, db, now);
 
   const expired = await db
     .select({ id: mailbox.id, ownerUserId: mailbox.ownerUserId })
@@ -88,6 +94,60 @@ export async function runCron(env: Env, now: Date): Promise<void> {
           .where(eq(domain.id, d.id));
       } catch (err) {
         console.error(`dns check failed for ${d.name}`, err);
+      }
+    }),
+  );
+}
+
+// Dispatch drafts whose scheduled send time has arrived. Each is sent through
+// the normal outbound path with its stored payload, then the draft is deleted.
+// A send that throws reverts the row to an ordinary draft (so it stops retrying
+// and the content is preserved) and the author is warned over SSE.
+async function dispatchScheduledSends(env: Env, db: DB, now: Date): Promise<void> {
+  const due = await db
+    .select()
+    .from(draft)
+    .where(and(isNotNull(draft.scheduledFor), lte(draft.scheduledFor, now)))
+    .orderBy(asc(draft.scheduledFor))
+    .limit(SCHEDULED_SEND_LIMIT);
+
+  await Promise.all(
+    due.map(async (row) => {
+      const payload = row.scheduledPayload;
+      // A scheduled row without a payload is corrupt — unschedule it rather than
+      // loop on it every tick.
+      if (!payload) {
+        await db.update(draft).set({ scheduledFor: null }).where(eq(draft.id, row.id));
+        return;
+      }
+      try {
+        const quote = payload.quote
+          ? await buildQuote(env, db, row.userId, payload.quote)
+          : undefined;
+        await sendFromMailbox(env, db, row.userId, payload, quote);
+
+        // The send consumed the temp upload blobs (they live in the new .eml);
+        // drop them and the draft, mirroring the post-send cleanup of the UI.
+        const prefix = `draft/${row.userId}/`;
+        await Promise.all(
+          (payload.attachments ?? [])
+            .filter((a) => a.r2Key.startsWith(prefix))
+            .map((a) => env.BLOBS.delete(a.r2Key)),
+        );
+        await db.delete(draft).where(eq(draft.id, row.id));
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        console.error(`scheduled send failed for draft ${row.id}`, err);
+        await db
+          .update(draft)
+          .set({ scheduledFor: null, scheduledPayload: null, updatedAt: now })
+          .where(eq(draft.id, row.id));
+        await broadcastToUsers(env, [row.userId], {
+          type: "scheduled_send_failed",
+          mailboxId: row.mailboxId,
+          draftId: row.id,
+          error: detail,
+        });
       }
     }),
   );

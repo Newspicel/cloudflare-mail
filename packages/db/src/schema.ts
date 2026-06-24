@@ -703,13 +703,39 @@ export const draft = sqliteTable(
       .$type<{ r2Key: string; filename: string; contentType: string; sizeBytes: number }[]>()
       .notNull()
       .default(sql`'[]'`),
+    // Scheduled send: when set, the cron dispatches `scheduledPayload` at this
+    // time and deletes the draft. Clearing `scheduledFor` reverts it to a normal
+    // editable draft (how "cancel" works). The payload is the fully-resolved
+    // outbound body (text/html already rendered + sanitized client-side), so the
+    // deferred send is byte-identical to an immediate one.
+    scheduledFor: integer("scheduled_for", { mode: "timestamp" }),
+    scheduledPayload: text("scheduled_payload", { mode: "json" }).$type<ScheduledSendPayload>(),
     ...timestamps(),
   },
   (t) => [
     index("draft_mailbox_idx").on(t.mailboxId, t.updatedAt),
     index("draft_user_idx").on(t.userId),
+    index("draft_scheduled_idx").on(t.scheduledFor),
   ],
 );
+
+// The resolved outbound payload stored on a scheduled draft. Mirrors the
+// `sendMessage` input shape (shared/schemas.ts) without coupling the db package
+// to the shared zod schemas; the cron feeds it straight into sendFromMailbox.
+export type ScheduledSendPayload = {
+  mailboxId: string;
+  fromAddress?: string;
+  to: { name?: string; address: string }[];
+  cc?: { name?: string; address: string }[];
+  bcc?: { name?: string; address: string }[];
+  subject: string;
+  text?: string;
+  html?: string;
+  inReplyTo?: string;
+  references?: string[];
+  quote?: { messageId: string; kind: (typeof QUOTE_KINDS)[number] };
+  attachments?: { r2Key: string; filename: string; contentType: string }[];
+};
 
 // ─── Web Push notifications ─────────────────────────────────────────────────
 
