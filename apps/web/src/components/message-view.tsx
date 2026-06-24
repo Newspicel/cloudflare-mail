@@ -326,7 +326,9 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
         </div>
 
         <div className="flex-1 space-y-3 overflow-y-auto p-3 sm:p-4">
-          {!readOnly && <ThreadAiPanel thread={thread} messages={visibleMessages} />}
+          {!readOnly && (
+            <ThreadAiPanel key={thread.id} thread={thread} messages={visibleMessages} />
+          )}
           {visibleMessages.map((m) => (
             <MessageCard
               key={m.id}
