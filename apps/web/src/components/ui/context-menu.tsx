@@ -56,15 +56,19 @@ function ContextMenuGroup({ ...props }: ContextMenuPrimitive.Group.Props) {
   return <ContextMenuPrimitive.Group data-slot="context-menu-group" {...props} />;
 }
 
+// A standalone section heading. Base UI's ContextMenu.GroupLabel requires a
+// wrapping ContextMenu.Group (throws #31 otherwise); these labels are plain
+// headers, so render a styled presentation div instead.
 function ContextMenuLabel({
   className,
   inset,
   ...props
-}: ContextMenuPrimitive.GroupLabel.Props & {
+}: React.ComponentProps<"div"> & {
   inset?: boolean;
 }) {
   return (
-    <ContextMenuPrimitive.GroupLabel
+    <div
+      role="presentation"
       data-slot="context-menu-label"
       data-inset={inset}
       className={cn(
