@@ -480,7 +480,8 @@ function MailboxPgpCard({ mailboxId, settingsKey }: { mailboxId: string; setting
                     variant="outline"
                     size="sm"
                     onClick={async () => {
-                      if (await confirmDelete(`recipient key for ${k.email}`)) removeContact.mutate(k.id);
+                      if (await confirmDelete(`recipient key for ${k.email}`))
+                        removeContact.mutate(k.id);
                     }}
                     disabled={removeContact.isPending}
                   >
