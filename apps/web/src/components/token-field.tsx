@@ -3,6 +3,7 @@ import { type KeyboardEvent, useRef } from "react";
 import { cn } from "@/lib/cn.ts";
 
 const SPLIT = /[\s,;]+/;
+const defaultNormalize = (raw: string) => raw.trim() || null;
 
 export interface TokenFieldProps {
   value: string[];
@@ -23,7 +24,7 @@ export function TokenField({
   value,
   onChange,
   placeholder,
-  normalize = (raw) => raw.trim() || null,
+  normalize = defaultNormalize,
   ariaLabel,
   className,
   disabled,

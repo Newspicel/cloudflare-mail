@@ -50,8 +50,10 @@ export async function runRuleSends(env: Env, db: DB, ctx: RuleSendContext): Prom
     // Don't forward back to ourselves — that would loop straight back in.
     if (fwd.to.trim().toLowerCase() === ctx.selfAddr.toLowerCase()) continue;
     const raw = buildForward(ctx, fromName, fwd.to);
+    // eslint-disable-next-line no-await-in-loop -- sends are gated by the shared hourly budget, so each must settle before the next
     if (await trySend(env, ctx.selfAddr, fwd.to, raw)) {
       budget--;
+      // eslint-disable-next-line no-await-in-loop -- sequential by design; see above
       await logSend(db, ctx, fwd.ruleId, "forward", fwd.to);
     }
   }
@@ -62,10 +64,13 @@ export async function runRuleSends(env: Env, db: DB, ctx: RuleSendContext): Prom
 
   for (const reply of outcome.autoReplies) {
     if (budget <= 0) break;
+    // eslint-disable-next-line no-await-in-loop -- per-recipient throttle check must precede the send
     if (await repliedRecently(db, reply.ruleId, headerFrom)) continue;
     const raw = buildAutoReply(ctx, fromName, headerFrom, reply.subject, reply.body);
+    // eslint-disable-next-line no-await-in-loop -- sends are gated by the shared hourly budget, so each must settle before the next
     if (await trySend(env, ctx.selfAddr, headerFrom, raw)) {
       budget--;
+      // eslint-disable-next-line no-await-in-loop -- sequential by design; see above
       await logSend(db, ctx, reply.ruleId, "autoReply", headerFrom);
     }
   }

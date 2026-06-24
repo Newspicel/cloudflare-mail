@@ -41,7 +41,7 @@ const expected = getAuthTables({
 
 describe("better-auth schema vs schema.ts", () => {
   it("maps every model Better Auth expects", () => {
-    expect(Object.keys(expected).sort()).toEqual(Object.keys(TABLES).sort());
+    expect(Object.keys(expected).toSorted()).toEqual(Object.keys(TABLES).toSorted());
   });
 
   for (const [model, table] of Object.entries(expected)) {
