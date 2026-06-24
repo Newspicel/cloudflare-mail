@@ -15,6 +15,8 @@ import { useThreadListMutation } from "@/lib/thread-mutations.ts";
 import { formatRemaining, useNow } from "@/lib/time.ts";
 import { useListVirtualizer, visibleBlock } from "@/lib/use-list-virtualizer.ts";
 import { FOLDER_META, FolderTabs } from "./folder-tabs.tsx";
+import { BulkLabelsMenu } from "./labels-menu.tsx";
+import { MoveToFolderMenu } from "./move-to-folder-menu.tsx";
 import { ThreadRowView } from "./thread-row.tsx";
 import { Checkbox } from "./ui/checkbox.tsx";
 import { useConfirmHelpers } from "./ui/confirm.tsx";
@@ -80,6 +82,18 @@ export function ThreadList({
     onApply: () => setSelected(new Set()),
   });
 
+  const bulkRead = useThreadListMutation<boolean>({
+    mailboxId,
+    mutationFn: (read) =>
+      Promise.all(
+        [...selected].map((id) =>
+          api(`/api/threads/${id}`, { method: "PATCH", body: JSON.stringify({ read }) }),
+        ),
+      ),
+    optimistic: (read, qc) =>
+      patchThreadsInLists(qc, mailboxId, [...selected], { unreadCount: read ? 0 : 1 }),
+  });
+
   const bulkDel = useThreadListMutation<string[]>({
     mailboxId,
     mutationFn: (ids) =>
@@ -142,31 +156,57 @@ export function ThreadList({
                     onClick={deleteSelected}
                   />
                 </>
-              ) : view === "spam" ? (
-                <IconButton
-                  icon={Inbox}
-                  label="Not spam"
-                  size="icon-sm"
-                  disabled={bulk.isPending}
-                  onClick={() => bulk.mutate({ spam: false })}
-                />
               ) : (
-                <IconButton
-                  icon={ShieldAlert}
-                  label="Mark as spam"
-                  size="icon-sm"
-                  disabled={bulk.isPending}
-                  onClick={() => bulk.mutate({ spam: true })}
-                />
-              )}
-              {view !== "trash" && (
-                <IconButton
-                  icon={Trash2}
-                  label="Trash"
-                  size="icon-sm"
-                  disabled={bulk.isPending}
-                  onClick={() => bulk.mutate({ trashed: true })}
-                />
+                <>
+                  <IconButton
+                    icon={MailOpen}
+                    label="Mark as read"
+                    size="icon-sm"
+                    disabled={bulkRead.isPending}
+                    onClick={() => bulkRead.mutate(true)}
+                  />
+                  <IconButton
+                    icon={Mail}
+                    label="Mark as unread"
+                    size="icon-sm"
+                    disabled={bulkRead.isPending}
+                    onClick={() => bulkRead.mutate(false)}
+                  />
+                  <BulkLabelsMenu mailboxId={mailboxId} threadIds={[...selected]} size="icon-sm" />
+                  <MoveToFolderMenu
+                    mailboxId={mailboxId}
+                    threadIds={[...selected]}
+                    size="icon-sm"
+                    onMoved={(folderName) => {
+                      toast.success(`Moved to ${folderName}`);
+                      setSelected(new Set());
+                    }}
+                  />
+                  {view === "spam" ? (
+                    <IconButton
+                      icon={Inbox}
+                      label="Not spam"
+                      size="icon-sm"
+                      disabled={bulk.isPending}
+                      onClick={() => bulk.mutate({ spam: false })}
+                    />
+                  ) : (
+                    <IconButton
+                      icon={ShieldAlert}
+                      label="Mark as spam"
+                      size="icon-sm"
+                      disabled={bulk.isPending}
+                      onClick={() => bulk.mutate({ spam: true })}
+                    />
+                  )}
+                  <IconButton
+                    icon={Trash2}
+                    label="Trash"
+                    size="icon-sm"
+                    disabled={bulk.isPending}
+                    onClick={() => bulk.mutate({ trashed: true })}
+                  />
+                </>
               )}
             </div>
           </div>

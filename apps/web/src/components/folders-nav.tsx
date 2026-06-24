@@ -65,7 +65,7 @@ export function FoldersNav({ onClose }: { onClose?: () => void }) {
     file.mutate(
       {
         folderId,
-        threadId: drag.threadId,
+        threadIds: [drag.threadId],
         mailboxId: drag.mailboxId,
         fromFolderId: drag.fromFolderId,
       },

@@ -11,25 +11,26 @@ import { Input } from "./ui/input.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
 
 interface Props {
-  threadId: string;
+  threadIds: string[];
   mailboxId: string;
+  size?: "icon" | "icon-sm";
   onMoved?: (folderName: string) => void;
 }
 
-export function MoveToFolderMenu({ threadId, mailboxId, onMoved }: Props) {
+export function MoveToFolderMenu({ threadIds, mailboxId, size = "icon", onMoved }: Props) {
   const [open, setOpen] = useState(false);
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         render={
-          <Button variant="ghost" size="icon" aria-label="Move to folder">
+          <Button variant="ghost" size={size} aria-label="Move to folder">
             <FolderInput />
           </Button>
         }
       />
       <PopoverContent align="end" className="w-64 p-2">
         <MovePopover
-          threadId={threadId}
+          threadIds={threadIds}
           mailboxId={mailboxId}
           onMoved={(n) => {
             setOpen(false);
@@ -41,7 +42,7 @@ export function MoveToFolderMenu({ threadId, mailboxId, onMoved }: Props) {
   );
 }
 
-function MovePopover({ threadId, mailboxId, onMoved }: Props) {
+function MovePopover({ threadIds, mailboxId, onMoved }: Props) {
   const qc = useQueryClient();
   const foldersQ = useQuery(foldersQuery);
   const folders = foldersQ.data?.folders ?? [];
@@ -51,7 +52,7 @@ function MovePopover({ threadId, mailboxId, onMoved }: Props) {
   const [name, setName] = useState("");
 
   function move(folderId: string, folderName: string) {
-    file.mutate({ folderId, threadId, mailboxId }, { onSuccess: () => onMoved?.(folderName) });
+    file.mutate({ folderId, threadIds, mailboxId }, { onSuccess: () => onMoved?.(folderName) });
   }
 
   const create = useMutation({

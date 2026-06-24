@@ -9,13 +9,13 @@ import {
 
 interface FileInput {
   folderId: string;
-  threadId: string;
+  threadIds: string[];
   mailboxId: string;
   /** Origin folder, when moving a row from one folder to another. */
   fromFolderId?: string;
 }
 
-// File a conversation into a custom folder (a "move"): optimistically drop it
+// File conversations into a custom folder (a "move"): optimistically drop them
 // from the source mailbox lists and any origin folder; `invalidateThreadChange`
 // reconciles the real counts and lists afterwards (also restoring on error).
 export function useFileThread() {
@@ -24,15 +24,15 @@ export function useFileThread() {
     mutationFn: (v: FileInput) =>
       api(`/api/folders/${v.folderId}/threads`, {
         method: "POST",
-        body: JSON.stringify({ threadIds: [v.threadId] }),
+        body: JSON.stringify({ threadIds: v.threadIds }),
       }),
     onMutate: (v) => {
-      removeThreadsFromLists(qc, v.mailboxId, [v.threadId]);
-      removeThreadsFromLists(qc, "all", [v.threadId]);
-      if (v.fromFolderId) removeThreadsFromFolder(qc, v.fromFolderId, [v.threadId]);
+      removeThreadsFromLists(qc, v.mailboxId, v.threadIds);
+      removeThreadsFromLists(qc, "all", v.threadIds);
+      if (v.fromFolderId) removeThreadsFromFolder(qc, v.fromFolderId, v.threadIds);
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed to move"),
-    onSettled: (_d, _e, v) => invalidateThreadChange(qc, v.mailboxId, v.threadId),
+    onSettled: (_d, _e, v) => invalidateThreadChange(qc, v.mailboxId),
   });
 }
 

@@ -98,6 +98,39 @@ export function labelsRoutes() {
     return c.body(null, 204);
   });
 
+  // Apply/remove a label across every message in a thread — bulk labelling from
+  // the list operates on threads, but labels are stored per message.
+  r.put("/:id/threads/:threadId", async (c) => {
+    const db = dbFromCtx(c);
+    const user = c.get("user")!;
+    const id = c.req.param("id");
+    const threadId = c.req.param("threadId");
+    const { mailboxId, messageIds } = await loadLabelAndThread(db, id, threadId);
+    await requirePerm(db, user.id, mailboxId, Perm.WRITE);
+    if (messageIds.length > 0) {
+      await db
+        .insert(messageLabel)
+        .values(messageIds.map((messageId) => ({ messageId, labelId: id })))
+        .onConflictDoNothing();
+    }
+    return c.json({ ok: true });
+  });
+
+  r.delete("/:id/threads/:threadId", async (c) => {
+    const db = dbFromCtx(c);
+    const user = c.get("user")!;
+    const id = c.req.param("id");
+    const threadId = c.req.param("threadId");
+    const { mailboxId, messageIds } = await loadLabelAndThread(db, id, threadId);
+    await requirePerm(db, user.id, mailboxId, Perm.WRITE);
+    if (messageIds.length > 0) {
+      await db
+        .delete(messageLabel)
+        .where(and(eq(messageLabel.labelId, id), inArray(messageLabel.messageId, messageIds)));
+    }
+    return c.body(null, 204);
+  });
+
   // Resolve labels attached to a set of message ids the caller already has access to.
   r.get("/by-messages", async (c) => {
     const db = dbFromCtx(c);
@@ -212,4 +245,21 @@ async function loadLabelAndMessage(
     throw new HTTPException(400, { message: "label/message mailbox mismatch" });
   }
   return { mailboxId: msg.mailboxId };
+}
+
+async function loadLabelAndThread(
+  db: ReturnType<typeof dbFromCtx>,
+  labelId: string,
+  threadId: string,
+): Promise<{ mailboxId: string; messageIds: string[] }> {
+  const lab = await db.query.label.findFirst({
+    where: eq(label.id, labelId),
+    columns: { mailboxId: true },
+  });
+  if (!lab) throw new HTTPException(404, { message: "label not found" });
+  const msgs = await db
+    .select({ id: message.id })
+    .from(message)
+    .where(and(eq(message.threadId, threadId), eq(message.mailboxId, lab.mailboxId)));
+  return { mailboxId: lab.mailboxId, messageIds: msgs.map((m) => m.id) };
 }
