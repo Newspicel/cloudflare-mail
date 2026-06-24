@@ -26,6 +26,32 @@ export function attachmentsRoutes() {
     return c.json({ r2Key: key, filename, contentType, sizeBytes: body.byteLength });
   });
 
+  // Serve a still-unsent draft blob inline, for the composer to preview an
+  // embedded image across reloads. Ownership is the `draft/<userId>/` key
+  // prefix (same contract as the send path). Restricted to raster images and
+  // served nosniff so a draft blob can never execute as script in our origin.
+  r.get("/draft-blob", async (c) => {
+    const user = c.get("user")!;
+    const key = c.req.query("key") ?? "";
+    if (!key.startsWith(`draft/${user.id}/`)) {
+      throw new HTTPException(403, { message: "forbidden" });
+    }
+    const obj = await c.env.BLOBS.get(key);
+    if (!obj) throw new HTTPException(404, { message: "not found" });
+    const type = obj.httpMetadata?.contentType ?? "";
+    if (!/^image\/(png|jpeg|gif|webp|avif)$/i.test(type)) {
+      throw new HTTPException(415, { message: "unsupported" });
+    }
+    return new Response(obj.body, {
+      headers: {
+        "content-type": type,
+        "x-content-type-options": "nosniff",
+        "cache-control": "private, max-age=300",
+        "content-security-policy": "default-src 'none'; sandbox",
+      },
+    });
+  });
+
   r.get("/:id", async (c) => {
     const db = dbFromCtx(c);
     const user = c.get("user")!;

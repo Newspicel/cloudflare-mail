@@ -146,7 +146,13 @@ export function detectPgp(rawText: string): PgpShape {
 export interface MailContent {
   text?: string;
   html?: string;
-  attachments?: { filename: string; contentType: string; data: Uint8Array }[];
+  attachments?: {
+    filename: string;
+    contentType: string;
+    data: Uint8Array;
+    inline?: boolean;
+    contentId?: string;
+  }[];
 }
 
 export interface PgpHeaders {
@@ -414,15 +420,25 @@ function textPart(contentType: string, text: string): string {
   ].join(CRLF);
 }
 
-function attachmentPart(att: { filename: string; contentType: string; data: Uint8Array }): string {
+function attachmentPart(att: {
+  filename: string;
+  contentType: string;
+  data: Uint8Array;
+  inline?: boolean;
+  contentId?: string;
+}): string {
   const name = mimeFilename(att.filename);
-  return [
+  const lines = [
     `Content-Type: ${att.contentType}; name="${name}"`,
     "Content-Transfer-Encoding: base64",
-    `Content-Disposition: attachment; filename="${name}"`,
-    "",
-    b64lines(att.data),
-  ].join(CRLF);
+    `Content-Disposition: ${att.inline ? "inline" : "attachment"}; filename="${name}"`,
+  ];
+  if (att.inline && att.contentId) {
+    const bare = att.contentId.replace(/^<|>$/g, "");
+    if (bare) lines.push(`Content-ID: <${bare}>`);
+  }
+  lines.push("", b64lines(att.data));
+  return lines.join(CRLF);
 }
 
 function topHeaders(h: PgpHeaders, extra: Record<string, string>): string {
