@@ -5,6 +5,7 @@ import { ArrowRight, Check, X } from "lucide-react";
 import { useId, useState } from "react";
 import { toast } from "sonner";
 import { MailboxSettingsForm } from "@/components/mailbox-settings-form.tsx";
+import { TokenField } from "@/components/token-field.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Checkbox } from "@/components/ui/checkbox.tsx";
 import { useConfirm } from "@/components/ui/confirm.tsx";
@@ -25,7 +26,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select.tsx";
-import { Textarea } from "@/components/ui/textarea.tsx";
 import { api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
 import { type MailboxSummary, mailboxesQuery, meQuery } from "@/lib/queries.ts";
@@ -2457,30 +2457,36 @@ function BlockEntryRow({ entry }: { entry: BlockEntry }) {
   );
 }
 
+// Strip a leading @ / mailto and lowercase; reject anything without a dot.
+function normalizeDomain(raw: string): string | null {
+  const d = raw
+    .trim()
+    .toLowerCase()
+    .replace(/^@/, "")
+    .replace(/^mailto:/, "");
+  return d.includes(".") ? d : null;
+}
+
 function ProtectedDomainsPanel() {
   const qc = useQueryClient();
   const q = useQuery({
     queryKey: ["admin-protected-domains"],
     queryFn: () => api<{ domains: string[] }>("/api/admin/block/protected-domains"),
   });
-  const [text, setText] = useState<string | null>(null);
-  // Once loaded, seed the editor from the server value (newline-separated).
-  const current = (q.data?.domains ?? []).join("\n");
-  const draft = text ?? current;
+  // null = untouched (mirrors the server value); an array once edited locally.
+  const [draft, setDraft] = useState<string[] | null>(null);
+  const current = q.data?.domains ?? [];
+  const domains = draft ?? current;
+  const dirty = draft !== null;
 
   const save = useMutation({
     mutationFn: () =>
       api("/api/admin/block/protected-domains", {
         method: "PUT",
-        body: JSON.stringify({
-          domains: draft
-            .split(/[\s,]+/)
-            .map((d) => d.trim().toLowerCase())
-            .filter(Boolean),
-        }),
+        body: JSON.stringify({ domains }),
       }),
     onSuccess: () => {
-      setText(null);
+      setDraft(null);
       qc.invalidateQueries({ queryKey: ["admin-protected-domains"] });
       toast.success("Protected domains saved");
     },
@@ -2490,21 +2496,20 @@ function ProtectedDomainsPanel() {
   return (
     <Section
       title="Protected domains"
-      description="These domains can never be blocked wholesale — only individual addresses on them. One domain per line."
+      description="These domains can never be blocked wholesale — only individual addresses on them."
     >
-      <Textarea
-        value={draft}
-        onChange={(e) => setText(e.target.value)}
-        rows={6}
-        spellCheck={false}
-        className="resize-y font-mono text-[12px]"
-        placeholder="gmail.com&#10;proton.me"
+      <TokenField
+        value={domains}
+        onChange={setDraft}
+        ariaLabel="Protected domains"
+        placeholder="gmail.com, proton.me…"
+        normalize={normalizeDomain}
       />
       <div className="mt-3 flex justify-end gap-2">
-        <GhostBtn disabled={text === null || save.isPending} onClick={() => setText(null)}>
+        <GhostBtn disabled={!dirty || save.isPending} onClick={() => setDraft(null)}>
           Reset
         </GhostBtn>
-        <PrimaryBtn disabled={text === null || save.isPending} onClick={() => save.mutate()}>
+        <PrimaryBtn disabled={!dirty || save.isPending} onClick={() => save.mutate()}>
           Save
         </PrimaryBtn>
       </div>
