@@ -7,6 +7,7 @@ import type {
 } from "@cfmail/shared/responses";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
+import type { LucideIcon } from "lucide-react";
 import {
   ArchiveRestore,
   ArrowLeft,
@@ -15,6 +16,8 @@ import {
   Download,
   Forward,
   Inbox,
+  Lock,
+  LockOpen,
   MailMinus,
   MapPin,
   Paperclip,
@@ -22,13 +25,14 @@ import {
   Reply,
   ReplyAll,
   ShieldAlert,
+  ShieldCheck,
+  ShieldQuestion,
   Star,
   Trash2,
   Users,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge.tsx";
 import { api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
 import {
@@ -485,25 +489,112 @@ function ActionIcon({
   );
 }
 
-// PGP status chips. Inbound shows the signature verification outcome; outbound
-// just confirms what we did (signed / encrypted).
-function PgpBadges({ msg }: { msg: MessageRow }) {
-  if (!msg.pgpEncrypted && !msg.pgpSigned) return null;
+// A single Proton-style padlock shown in front of the sender, folding the
+// strongest available trust signal into one glyph: end-to-end PGP encryption,
+// PGP signature verification, then transport authentication (SPF/DKIM/DMARC).
+type LockTone = "success" | "warning" | "destructive" | "muted";
+
+const LOCK_TONES: Record<LockTone, string> = {
+  success: "text-success",
+  warning: "text-warning-foreground",
+  destructive: "text-destructive",
+  muted: "text-muted-foreground",
+};
+
+function senderLock(
+  msg: MessageRow,
+): { Icon: LucideIcon; tone: LockTone; title: string; detail?: string } | null {
   const inbound = msg.direction === "in";
+
+  // 1. PGP encryption — end-to-end, the strongest signal.
+  if (msg.pgpEncrypted) {
+    if (inbound && msg.pgpSigned && msg.pgpVerify === "bad")
+      return {
+        Icon: Lock,
+        tone: "destructive",
+        title: "Encrypted · bad signature",
+        detail: "End-to-end encrypted, but the sender's signature failed to verify.",
+      };
+    const detail = !msg.pgpSigned
+      ? undefined
+      : !inbound
+        ? "Signed with your key."
+        : msg.pgpVerify === "good"
+          ? "Signed and verified."
+          : "Signed, but the signature could not be verified.";
+    return { Icon: Lock, tone: "success", title: "End-to-end encrypted", detail };
+  }
+
+  // 2. PGP signature without encryption.
+  if (msg.pgpSigned) {
+    if (!inbound)
+      return {
+        Icon: ShieldCheck,
+        tone: "success",
+        title: "Digitally signed",
+        detail: "Signed with your key.",
+      };
+    if (msg.pgpVerify === "good")
+      return {
+        Icon: ShieldCheck,
+        tone: "success",
+        title: "Signed — verified",
+        detail: "The sender's PGP signature is valid.",
+      };
+    if (msg.pgpVerify === "bad")
+      return {
+        Icon: ShieldAlert,
+        tone: "destructive",
+        title: "Bad signature",
+        detail: "The PGP signature is invalid — this message may be forged.",
+      };
+    return {
+      Icon: ShieldQuestion,
+      tone: "warning",
+      title: "Signed · unverified",
+      detail: "Signed, but we have no key to verify the signature.",
+    };
+  }
+
+  // 3. Transport authentication (inbound only) — SPF / DKIM / DMARC.
+  if (inbound) {
+    const auth = authStatus(msg.spamAuth);
+    if (auth === "pass")
+      return {
+        Icon: ShieldCheck,
+        tone: "muted",
+        title: "Authenticated sender",
+        detail: "Passed SPF / DKIM / DMARC checks.",
+      };
+    if (auth === "fail")
+      return {
+        Icon: LockOpen,
+        tone: "destructive",
+        title: "Unverified sender",
+        detail: "Failed authentication — the address may be spoofed.",
+      };
+    if (auth === "unverified")
+      return {
+        Icon: ShieldQuestion,
+        tone: "muted",
+        title: "Not authenticated",
+        detail: "The sender's domain isn't authenticated.",
+      };
+  }
+
+  return null;
+}
+
+function SenderLock({ msg }: { msg: MessageRow }) {
+  const lock = senderLock(msg);
+  if (!lock) return null;
+  const { Icon, tone, title, detail } = lock;
   return (
-    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-      {msg.pgpEncrypted && <Badge variant="primary">Encrypted</Badge>}
-      {msg.pgpSigned && !inbound && <Badge variant="success">Signed</Badge>}
-      {msg.pgpSigned && inbound && msg.pgpVerify === "good" && (
-        <Badge variant="success">Signature verified</Badge>
-      )}
-      {msg.pgpSigned && inbound && msg.pgpVerify === "bad" && (
-        <Badge variant="destructive">Bad signature</Badge>
-      )}
-      {msg.pgpSigned && inbound && msg.pgpVerify !== "good" && msg.pgpVerify !== "bad" && (
-        <Badge variant="warning">Signed · unverified</Badge>
-      )}
-    </div>
+    <Tooltip label={detail ? `${title} — ${detail}` : title}>
+      <span className={cn("inline-grid shrink-0 place-items-center", LOCK_TONES[tone])}>
+        <Icon className="size-3.5" aria-label={title} />
+      </span>
+    </Tooltip>
   );
 }
 
@@ -702,9 +793,12 @@ function MessageCard({
     <article className="overflow-hidden rounded-lg border bg-card shadow-black/[0.02] shadow-sm">
       <header className="flex items-start justify-between gap-4 border-b px-4 py-2.5">
         <div className="min-w-0">
-          <div className="font-semibold text-[13px]">
-            {msg.fromName ?? msg.fromAddr}{" "}
-            <span className="font-normal text-muted-foreground">&lt;{msg.fromAddr}&gt;</span>
+          <div className="flex items-center gap-1.5 font-semibold text-[13px]">
+            <SenderLock msg={msg} />
+            <span className="truncate">
+              {msg.fromName ?? msg.fromAddr}{" "}
+              <span className="font-normal text-muted-foreground">&lt;{msg.fromAddr}&gt;</span>
+            </span>
           </div>
           <div className="space-y-0.5 text-[11px] text-muted-foreground">
             <div>
@@ -722,7 +816,6 @@ function MessageCard({
             )}
           </div>
           <LabelChips messageId={msg.id} className="mt-1.5" />
-          <PgpBadges msg={msg} />
         </div>
         <div className="flex shrink-0 flex-col items-end gap-2">
           <div className="flex items-center gap-1.5">
