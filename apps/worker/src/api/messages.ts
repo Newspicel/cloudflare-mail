@@ -206,7 +206,7 @@ export function messagesRoutes() {
     if (msg.direction !== "in") throw new HTTPException(400, { message: "not an inbound message" });
 
     const mb = await db.query.mailbox.findFirst({
-      where: (m, { eq }) => eq(m.id, msg.mailboxId),
+      where: (m) => eq(m.id, msg.mailboxId),
       columns: { aiFeatures: true, aiTokenCap: true },
     });
     if (!mb?.aiFeatures) throw new HTTPException(403, { message: "AI features are off" });

@@ -54,10 +54,12 @@ export function useListVirtualizer(
   // initialOffset only feeds the windowing math; the scroll element itself
   // mounts at 0, so restore its real scrollTop once seeded measurements have
   // given the spacer its correct height.
+  /* eslint-disable react-hooks/exhaustive-deps -- restore once on mount */
   // biome-ignore lint/correctness/useExhaustiveDependencies: restore once on mount
   useLayoutEffect(() => {
     if (snap && scrollRef.current) scrollRef.current.scrollTop = snap.offset;
   }, []);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   const items = virtualizer.getVirtualItems();
   const lastIndex = items.length ? items[items.length - 1]!.index : -1;
