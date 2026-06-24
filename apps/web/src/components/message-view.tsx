@@ -1,13 +1,15 @@
 import { Flag, hasFlag, setFlag } from "@cfmail/shared/flags";
-import type { UnsubscribeResultDto } from "@cfmail/shared/responses";
+import type { AttachmentDto, UnsubscribeResultDto } from "@cfmail/shared/responses";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
   ArchiveRestore,
   ArrowLeft,
+  Download,
   Forward,
   Inbox,
   MailMinus,
+  Paperclip,
   Reply,
   ReplyAll,
   ShieldAlert,
@@ -379,6 +381,55 @@ function PgpBadges({ msg }: { msg: MessageRow }) {
   );
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB"];
+  let v = bytes / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v < 10 ? v.toFixed(1) : Math.round(v)} ${units[i]}`;
+}
+
+// Real (non-inline) attachments, shown below the body with a download link.
+// Inline `cid:` parts are embedded in the HTML and rewritten by the body
+// endpoint, so they're filtered out here to avoid duplicating them.
+function MessageAttachments({
+  messageId,
+  attachments,
+  hasHtml,
+}: {
+  messageId: string;
+  attachments: AttachmentDto[];
+  hasHtml: boolean;
+}) {
+  const visible = attachments.filter((a) => !(hasHtml && a.inline && a.contentId));
+  if (visible.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-2 border-t bg-muted/30 px-4 py-3">
+      {visible.map((att) => (
+        <a
+          key={att.id}
+          href={`/api/messages/${messageId}/attachments/${att.id}/raw?download`}
+          download={att.filename}
+          className="group flex max-w-full items-center gap-2.5 rounded-lg border bg-background px-3 py-2 text-left shadow-black/[0.02] shadow-sm transition-colors hover:border-primary/40 hover:bg-muted"
+        >
+          <Paperclip className="size-4 shrink-0 text-muted-foreground" />
+          <span className="min-w-0">
+            <span className="block truncate font-medium text-[12px]">{att.filename}</span>
+            <span className="block text-[11px] text-muted-foreground">
+              {formatBytes(att.sizeBytes)}
+            </span>
+          </span>
+          <Download className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
+        </a>
+      ))}
+    </div>
+  );
+}
+
 function MessageCard({
   msg,
   readOnly,
@@ -463,6 +514,13 @@ function MessageCard({
         <pre className="whitespace-pre-wrap px-4 py-3 font-sans text-[13px]">
           {body.data?.text ?? msg.snippet}
         </pre>
+      )}
+      {body.data && body.data.attachments.length > 0 && (
+        <MessageAttachments
+          messageId={msg.id}
+          attachments={body.data.attachments}
+          hasHtml={Boolean(bodyHtml)}
+        />
       )}
     </article>
   );
