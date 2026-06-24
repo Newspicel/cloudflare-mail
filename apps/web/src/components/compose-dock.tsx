@@ -83,6 +83,16 @@ interface DraftSnapshot {
   attachments: UploadedAttachment[];
 }
 
+// A queued/in-flight autosave: the snapshot, whether it's blank (→ delete), and
+// `key` so the close/unload paths can mark it persisted. `keepalive` keeps the
+// request alive past an unmount or tab close.
+interface DraftFlush {
+  snap: DraftSnapshot;
+  isEmpty: boolean;
+  key: string;
+  keepalive?: boolean;
+}
+
 const listeners = new Set<(s: ComposeState) => void>();
 let state: ComposeState = {
   open: false,
@@ -336,9 +346,15 @@ export function ComposeForm({
   // ── Server-persisted drafts ────────────────────────────────────────────
   const draftIdRef = useRef<string | null>(d?.id ?? null);
   const initialKeyRef = useRef<string | null>(null);
+  // Key of the snapshot last persisted (or the initial, untouched state). Lets
+  // the close/unload handlers tell whether there's an unsaved edit to flush.
+  const savedKeyRef = useRef<string | null>(null);
+  // The most recent snapshot, kept current so close/unmount can flush the last
+  // <700ms of typing that the debounce timer would otherwise drop.
+  const latestRef = useRef<DraftFlush | null>(null);
   const saveRef = useRef<{
     saving: boolean;
-    queued: { snap: DraftSnapshot; isEmpty: boolean } | null;
+    queued: DraftFlush | null;
   }>({
     saving: false,
     queued: null,
@@ -351,16 +367,19 @@ export function ComposeForm({
     qc.invalidateQueries({ queryKey: keys.folderCounts(mailboxId) });
   }, [qc, mailboxId]);
 
-  const deleteDraft = useCallback(async () => {
-    const id = draftIdRef.current;
-    if (!id) return;
-    draftIdRef.current = null;
-    await api(`/api/drafts/${id}`, { method: "DELETE" });
-    invalidateDrafts();
-  }, [invalidateDrafts]);
+  const deleteDraft = useCallback(
+    async (keepalive?: boolean) => {
+      const id = draftIdRef.current;
+      if (!id) return;
+      draftIdRef.current = null;
+      await api(`/api/drafts/${id}`, { method: "DELETE", keepalive });
+      invalidateDrafts();
+    },
+    [invalidateDrafts],
+  );
 
   const flush = useCallback(
-    async (data: { snap: DraftSnapshot; isEmpty: boolean }) => {
+    async (data: DraftFlush) => {
       const st = saveRef.current;
       if (st.saving) {
         st.queued = data;
@@ -369,7 +388,7 @@ export function ComposeForm({
       st.saving = true;
       try {
         if (data.isEmpty) {
-          await deleteDraft();
+          await deleteDraft(data.keepalive);
         } else {
           const payload = {
             ...data.snap,
@@ -381,17 +400,20 @@ export function ComposeForm({
             await api(`/api/drafts/${draftIdRef.current}`, {
               method: "PATCH",
               body: JSON.stringify(payload),
+              keepalive: data.keepalive,
             });
           } else {
             const res = await api<{ draft: { id: string } }>("/api/drafts", {
               method: "POST",
               body: JSON.stringify({ mailboxId, ...payload }),
+              keepalive: data.keepalive,
             });
             draftIdRef.current = res.draft.id;
           }
           setSavedHint(true);
           invalidateDrafts();
         }
+        savedKeyRef.current = data.key;
       } catch {
         // Autosave is best-effort; surface nothing on transient failures.
       } finally {
@@ -439,11 +461,33 @@ export function ComposeForm({
   useEffect(() => {
     const { snap, isEmpty } = currentSnapshot();
     const key = JSON.stringify(snap);
-    if (initialKeyRef.current === null) initialKeyRef.current = key;
-    if (key === initialKeyRef.current) return;
-    const handle = setTimeout(() => void flush({ snap, isEmpty }), 700);
+    if (initialKeyRef.current === null) {
+      initialKeyRef.current = key;
+      savedKeyRef.current = key;
+    }
+    latestRef.current = { snap, isEmpty, key };
+    if (key === savedKeyRef.current) return;
+    const handle = setTimeout(() => void flush({ snap, isEmpty, key }), 700);
     return () => clearTimeout(handle);
   }, [currentSnapshot, flush]);
+
+  // Flush the last edit when the composer closes or the tab is torn down — the
+  // debounce timer is cancelled on unmount, so without this the final <700ms of
+  // typing is lost. `keepalive` lets the request outlive the page on tab close.
+  useEffect(() => {
+    const flushPending = (keepalive: boolean) => {
+      const latest = latestRef.current;
+      if (!latest || latest.key === savedKeyRef.current) return;
+      savedKeyRef.current = latest.key;
+      void flush({ ...latest, keepalive });
+    };
+    const onUnload = () => flushPending(true);
+    window.addEventListener("pagehide", onUnload);
+    return () => {
+      window.removeEventListener("pagehide", onUnload);
+      flushPending(false);
+    };
+  }, [flush]);
 
   // Persist the current state and resolve the draft id — used by the pop-out so
   // the new window can rehydrate from the server-saved draft. Returns null only
@@ -451,7 +495,9 @@ export function ComposeForm({
   const ensureDraftSaved = useCallback(async (): Promise<string | null> => {
     const { snap, isEmpty } = currentSnapshot();
     if (isEmpty) return draftIdRef.current;
-    await flush({ snap, isEmpty: false });
+    const key = JSON.stringify(snap);
+    savedKeyRef.current = key;
+    await flush({ snap, isEmpty: false, key });
     return draftIdRef.current;
   }, [currentSnapshot, flush]);
 
@@ -514,6 +560,9 @@ export function ComposeForm({
       // Keep the combined "All" view's lists/counts in sync with the send.
       qc.invalidateQueries({ queryKey: keys.threadsRoot("all") });
       await deleteDraft().catch(() => {});
+      // The message is sent and the draft removed — don't let the close-flush
+      // resurrect it on unmount.
+      latestRef.current = null;
       finish();
     },
     onError: (err: unknown) => {
@@ -549,6 +598,8 @@ export function ComposeForm({
 
   function discard() {
     void deleteDraft().catch(() => {});
+    // Suppress the close-flush so unmount doesn't re-create the discarded draft.
+    latestRef.current = null;
     finish();
   }
 
