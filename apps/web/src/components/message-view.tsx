@@ -71,9 +71,18 @@ interface Props {
   messages: MessageRow[];
   view?: MailView;
   readOnly?: boolean;
+  // Set when the thread is being viewed inside a custom folder, enabling the
+  // "move back to mailbox" action in the move-to-folder menu.
+  folderId?: string;
 }
 
-export function MessageView({ thread, messages, view = "inbox", readOnly = false }: Props) {
+export function MessageView({
+  thread,
+  messages,
+  view = "inbox",
+  readOnly = false,
+  folderId,
+}: Props) {
   const nav = useNavigate();
   const qc = useQueryClient();
   const { confirmDelete } = useConfirmHelpers();
@@ -316,6 +325,7 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
             <MoveToFolderMenu
               threadIds={[thread.id]}
               mailboxId={thread.mailboxId}
+              currentFolderId={folderId}
               tooltip="Move to folder"
               onMoved={(folderName) => {
                 toast.success(`Moved to ${folderName}`);
