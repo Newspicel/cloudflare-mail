@@ -9,9 +9,13 @@ A self-hostable, Gmail-style mail client that runs entirely on Cloudflare — on
   - `temp` — disposable, TTL-based, random local-part, auto-collected by cron
 - **Multi-domain** across primary + sub-domains
 - **Gmail-style UI** — 3-pane layout, compose dock, SSE-driven live updates
+- **Full-text search** over subjects, bodies, and recipients (D1 FTS5)
+- **Organization** — labels, folders, reminders, and per-mailbox automation rules
+- **Inbound pipeline** — threading, spam scoring, gateway PGP decrypt, one-click unsubscribe, calendar (`.ics`) parsing, blocklist
+- **Push notifications** and a tracking-pixel image proxy
 - **Everything on Cloudflare** — no external database, no SMTP servers to run
 
-> Status: early-stage scaffold. The foundation (auth, RBAC, inbound/outbound mail, temp GC, SSE) is wired end-to-end; UI polish, search, and tests are still open. Contributions welcome.
+> Status: actively developed. Auth, RBAC, inbound/outbound mail, threading, search, labels/folders/rules, spam, PGP, reminders, calendar, push, temp GC, and SSE are wired end-to-end, with a Vitest suite covering the worker pipelines. Contributions welcome.
 
 ## Stack
 
@@ -167,6 +171,7 @@ pnpm dev          # Vite (:5173) + Wrangler (:8787), Vite proxies /api
 ```bash
 pnpm typecheck    # tsgo across all packages
 pnpm lint         # oxlint + biome check
+pnpm test         # Vitest (worker pipelines)
 pnpm build        # Vite + Wrangler dry-run
 ```
 
