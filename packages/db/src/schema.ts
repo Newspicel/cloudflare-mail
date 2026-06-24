@@ -710,6 +710,11 @@ export const draft = sqliteTable(
     // deferred send is byte-identical to an immediate one.
     scheduledFor: integer("scheduled_for", { mode: "timestamp" }),
     scheduledPayload: text("scheduled_payload", { mode: "json" }).$type<ScheduledSendPayload>(),
+    // Dispatch attempts so far; the cron retries a failing send a few times
+    // before giving up. `scheduledError` is set only on terminal failure (the
+    // row is reverted to an editable draft) so the UI can flag it.
+    scheduledAttempts: integer("scheduled_attempts").notNull().default(0),
+    scheduledError: text("scheduled_error"),
     ...timestamps(),
   },
   (t) => [

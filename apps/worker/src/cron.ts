@@ -19,6 +19,9 @@ const SERVICE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const SERVICE_PURGE_LIMIT = 500;
 // How many due scheduled sends to dispatch per cron tick.
 const SCHEDULED_SEND_LIMIT = 50;
+// A failing scheduled send is retried on subsequent ticks up to this many times
+// before it's marked failed.
+const SCHEDULED_SEND_MAX_ATTEMPTS = 3;
 
 export async function runCron(env: Env, now: Date): Promise<void> {
   const db = makeDB(env.DB);
@@ -101,8 +104,8 @@ export async function runCron(env: Env, now: Date): Promise<void> {
 
 // Dispatch drafts whose scheduled send time has arrived. Each is sent through
 // the normal outbound path with its stored payload, then the draft is deleted.
-// A send that throws reverts the row to an ordinary draft (so it stops retrying
-// and the content is preserved) and the author is warned over SSE.
+// A send that throws is retried on later ticks; after a few failures the row is
+// reverted to an editable draft, flagged with the error, and the author warned.
 async function dispatchScheduledSends(env: Env, db: DB, now: Date): Promise<void> {
   const due = await db
     .select()
@@ -137,10 +140,27 @@ async function dispatchScheduledSends(env: Env, db: DB, now: Date): Promise<void
         await db.delete(draft).where(eq(draft.id, row.id));
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
-        console.error(`scheduled send failed for draft ${row.id}`, err);
+        const attempts = row.scheduledAttempts + 1;
+        console.error(
+          `scheduled send failed for draft ${row.id} (attempt ${attempts}/${SCHEDULED_SEND_MAX_ATTEMPTS})`,
+          err,
+        );
+        if (attempts < SCHEDULED_SEND_MAX_ATTEMPTS) {
+          // Bump the counter but leave `scheduledFor` in the past so the next
+          // tick retries it.
+          await db.update(draft).set({ scheduledAttempts: attempts }).where(eq(draft.id, row.id));
+          return;
+        }
+        // Out of retries — revert to an editable draft, flag the failure, warn.
         await db
           .update(draft)
-          .set({ scheduledFor: null, scheduledPayload: null, updatedAt: now })
+          .set({
+            scheduledFor: null,
+            scheduledPayload: null,
+            scheduledAttempts: attempts,
+            scheduledError: detail,
+            updatedAt: now,
+          })
           .where(eq(draft.id, row.id));
         await broadcastToUsers(env, [row.userId], {
           type: "scheduled_send_failed",
