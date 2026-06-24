@@ -75,6 +75,18 @@
   * {
     border-color: var(--color-border);
   }
+  /* Tailwind v4 dropped the UA pointer cursor on buttons. Restore it for all
+     enabled interactive controls so clickable elements feel clickable. */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="menuitem"]:not([aria-disabled="true"]),
+  [role="option"]:not([aria-disabled="true"]),
+  [role="tab"]:not([aria-disabled="true"]),
+  label[for],
+  summary,
+  select:not(:disabled) {
+    cursor: pointer;
+  }
   html {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
