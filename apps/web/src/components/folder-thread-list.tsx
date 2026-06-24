@@ -11,7 +11,13 @@ import {
 import { useThreadListMutation } from "@/lib/thread-mutations.ts";
 import { useUnfileThread } from "@/lib/use-folder-mutations.ts";
 import { useListVirtualizer, visibleBlock } from "@/lib/use-list-virtualizer.ts";
-import { type RowAction, RowContextMenu } from "./thread-context-menu.tsx";
+import {
+  FolderSubmenu,
+  LabelsSubmenu,
+  ReminderSubmenu,
+  type RowAction,
+  RowContextMenu,
+} from "./thread-context-menu.tsx";
 import { ThreadRowView } from "./thread-row.tsx";
 import { IconButton } from "./ui/icon-button.tsx";
 import { TooltipProvider } from "./ui/tooltip.tsx";
@@ -153,15 +159,27 @@ function FolderRowItem({
       label: unread ? "Mark as read" : "Mark as unread",
       onClick: () => setRead.mutate(unread),
     },
-    {
-      icon: FolderInput,
-      label: "Remove from folder",
-      onClick: () => unfile.mutate({ folderId, threadId: thread.id, mailboxId: thread.mailboxId }),
-    },
   ];
 
   return (
-    <RowContextMenu actions={menuActions}>
+    <RowContextMenu
+      leading={
+        <>
+          <LabelsSubmenu
+            mailboxId={thread.mailboxId}
+            threadId={thread.id}
+            applied={new Set((labels ?? []).map((l) => l.id))}
+          />
+          <FolderSubmenu
+            mailboxId={thread.mailboxId}
+            threadId={thread.id}
+            currentFolderId={folderId}
+          />
+          <ReminderSubmenu mailboxId={thread.mailboxId} threadId={thread.id} />
+        </>
+      }
+      actions={menuActions}
+    >
       <ThreadRowView
         thread={thread}
         link={{ kind: "folder", folderId }}

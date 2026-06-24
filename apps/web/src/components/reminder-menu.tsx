@@ -19,7 +19,7 @@ function atHour(d: Date, hour: number): Date {
   return out;
 }
 
-function remindPresets(): { label: string; when: Date }[] {
+export function remindPresets(): { label: string; when: Date }[] {
   const now = new Date();
   const tomorrow = new Date(now);
   tomorrow.setDate(tomorrow.getDate() + 1);
@@ -33,7 +33,7 @@ function remindPresets(): { label: string; when: Date }[] {
   ].filter((p) => p.when.getTime() > now.getTime());
 }
 
-function formatWhen(d: Date): string {
+export function formatWhen(d: Date): string {
   return d.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" });
 }
 
