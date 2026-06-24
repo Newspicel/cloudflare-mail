@@ -7,6 +7,7 @@ import { cn } from "@/lib/cn.ts";
 import { labelsQuery, messageLabelsQuery } from "@/lib/queries.ts";
 import { keys } from "@/lib/query-keys.ts";
 import { Button } from "./ui/button.tsx";
+import { ColorPicker } from "./ui/color-picker.tsx";
 import { useConfirm } from "./ui/confirm.tsx";
 import { Input } from "./ui/input.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
@@ -56,6 +57,7 @@ function LabelsPopover({ mailboxId, messageId }: { mailboxId: string; messageId:
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [color, setColor] = useState(DEFAULT_COLOR);
+  const [customColor, setCustomColor] = useState(false);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: keys.labels(mailboxId) });
@@ -82,6 +84,7 @@ function LabelsPopover({ mailboxId, messageId }: { mailboxId: string; messageId:
       setCreating(false);
       setName("");
       setColor(DEFAULT_COLOR);
+      setCustomColor(false);
       invalidate();
       toggle.mutate({ labelId: res.id, on: true });
     },
@@ -129,21 +132,43 @@ function LabelsPopover({ mailboxId, messageId }: { mailboxId: string; messageId:
             placeholder="Label name"
             maxLength={64}
           />
-          <div className="flex flex-wrap gap-1">
+          <div className="flex flex-wrap items-center gap-1">
             {PRESET_COLORS.map((c) => (
               <button
                 key={c}
                 type="button"
-                onClick={() => setColor(c)}
+                onClick={() => {
+                  setColor(c);
+                  setCustomColor(false);
+                }}
                 className={cn(
                   "h-5 w-5 rounded-full border",
-                  color === c ? "ring-2 ring-ring ring-offset-1 ring-offset-card" : "",
+                  !customColor && color === c
+                    ? "ring-2 ring-ring ring-offset-1 ring-offset-card"
+                    : "",
                 )}
                 style={{ backgroundColor: c }}
                 aria-label={c}
               />
             ))}
+            <button
+              type="button"
+              onClick={() => setCustomColor((v) => !v)}
+              className={cn(
+                "h-5 w-5 rounded-full border",
+                customColor ? "ring-2 ring-ring ring-offset-1 ring-offset-card" : "",
+              )}
+              style={{
+                background: customColor
+                  ? color
+                  : "conic-gradient(from 0deg, #ef4444, #eab308, #22c55e, #06b6d4, #6366f1, #ec4899, #ef4444)",
+              }}
+              aria-label="Custom color"
+              title="Custom color"
+            />
           </div>
+
+          {customColor && <ColorPicker value={color} onChange={setColor} />}
           <div className="flex gap-2">
             <Button
               variant="primary"

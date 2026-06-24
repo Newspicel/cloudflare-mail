@@ -9,6 +9,7 @@ import {
   Maximize2,
   Minimize2,
   Paperclip,
+  Plus,
   Trash2,
   X,
 } from "lucide-react";
@@ -295,8 +296,18 @@ export function ComposeForm({
     (id: string) => sendable.find((m) => m.id === id)?.address ?? "",
     [sendable],
   );
-  // Selectable "From" addresses: each sendable mailbox, plus the plus-addressed
-  // envelope recipient when replying to one (so it can be re-picked).
+  // Custom plus-aliases the user typed in compose, so they stay selectable.
+  const [customAliases, setCustomAliases] = useState<
+    { address: string; mailboxId: string }[]
+  >(() => {
+    if (d?.fromAddress && plusBase(d.fromAddress))
+      return [{ address: d.fromAddress, mailboxId: d.mailboxId }];
+    return [];
+  });
+  const [plusOpen, setPlusOpen] = useState(false);
+  const [plusTag, setPlusTag] = useState("");
+  // Selectable "From" addresses: each sendable mailbox, the plus-addressed
+  // envelope recipient when replying to one, plus any custom alias the user added.
   const fromOptions = useMemo(() => {
     const opts = sendable.map((m) => ({ address: m.address, mailboxId: m.id }));
     const dt = rep?.deliveredTo;
@@ -308,9 +319,29 @@ export function ComposeForm({
       !opts.some((o) => o.address.toLowerCase() === dt.toLowerCase())
     )
       opts.push({ address: dt, mailboxId: mb.id });
+    for (const c of customAliases)
+      if (!opts.some((o) => o.address.toLowerCase() === c.address.toLowerCase()))
+        opts.push(c);
     return opts;
-  }, [sendable, rep]);
+  }, [sendable, rep, customAliases]);
   const currentFrom = fromAddress ?? baseAddr(mailboxId);
+  // Apply the "+tag" typed in the picker as a sub-address of the chosen mailbox.
+  const applyPlusTag = useCallback(() => {
+    const base = baseAddr(mailboxId);
+    const at = base.lastIndexOf("@");
+    if (at <= 0) return;
+    const tag = plusTag.trim().replace(/^\++/, "").replace(/\s+/g, "");
+    const addr = tag ? `${base.slice(0, at)}+${tag}@${base.slice(at + 1)}` : base;
+    if (tag)
+      setCustomAliases((prev) =>
+        prev.some((c) => c.address.toLowerCase() === addr.toLowerCase())
+          ? prev
+          : [...prev, { address: addr, mailboxId }],
+      );
+    setFromAddress(tag ? addr : null);
+    setPlusOpen(false);
+    setPlusTag("");
+  }, [baseAddr, mailboxId, plusTag]);
   // PGP policy of the selected sending mailbox — drives the compose indicator.
   const pgpMode = sendable.find((m) => m.id === mailboxId)?.pgpMode ?? "off";
   const [to, setTo] = useState<RecipientsValue>(() => {
@@ -955,6 +986,66 @@ export function ComposeForm({
               ))}
             </SelectContent>
           </Select>
+          <Popover
+            open={plusOpen}
+            onOpenChange={(open) => {
+              setPlusOpen(open);
+              if (open) {
+                const local = plusBase(currentFrom);
+                setPlusTag(
+                  local && currentFrom.toLowerCase() !== local
+                    ? (currentFrom.slice(currentFrom.indexOf("+") + 1).split("@")[0] ?? "")
+                    : "",
+                );
+              }
+            }}
+          >
+            <PopoverTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label="Custom sub-address"
+                  className="mt-0.5 shrink-0 rounded p-0.5 text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
+              }
+            />
+            <PopoverContent side="bottom" align="start" className="w-72 p-2">
+              <span className="mb-1.5 block px-0.5 text-[11px] text-muted-foreground">
+                Custom sub-address
+              </span>
+              {(() => {
+                const base = baseAddr(mailboxId);
+                const at = base.lastIndexOf("@");
+                const local = at > 0 ? base.slice(0, at) : base;
+                const domain = at > 0 ? base.slice(at + 1) : "";
+                return (
+                  <div className="flex items-center rounded-md border bg-card px-2 text-[13px] focus-within:ring-2 focus-within:ring-ring/40">
+                    <span className="shrink-0 text-muted-foreground">{local}+</span>
+                    <input
+                      // biome-ignore lint/a11y/noAutofocus: focus the field when the picker opens
+                      autoFocus
+                      value={plusTag}
+                      onChange={(e) => setPlusTag(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          applyPlusTag();
+                        }
+                      }}
+                      placeholder="tag"
+                      className="min-w-0 flex-1 bg-transparent py-1 outline-none placeholder:text-muted-foreground"
+                    />
+                    <span className="shrink-0 text-muted-foreground">@{domain}</span>
+                  </div>
+                );
+              })()}
+              <Button variant="primary" size="sm" className="mt-2 w-full" onClick={applyPlusTag}>
+                Use address
+              </Button>
+            </PopoverContent>
+          </Popover>
         </div>
         <AddressField
           label="To"
