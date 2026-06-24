@@ -998,16 +998,20 @@ function MessageCard({
               {formatDateTime(when, fmt)}
             </time>
             {!readOnly && (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={onToggleStar}
-                className={cn(starred && "text-amber-500 hover:text-amber-500")}
-                aria-label={starred ? "Unstar" : "Star"}
-                aria-pressed={starred}
-              >
-                <Star className={cn(starred && "fill-current")} />
-              </Button>
+              <Tooltip label={starred ? "Unstar" : "Star"}>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={onToggleStar}
+                  className={cn(
+                    starred && "text-amber-500 hover:text-amber-500",
+                  )}
+                  aria-label={starred ? "Unstar" : "Star"}
+                  aria-pressed={starred}
+                >
+                  <Star className={cn(starred && "fill-current")} />
+                </Button>
+              </Tooltip>
             )}
             <MessageMenu
               msg={msg}
