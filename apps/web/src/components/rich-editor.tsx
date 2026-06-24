@@ -23,6 +23,7 @@ import { cn } from "@/lib/cn.ts";
 
 export interface RichEditorHandle {
   exec(cmd: string, value?: string): void;
+  focus(): void;
 }
 
 // A pending command applied right after the editor mounts — used when a
@@ -95,7 +96,7 @@ export const RichEditor = forwardRef<
     [onChange, saveSelection],
   );
 
-  useImperativeHandle(ref, () => ({ exec }), [exec]);
+  useImperativeHandle(ref, () => ({ exec, focus: () => elRef.current?.focus() }), [exec]);
 
   // Seed content once on mount; the editor is uncontrolled afterwards so the
   // caret never jumps. Run any command queued during the promote-to-HTML step.
