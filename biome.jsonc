@@ -12,6 +12,7 @@
       "!**/dist",
       "!**/.turbo",
       "!**/.wrangler",
+      "!**/.claude",
       "!**/drizzle",
       "!apps/web/src/components/ui",
       "!apps/web/src/routeTree.gen.ts"

@@ -22,7 +22,6 @@ import { type DateTimeFmt, formatStamp } from "@/lib/time.ts";
 import { Logo } from "./logo.tsx";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar.tsx";
 import { Button } from "./ui/button.tsx";
-import { Kbd } from "./ui/kbd.tsx";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -31,6 +30,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu.tsx";
+import { Kbd } from "./ui/kbd.tsx";
 
 const SEARCH_DEBOUNCE_MS = 200;
 const MIN_SEARCH_CHARS = 2;
@@ -233,9 +233,7 @@ function SearchBox() {
         >
           <SlidersHorizontal className="h-3.5 w-3.5" />
         </button>
-        <Kbd className="hidden min-w-0 shrink-0 gap-0.5 bg-card text-[10px] sm:inline-flex">
-          /
-        </Kbd>
+        <Kbd className="hidden min-w-0 shrink-0 gap-0.5 bg-card text-[10px] sm:inline-flex">/</Kbd>
       </label>
 
       {showDropdown && (

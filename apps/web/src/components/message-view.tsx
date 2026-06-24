@@ -235,6 +235,7 @@ export function MessageView({ thread, messages, view = "inbox", readOnly = false
   // anchor) — until the user scrolls, after which we leave the position alone.
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastCardRef = useRef<HTMLElement>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-pin when a new thread opens
   useEffect(() => {
     const container = scrollRef.current;
     if (!container) return;

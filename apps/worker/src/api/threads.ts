@@ -190,7 +190,7 @@ export function threadsRoutes() {
     const th = await requireEntityAccess(db, user.id, thread, id, Perm.READ);
 
     const mb = await db.query.mailbox.findFirst({
-      where: (m, { eq }) => eq(m.id, th.mailboxId),
+      where: (m) => eq(m.id, th.mailboxId),
       columns: { aiFeatures: true, aiTokenCap: true },
     });
     if (!mb?.aiFeatures) throw new HTTPException(403, { message: "AI features are off" });
@@ -198,7 +198,7 @@ export function threadsRoutes() {
     // Reuse a cached summary while the thread is unchanged. `msgCount` moves on
     // any add/remove, so a stale cache is simply ignored and regenerated.
     const cached = await db.query.threadSummary.findFirst({
-      where: (s, { eq }) => eq(s.threadId, id),
+      where: (s) => eq(s.threadId, id),
     });
     if (cached && cached.msgCount === th.msgCount) {
       return c.json({ bullets: cached.bullets } satisfies ThreadSummaryDto);

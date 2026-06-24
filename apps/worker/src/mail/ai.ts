@@ -43,7 +43,7 @@ export async function aiBudgetExhausted(
 ): Promise<boolean> {
   if (cap === null) return false;
   const used = await db.query.mailboxAiUsage.findFirst({
-    where: (u, { eq }) => eq(u.mailboxId, mailboxId),
+    where: (u) => eq(u.mailboxId, mailboxId),
     columns: { period: true, tokensIn: true, tokensOut: true },
   });
   return !!used && used.period === currentPeriod() && used.tokensIn + used.tokensOut >= cap;

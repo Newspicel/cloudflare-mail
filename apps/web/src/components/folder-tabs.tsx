@@ -41,9 +41,7 @@ export function FolderTabs({ mailboxId, view }: { mailboxId: string; view: MailV
                 value={v}
                 aria-label={label}
                 className="relative flex-1 px-0"
-                render={
-                  <Link to="/app/m/$mailboxId" params={{ mailboxId }} search={{ view: v }} />
-                }
+                render={<Link to="/app/m/$mailboxId" params={{ mailboxId }} search={{ view: v }} />}
               >
                 <m.icon />
                 <UnreadBadge
