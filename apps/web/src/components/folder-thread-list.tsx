@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Folder as FolderIcon, FolderInput, Mail, MailOpen } from "lucide-react";
-import { type CSSProperties, useMemo, useRef } from "react";
+import { type CSSProperties, useCallback, useMemo, useRef } from "react";
 import { api } from "@/lib/api.ts";
 import {
   type FolderRow,
@@ -43,6 +43,10 @@ export function FolderThreadList({
     cacheKey: `f:${folderId}`,
   });
   const vItems = virtualizer.getVirtualItems();
+  const remeasure = useCallback(
+    (i: number, el: HTMLLIElement) => virtualizer.resizeItem(i, el.offsetHeight),
+    [virtualizer],
+  );
 
   const [from, to] = visibleBlock(virtualizer, threads.length);
   const visibleIds = useMemo(() => threads.slice(from, to).map((t) => t.id), [threads, from, to]);
@@ -79,6 +83,7 @@ export function FolderThreadList({
                   <FolderRowItem
                     key={t.id}
                     rowRef={virtualizer.measureElement}
+                    remeasure={remeasure}
                     dataIndex={vi.index}
                     style={rowStyle(vi.start)}
                     folderId={folderId}
@@ -118,6 +123,7 @@ function FolderRowItem({
   labels,
   active,
   rowRef,
+  remeasure,
   style,
   dataIndex,
 }: {
@@ -126,6 +132,7 @@ function FolderRowItem({
   labels?: MessageLabel[];
   active: boolean;
   rowRef: (el: HTMLLIElement | null) => void;
+  remeasure: (index: number, el: HTMLLIElement) => void;
   style: CSSProperties;
   dataIndex: number;
 }) {
@@ -146,6 +153,7 @@ function FolderRowItem({
       active={active}
       labels={labels}
       rowRef={rowRef}
+      remeasure={remeasure}
       style={style}
       dataIndex={dataIndex}
       actions={

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { ArchiveRestore, Inbox, Mail, MailOpen, ShieldAlert, Timer, Trash2, X } from "lucide-react";
-import { type CSSProperties, useMemo, useRef, useState } from "react";
+import { type CSSProperties, useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
@@ -56,6 +56,10 @@ export function ThreadList({
     cacheKey: `m:${mailboxId}:${view}`,
   });
   const vItems = virtualizer.getVirtualItems();
+  const remeasure = useCallback(
+    (i: number, el: HTMLLIElement) => virtualizer.resizeItem(i, el.offsetHeight),
+    [virtualizer],
+  );
 
   // Labels only for the on-screen block — bounds the request and keeps its key
   // stable while scrolling within the block.
@@ -185,6 +189,7 @@ export function ThreadList({
                   <ThreadRowItem
                     key={t.id}
                     rowRef={virtualizer.measureElement}
+                    remeasure={remeasure}
                     dataIndex={vi.index}
                     style={rowStyle(vi.start)}
                     mailboxId={mailboxId}
@@ -232,6 +237,7 @@ function ThreadRowItem({
   selecting,
   onToggleSelect,
   rowRef,
+  remeasure,
   style,
   dataIndex,
 }: {
@@ -244,6 +250,7 @@ function ThreadRowItem({
   selecting: boolean;
   onToggleSelect: () => void;
   rowRef: (el: HTMLLIElement | null) => void;
+  remeasure: (index: number, el: HTMLLIElement) => void;
   style: CSSProperties;
   dataIndex: number;
 }) {
@@ -281,6 +288,7 @@ function ThreadRowItem({
       selected={selected}
       labels={labels}
       rowRef={rowRef}
+      remeasure={remeasure}
       style={style}
       dataIndex={dataIndex}
       leading={
