@@ -635,15 +635,25 @@ export function MailboxImportSection({ mailboxes }: { mailboxes: ImportTarget[] 
       ]
         .filter(Boolean)
         .join(", ");
-      toast.success(
-        `Imported ${imported} message${imported === 1 ? "" : "s"}${extra ? ` (${extra})` : ""}`,
-      );
+      if (result.failed) {
+        toast.warning(
+          `Imported ${imported} message${imported === 1 ? "" : "s"}${extra ? ` (${extra})` : ""}. Import again to retry the failed ones — duplicates are skipped.`,
+        );
+      } else {
+        toast.success(
+          `Imported ${imported} message${imported === 1 ? "" : "s"}${extra ? ` (${extra})` : ""}`,
+        );
+      }
       qc.invalidateQueries({ queryKey: keys.threadsRoot(mailboxId) });
       qc.invalidateQueries({ queryKey: keys.mailboxes() });
       qc.invalidateQueries({ queryKey: keys.folders() });
-      setFiles([]);
-      if (inputRef.current) inputRef.current.value = "";
-      if (folderRef.current) folderRef.current.value = "";
+      // Keep the selection on failures so the user can re-run to retry just the
+      // failed messages (re-import is deduped, so successes are skipped fast).
+      if (!result.failed) {
+        setFiles([]);
+        if (inputRef.current) inputRef.current.value = "";
+        if (folderRef.current) folderRef.current.value = "";
+      }
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Import failed");
     } finally {
@@ -737,6 +747,7 @@ export function MailboxImportSection({ mailboxes }: { mailboxes: ImportTarget[] 
           <span className="text-[12px] text-muted-foreground">
             {progress.done} / {progress.total} processed
             {progress.duplicate ? ` · ${progress.duplicate} skipped` : ""}
+            {progress.retried ? ` · ${progress.retried} retried` : ""}
             {progress.failed ? ` · ${progress.failed} failed` : ""}
           </span>
         </div>
