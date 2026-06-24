@@ -30,6 +30,7 @@ import {
   messageBodyQuery,
 } from "@/lib/queries.ts";
 import { keys } from "@/lib/query-keys.ts";
+import { canDownscale, downscaleImage } from "@/lib/resize-image.ts";
 import { sanitizeEmailHtml } from "@/lib/sanitize-email.ts";
 import { canStripMetadata, stripImageMetadata } from "@/lib/strip-image-metadata.ts";
 import { fillTemplate, type TemplateContext } from "@/lib/templates.ts";
@@ -494,6 +495,8 @@ export function ComposeForm({
   const [pendingImages, setPendingImages] = useState<File[]>([]);
   const [stripMeta, setStripMeta] = useState(true);
   const [placement, setPlacement] = useState<"attachment" | "inline">("inline");
+  // Longest-edge cap applied to pending images before upload; 0 = keep original.
+  const [resizeMax, setResizeMax] = useState(0);
 
   // Threading context: a reopened draft carries it; a fresh reply derives it
   // from the message being answered.
@@ -1019,9 +1022,12 @@ export function ComposeForm({
     if (!images.length) return;
 
     const prepared = await Promise.all(
-      images.map((file) =>
-        stripMeta && canStripMetadata(file.type) ? stripImageMetadata(file) : Promise.resolve(file),
-      ),
+      images.map(async (file) => {
+        // Downscale first (this re-encodes and already drops metadata), then
+        // strip — a no-op on a clean re-encode but needed for un-resized images.
+        const sized = resizeMax ? await downscaleImage(file, resizeMax) : file;
+        return stripMeta && canStripMetadata(sized.type) ? await stripImageMetadata(sized) : sized;
+      }),
     );
 
     if (placement === "attachment") {
@@ -1087,6 +1093,15 @@ export function ComposeForm({
   }
   const dragHandlers = { onDragEnter, onDragOver, onDragLeave, onDrop };
 
+  // Paste an image straight from the clipboard (e.g. a screenshot). Only image
+  // files are intercepted — pasting text/HTML falls through to the editor.
+  function onPaste(e: React.ClipboardEvent) {
+    const images = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith("image/"));
+    if (!images.length) return;
+    e.preventDefault();
+    void handleIncomingFiles(images);
+  }
+
   const titleText = rep
     ? s.replyAll
       ? "Reply all"
@@ -1144,6 +1159,22 @@ export function ComposeForm({
               <Checkbox checked={stripMeta} onCheckedChange={(v) => setStripMeta(v === true)} />
               Remove image metadata (EXIF, GPS)
             </Label>
+            {pendingImages.some((f) => canDownscale(f.type)) && (
+              <div className="flex items-center justify-between gap-2 text-[13px]">
+                <span>Scale down</span>
+                <Select value={String(resizeMax)} onValueChange={(v) => setResizeMax(Number(v))}>
+                  <SelectTrigger className="h-8 w-36 text-[13px]" aria-label="Scale down image">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="0">Original size</SelectItem>
+                    <SelectItem value="2048">Large (2048px)</SelectItem>
+                    <SelectItem value="1280">Medium (1280px)</SelectItem>
+                    <SelectItem value="640">Small (640px)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setPendingImages([])}>
@@ -1634,6 +1665,7 @@ export function ComposeForm({
       // biome-ignore lint/a11y/noStaticElementInteractions: container-level ⌘/Ctrl+Enter send shortcut; inner fields stay the focus targets
       <div
         onKeyDown={onContainerKeyDown}
+        onPaste={onPaste}
         {...dragHandlers}
         className="relative flex h-dvh flex-col overflow-hidden bg-card text-card-foreground"
       >
@@ -1653,6 +1685,7 @@ export function ComposeForm({
       <Dialog.Portal>
         <Dialog.Popup
           onKeyDown={onContainerKeyDown}
+          onPaste={onPaste}
           {...dragHandlers}
           className={cn(
             "fixed inset-0 z-40 flex flex-col overflow-hidden border bg-card text-card-foreground shadow-black/20 shadow-2xl outline-none transition-all duration-200 data-ending-style:translate-y-3 data-ending-style:opacity-0 data-starting-style:translate-y-3 data-starting-style:opacity-0 sm:inset-auto sm:right-6 sm:bottom-0 sm:rounded-t-xl sm:border-b-0",
