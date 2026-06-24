@@ -109,7 +109,35 @@ export interface UserPrefs {
   composeDefaultMode?: "text" | "markdown" | "html";
   sendShortcut?: boolean;
   replyAllDefault?: boolean;
+  // date & time
+  dateFormat?: DateFormat;
+  timeFormat?: "12h" | "24h";
+  // which maps service event/address links open in ("auto" picks by device)
+  mapProvider?: "auto" | "google" | "apple";
 }
+
+/**
+ * Explicit date layouts (order + separator + numeric/named month + year width),
+ * not country presets. Rendered by lib/time.ts. Examples assume 2026-06-24:
+ *   dmy-dot   24.06.2026   dmy-dot-2   24.06.26
+ *   dmy-slash 24/06/2026   dmy-slash-2 24/06/26
+ *   mdy-slash 06/24/2026   mdy-slash-2 06/24/26
+ *   iso       2026-06-24
+ *   d-mon-y   24 Jun 2026  d-month-y   24 June 2026
+ *   mon-d-y   Jun 24, 2026 month-d-y   June 24, 2026
+ */
+export type DateFormat =
+  | "dmy-dot"
+  | "dmy-dot-2"
+  | "dmy-slash"
+  | "dmy-slash-2"
+  | "mdy-slash"
+  | "mdy-slash-2"
+  | "iso"
+  | "d-mon-y"
+  | "d-month-y"
+  | "mon-d-y"
+  | "month-d-y";
 
 /** Parse the raw `preferences` JSON string into a typed object; never throws. */
 export function parseUserPrefs(raw: string | null | undefined): UserPrefs {
