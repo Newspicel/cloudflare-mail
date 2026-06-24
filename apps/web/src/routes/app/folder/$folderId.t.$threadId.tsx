@@ -3,7 +3,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { FolderThreadList } from "@/components/folder-thread-list.tsx";
 import { MessageView } from "@/components/message-view.tsx";
 import { MessageSkeleton } from "@/components/ui.tsx";
-import { foldersQuery, folderThreadsQuery, threadQuery } from "@/lib/queries.ts";
+import { foldersQuery, threadQuery } from "@/lib/queries.ts";
+import { useFolderFeed } from "@/lib/use-feeds.ts";
 
 export const Route = createFileRoute("/app/folder/$folderId/t/$threadId")({
   loader: ({ params, context }) =>
@@ -13,7 +14,7 @@ export const Route = createFileRoute("/app/folder/$folderId/t/$threadId")({
 
 function FolderThreadPage() {
   const { folderId, threadId } = Route.useParams();
-  const threads = useQuery(folderThreadsQuery(folderId));
+  const feed = useFolderFeed(folderId);
   const thread = useQuery(threadQuery(threadId));
   const folders = useQuery(foldersQuery);
   const folder = folders.data?.folders.find((f) => f.id === folderId);
@@ -24,8 +25,11 @@ function FolderThreadPage() {
         <FolderThreadList
           folder={folder}
           folderId={folderId}
-          threads={threads.data?.threads ?? []}
-          loading={threads.isLoading}
+          threads={feed.items}
+          loading={feed.loading}
+          hasMore={feed.hasMore}
+          loadingMore={feed.loadingMore}
+          loadMore={feed.loadMore}
           selectedThreadId={threadId}
         />
       </aside>

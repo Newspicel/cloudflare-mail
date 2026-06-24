@@ -1,12 +1,13 @@
 import { Flag, hasFlag } from "@cfmail/shared/flags";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api.ts";
 import { invalidateThreadChange } from "@/lib/invalidate.ts";
-import { type MessageRow, parseMailView, threadQuery, threadsQuery } from "@/lib/queries.ts";
+import { type MessageRow, parseMailView, threadQuery } from "@/lib/queries.ts";
 import { useKeyboardShortcuts } from "@/lib/shortcuts.ts";
+import { useThreadFeed } from "@/lib/use-feeds.ts";
 import { openCompose } from "./compose-dock.tsx";
 import { ShortcutsDialog } from "./shortcuts-dialog.tsx";
 
@@ -19,10 +20,7 @@ export function AppShortcuts() {
   const qc = useQueryClient();
   const [helpOpen, setHelpOpen] = useState(false);
 
-  const threadsQ = useQuery({
-    ...threadsQuery(mailboxId ?? "", view),
-    enabled: Boolean(mailboxId),
-  });
+  const feed = useThreadFeed(mailboxId ?? "", view);
 
   const setThreadState = useMutation({
     mutationFn: (input: { id: string; patch: { trashed?: boolean; spam?: boolean } }) =>
@@ -55,7 +53,7 @@ export function AppShortcuts() {
   const navigateThread = useCallback(
     (delta: number) => {
       if (!mailboxId) return;
-      const threads = threadsQ.data?.threads ?? [];
+      const threads = feed.items;
       if (threads.length === 0) return;
       const idx = threadId ? threads.findIndex((t) => t.id === threadId) : -1;
       const nextIdx =
@@ -72,7 +70,7 @@ export function AppShortcuts() {
         search: { view },
       });
     },
-    [mailboxId, threadId, view, threadsQ.data, nav],
+    [mailboxId, threadId, view, feed.items, nav],
   );
 
   const withLastMessage = useCallback(

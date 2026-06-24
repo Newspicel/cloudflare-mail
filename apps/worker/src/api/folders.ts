@@ -10,6 +10,7 @@ import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
 import { requireUser } from "../middleware.ts";
 import { accessibleMailboxIds, requirePerm } from "../permissions.ts";
+import { cursorBefore, decodeCursor, nextCursor } from "./pagination.ts";
 import { serializeThread } from "./serialize.ts";
 import { buildPatch, wrapUnique } from "./util.ts";
 
@@ -128,8 +129,10 @@ export function foldersRoutes() {
     await requireOwnFolder(db, user.id, id);
 
     const ids = await accessibleMailboxIds(db, user.id);
-    if (ids.length === 0) return c.json({ threads: [] } satisfies ThreadListDto);
+    if (ids.length === 0) return c.json({ threads: [], nextCursor: null } satisfies ThreadListDto);
 
+    const limit = Math.min(Number(c.req.query("limit") ?? 50), 200);
+    const cursor = decodeCursor(c.req.query("cursor"));
     const rows = await db
       .select()
       .from(thread)
@@ -141,13 +144,18 @@ export function foldersRoutes() {
           inArray(thread.mailboxId, ids),
           eq(thread.trashed, false),
           eq(thread.spam, false),
+          cursorBefore(cursor, thread.lastMsgAt, thread.id),
         ),
       )
-      .orderBy(desc(thread.lastMsgAt))
-      .limit(200);
+      .orderBy(desc(thread.lastMsgAt), desc(thread.id))
+      .limit(limit);
 
     return c.json({
       threads: rows.map((row) => serializeThread(row.thread)),
+      nextCursor: nextCursor(rows, limit, (row) => ({
+        ts: row.thread.lastMsgAt,
+        id: row.thread.id,
+      })),
     } satisfies ThreadListDto);
   });
 

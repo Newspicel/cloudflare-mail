@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Folder as FolderIcon, FolderInput, Mail, MailOpen } from "lucide-react";
+import { type CSSProperties, useMemo, useRef } from "react";
 import { api } from "@/lib/api.ts";
 import {
   type FolderRow,
@@ -9,6 +10,7 @@ import {
 } from "@/lib/queries.ts";
 import { useThreadListMutation } from "@/lib/thread-mutations.ts";
 import { useUnfileThread } from "@/lib/use-folder-mutations.ts";
+import { useListVirtualizer, visibleBlock } from "@/lib/use-list-virtualizer.ts";
 import { ThreadRowView } from "./thread-row.tsx";
 import { IconButton } from "./ui/icon-button.tsx";
 import { TooltipProvider } from "./ui/tooltip.tsx";
@@ -20,10 +22,32 @@ interface Props {
   threads: ThreadRow[];
   loading?: boolean;
   selectedThreadId?: string;
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  loadMore?: () => void;
 }
 
-export function FolderThreadList({ folder, folderId, threads, loading, selectedThreadId }: Props) {
-  const labelsQ = useQuery(threadLabelsQuery(threads.map((t) => t.id)));
+export function FolderThreadList({
+  folder,
+  folderId,
+  threads,
+  loading,
+  selectedThreadId,
+  hasMore = false,
+  loadingMore = false,
+  loadMore,
+}: Props) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useListVirtualizer(scrollRef, threads.length, {
+    hasMore,
+    loadingMore,
+    loadMore: () => loadMore?.(),
+  });
+  const vItems = virtualizer.getVirtualItems();
+
+  const [from, to] = visibleBlock(virtualizer, threads.length);
+  const visibleIds = useMemo(() => threads.slice(from, to).map((t) => t.id), [threads, from, to]);
+  const labelsQ = useQuery(threadLabelsQuery(visibleIds));
   const labelsByThread = labelsQ.data?.labels;
   return (
     <TooltipProvider delay={400}>
@@ -48,21 +72,45 @@ export function FolderThreadList({ folder, folderId, threads, loading, selectedT
             className="m-auto"
           />
         ) : (
-          <ul className="flex-1 overflow-y-auto">
-            {threads.map((t) => (
-              <FolderRowItem
-                key={t.id}
-                folderId={folderId}
-                thread={t}
-                labels={labelsByThread?.[t.id]}
-                active={t.id === selectedThreadId}
-              />
-            ))}
-          </ul>
+          <div ref={scrollRef} className="flex-1 overflow-y-auto">
+            <ul className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+              {vItems.map((vi) => {
+                const t = threads[vi.index]!;
+                return (
+                  <FolderRowItem
+                    key={t.id}
+                    rowRef={virtualizer.measureElement}
+                    dataIndex={vi.index}
+                    style={rowStyle(vi.start)}
+                    folderId={folderId}
+                    thread={t}
+                    labels={labelsByThread?.[t.id]}
+                    active={t.id === selectedThreadId}
+                  />
+                );
+              })}
+            </ul>
+            {loadingMore && (
+              <div className="py-3 text-center text-[11px] text-muted-foreground">
+                Loading more…
+              </div>
+            )}
+          </div>
         )}
       </div>
     </TooltipProvider>
   );
+}
+
+// Absolute placement for a virtualized row at `start` px down the spacer.
+function rowStyle(start: number): CSSProperties {
+  return {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    width: "100%",
+    transform: `translateY(${start}px)`,
+  };
 }
 
 function FolderRowItem({
@@ -70,11 +118,17 @@ function FolderRowItem({
   thread,
   labels,
   active,
+  rowRef,
+  style,
+  dataIndex,
 }: {
   folderId: string;
   thread: ThreadRow;
   labels?: MessageLabel[];
   active: boolean;
+  rowRef: (el: HTMLLIElement | null) => void;
+  style: CSSProperties;
+  dataIndex: number;
 }) {
   const unfile = useUnfileThread();
   const unread = thread.unreadCount > 0;
@@ -92,6 +146,9 @@ function FolderRowItem({
       link={{ kind: "folder", folderId }}
       active={active}
       labels={labels}
+      rowRef={rowRef}
+      style={style}
+      dataIndex={dataIndex}
       actions={
         <>
           <IconButton

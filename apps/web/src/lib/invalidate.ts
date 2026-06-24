@@ -3,8 +3,22 @@ import type { QueryClient } from "@tanstack/react-query";
 import { keys } from "./query-keys.ts";
 
 type ThreadList = { threads: ThreadDto[] };
+type ThreadPages = { pages: { threads: ThreadDto[]; nextCursor?: string | null }[] };
 type ThreadDetail = { thread: ThreadDto; messages: MessageDto[] };
 type MailboxList = { mailboxes: MailboxSummaryDto[] };
+
+// Thread lists are infinite queries (`{ pages: [{ threads }] }`), but the same
+// `threadsRoot` prefix also caches the folder-counts object (no `threads`). This
+// applies `fn` to every page's thread array and leaves non-list caches untouched,
+// so one mutator works across both shapes without knowing which it got.
+function mapThreadCache<T>(old: T, fn: (threads: ThreadDto[]) => ThreadDto[]): T {
+  const o = old as unknown as Partial<ThreadPages & ThreadList>;
+  if (Array.isArray(o?.pages)) {
+    return { ...o, pages: o.pages.map((p) => ({ ...p, threads: fn(p.threads) })) } as T;
+  }
+  if (Array.isArray(o?.threads)) return { ...o, threads: fn(o.threads) } as T;
+  return old;
+}
 
 // One place that defines "what to refresh when a thread changes" — used by both
 // the SSE handler and mutation `onSettled`, so the two never drift.
@@ -32,10 +46,8 @@ export function removeThreadsFromFolder(
   ids: Iterable<string>,
 ): void {
   const idSet = new Set(ids);
-  qc.setQueryData<ThreadList>(keys.folderThreads(folderId), (old) =>
-    old && Array.isArray(old.threads)
-      ? { ...old, threads: old.threads.filter((t) => !idSet.has(t.id)) }
-      : old,
+  qc.setQueryData(keys.folderThreads(folderId), (old) =>
+    old ? mapThreadCache(old, (threads) => threads.filter((t) => !idSet.has(t.id))) : old,
   );
 }
 
@@ -62,10 +74,8 @@ export function removeThreadsFromLists(
   ids: Iterable<string>,
 ): void {
   const idSet = new Set(ids);
-  qc.setQueriesData<ThreadList>({ queryKey: keys.threadsRoot(mailboxId) }, (old) =>
-    old && Array.isArray(old.threads)
-      ? { ...old, threads: old.threads.filter((t) => !idSet.has(t.id)) }
-      : old,
+  qc.setQueriesData({ queryKey: keys.threadsRoot(mailboxId) }, (old) =>
+    old ? mapThreadCache(old, (threads) => threads.filter((t) => !idSet.has(t.id))) : old,
   );
 }
 
@@ -77,9 +87,11 @@ export function patchThreadsInLists(
   patch: Partial<ThreadDto>,
 ): void {
   const idSet = new Set(ids);
-  qc.setQueriesData<ThreadList>({ queryKey: keys.threadsRoot(mailboxId) }, (old) =>
-    old && Array.isArray(old.threads)
-      ? { ...old, threads: old.threads.map((t) => (idSet.has(t.id) ? { ...t, ...patch } : t)) }
+  qc.setQueriesData({ queryKey: keys.threadsRoot(mailboxId) }, (old) =>
+    old
+      ? mapThreadCache(old, (threads) =>
+          threads.map((t) => (idSet.has(t.id) ? { ...t, ...patch } : t)),
+        )
       : old,
   );
 }
@@ -98,22 +110,34 @@ export function bumpThreadToTop(
   nowIso: string,
   incUnread: boolean,
 ): void {
-  qc.setQueriesData<ThreadList>({ queryKey: keys.threadsRoot(mailboxId) }, (old) => {
-    if (!old || !Array.isArray(old.threads)) return old;
-    const idx = old.threads.findIndex((t) => t.id === threadId);
-    if (idx === -1) return old;
-    const t = old.threads[idx];
-    if (!t) return old;
-    const updated: ThreadDto = {
-      ...t,
-      msgCount: t.msgCount + 1,
-      unreadCount: incUnread ? t.unreadCount + 1 : t.unreadCount,
-      lastMsgAt: nowIso,
-    };
-    return {
-      ...old,
-      threads: [updated, ...old.threads.slice(0, idx), ...old.threads.slice(idx + 1)],
-    };
+  const bump = (t: ThreadDto): ThreadDto => ({
+    ...t,
+    msgCount: t.msgCount + 1,
+    unreadCount: incUnread ? t.unreadCount + 1 : t.unreadCount,
+    lastMsgAt: nowIso,
+  });
+  // Pull the thread out of wherever it sits (any page) and prepend the bumped
+  // copy to the very first page so it lands at the top of the rendered list.
+  qc.setQueriesData({ queryKey: keys.threadsRoot(mailboxId) }, (old) => {
+    let found: ThreadDto | undefined;
+    const without = mapThreadCache(old as ThreadList | ThreadPages, (threads) =>
+      threads.filter((t) => {
+        if (t.id !== threadId) return true;
+        found = t;
+        return false;
+      }),
+    );
+    if (!found) return old;
+    const w = without as Partial<ThreadPages & ThreadList>;
+    if (Array.isArray(w.pages)) {
+      const [first, ...rest] = w.pages;
+      return {
+        ...w,
+        pages: [{ ...first, threads: [bump(found), ...(first?.threads ?? [])] }, ...rest],
+      };
+    }
+    if (Array.isArray(w.threads)) return { ...w, threads: [bump(found), ...w.threads] };
+    return old;
   });
 }
 

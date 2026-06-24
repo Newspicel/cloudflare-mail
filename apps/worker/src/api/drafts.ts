@@ -10,6 +10,7 @@ import type { AppBindings } from "../env.ts";
 import { assertOwnedAttachmentKeys } from "../mail/attachment-keys.ts";
 import { requireUser } from "../middleware.ts";
 import { ALL_MAILBOXES, requirePerm } from "../permissions.ts";
+import { cursorBefore, decodeCursor, nextCursor } from "./pagination.ts";
 import { serializeDraft } from "./serialize.ts";
 import { buildPatch } from "./util.ts";
 
@@ -26,16 +27,26 @@ export function draftsRoutes() {
 
     // "All" view: every draft the user authored, regardless of mailbox. Drafts
     // are already scoped to the author, so no per-mailbox permission check.
-    let where: ReturnType<typeof eq> | ReturnType<typeof and>;
+    let scope: ReturnType<typeof eq> | ReturnType<typeof and>;
     if (mailboxId === ALL_MAILBOXES) {
-      where = eq(draft.userId, user.id);
+      scope = eq(draft.userId, user.id);
     } else {
       await requirePerm(db, user.id, mailboxId, Perm.READ);
-      where = and(eq(draft.mailboxId, mailboxId), eq(draft.userId, user.id));
+      scope = and(eq(draft.mailboxId, mailboxId), eq(draft.userId, user.id));
     }
 
-    const rows = await db.select().from(draft).where(where).orderBy(desc(draft.updatedAt));
-    return c.json({ drafts: rows.map(serializeDraft) });
+    const limit = Math.min(Number(c.req.query("limit") ?? 50), 200);
+    const cursor = decodeCursor(c.req.query("cursor"));
+    const rows = await db
+      .select()
+      .from(draft)
+      .where(and(scope, cursorBefore(cursor, draft.updatedAt, draft.id)))
+      .orderBy(desc(draft.updatedAt), desc(draft.id))
+      .limit(limit);
+    return c.json({
+      drafts: rows.map(serializeDraft),
+      nextCursor: nextCursor(rows, limit, (d) => ({ ts: d.updatedAt, id: d.id })),
+    });
   });
 
   r.get("/:id", async (c) => {

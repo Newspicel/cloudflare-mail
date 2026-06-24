@@ -8,8 +8,8 @@ export const Route = createFileRoute("/app/m/$mailboxId")({
   loaderDeps: ({ search: { view } }) => ({ view }),
   loader: ({ params, context, deps }) =>
     deps.view === "drafts"
-      ? context.queryClient.ensureQueryData(draftsQuery(params.mailboxId))
-      : context.queryClient.ensureQueryData(threadsQuery(params.mailboxId, deps.view)),
+      ? context.queryClient.ensureInfiniteQueryData(draftsQuery(params.mailboxId))
+      : context.queryClient.ensureInfiniteQueryData(threadsQuery(params.mailboxId, deps.view)),
   component: MailboxLayout,
 });
 

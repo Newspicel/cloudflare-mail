@@ -1,6 +1,7 @@
 import type {
   ContactDto,
   DraftDto,
+  DraftListDto,
   FolderCountsDto,
   FolderDto,
   LabelDto,
@@ -15,8 +16,9 @@ import type {
   SearchResultDto,
   SearchResultsDto,
   ThreadDto,
+  ThreadListDto,
 } from "@cfmail/shared";
-import { queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { api } from "./api.ts";
 import { keys } from "./query-keys.ts";
 
@@ -74,21 +76,33 @@ export function parseMailView(value: unknown): MailView {
   return MAIL_VIEWS.includes(value as MailView) ? (value as MailView) : "inbox";
 }
 
+// Page size for the infinite thread lists. The worker caps at 200; 50 keeps the
+// first paint light while still filling a tall viewport in one fetch.
+const THREAD_PAGE = 50;
+
 export const threadsQuery = (mailboxId: string, view: MailView = "inbox") =>
-  queryOptions({
+  infiniteQueryOptions({
     queryKey: keys.threads(mailboxId, view),
-    queryFn: () =>
-      api<{ threads: ThreadDto[] }>(
-        `/api/threads?mailboxId=${encodeURIComponent(mailboxId)}&view=${view}`,
+    queryFn: ({ pageParam }) =>
+      api<ThreadListDto>(
+        `/api/threads?mailboxId=${encodeURIComponent(mailboxId)}&view=${view}&limit=${THREAD_PAGE}` +
+          (pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ""),
       ),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
     enabled: Boolean(mailboxId),
   });
 
 export const draftsQuery = (mailboxId: string) =>
-  queryOptions({
+  infiniteQueryOptions({
     queryKey: keys.drafts(mailboxId),
-    queryFn: () =>
-      api<{ drafts: DraftDto[] }>(`/api/drafts?mailboxId=${encodeURIComponent(mailboxId)}`),
+    queryFn: ({ pageParam }) =>
+      api<DraftListDto>(
+        `/api/drafts?mailboxId=${encodeURIComponent(mailboxId)}&limit=${THREAD_PAGE}` +
+          (pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ""),
+      ),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
     enabled: Boolean(mailboxId),
   });
 
@@ -203,9 +217,15 @@ export const foldersQuery = queryOptions({
 });
 
 export const folderThreadsQuery = (folderId: string) =>
-  queryOptions({
+  infiniteQueryOptions({
     queryKey: keys.folderThreads(folderId),
-    queryFn: () => api<{ threads: ThreadDto[] }>(`/api/folders/${folderId}/threads`),
+    queryFn: ({ pageParam }) =>
+      api<ThreadListDto>(
+        `/api/folders/${folderId}/threads?limit=${THREAD_PAGE}` +
+          (pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ""),
+      ),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
     enabled: Boolean(folderId),
   });
 

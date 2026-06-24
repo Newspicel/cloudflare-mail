@@ -19,6 +19,10 @@ export function setThreadDrag(e: DragEvent, data: ThreadDragData): void {
   e.dataTransfer.setData("text/plain", data.threadId);
   e.dataTransfer.effectAllowed = "move";
 
+  // Clear any ghost left behind by a drag whose `dragend` never fired (see
+  // below) before creating a new one.
+  clearThreadDragGhost();
+
   // Don't hand the live row to setDragImage: it sits inside a scrolling /
   // composited ancestor, and Chromium then snapshots that whole layer (the
   // entire window) instead of the row. Snapshot a detached clone parented
@@ -31,6 +35,9 @@ export function setThreadDrag(e: DragEvent, data: ThreadDragData): void {
     position: "fixed",
     top: "-10000px",
     left: "0",
+    // Virtualized rows are absolutely positioned with a translateY offset; the
+    // clone inherits it, so reset the transform or the ghost lands off-target.
+    transform: "none",
     width: `${rect.width}px`,
     margin: "0",
     listStyle: "none",
@@ -39,6 +46,11 @@ export function setThreadDrag(e: DragEvent, data: ThreadDragData): void {
   });
   document.body.appendChild(ghost);
   e.dataTransfer.setDragImage(ghost, e.clientX - rect.left, e.clientY - rect.top);
+
+  // Safety net: in a virtualized list the source row can unmount mid-drag
+  // (scrolled out of the window), and then its `onDragEnd` never fires and the
+  // ghost would leak. A one-shot document-level listener guarantees cleanup.
+  document.addEventListener("dragend", clearThreadDragGhost, { once: true });
 }
 
 /** Remove any leftover drag-image clone. Wire to the row's onDragEnd. */

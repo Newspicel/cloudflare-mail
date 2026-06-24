@@ -4,7 +4,8 @@ import { MailOpen } from "lucide-react";
 import { DraftList } from "@/components/draft-list.tsx";
 import { ThreadList } from "@/components/thread-list.tsx";
 import { EmptyState } from "@/components/ui.tsx";
-import { draftsQuery, mailboxesQuery, threadsQuery } from "@/lib/queries.ts";
+import { mailboxesQuery } from "@/lib/queries.ts";
+import { useDraftFeed, useThreadFeed } from "@/lib/use-feeds.ts";
 
 export const Route = createFileRoute("/app/m/$mailboxId/")({
   component: MailboxIndex,
@@ -14,8 +15,8 @@ function MailboxIndex() {
   const { mailboxId } = Route.useParams();
   const { view } = Route.useSearch();
   const isDrafts = view === "drafts";
-  const threads = useQuery({ ...threadsQuery(mailboxId, view), enabled: !isDrafts });
-  const draftsQ = useQuery({ ...draftsQuery(mailboxId), enabled: isDrafts });
+  const feed = useThreadFeed(mailboxId, view, !isDrafts);
+  const drafts = useDraftFeed(mailboxId, isDrafts);
   const mailboxes = useQuery(mailboxesQuery);
   const mailbox = mailboxes.data?.mailboxes.find((m) => m.id === mailboxId);
 
@@ -27,15 +28,21 @@ function MailboxIndex() {
             <DraftList
               mailboxId={mailboxId}
               view={view}
-              drafts={draftsQ.data?.drafts ?? []}
-              loading={draftsQ.isLoading}
+              drafts={drafts.items}
+              loading={drafts.loading}
+              hasMore={drafts.hasMore}
+              loadingMore={drafts.loadingMore}
+              loadMore={drafts.loadMore}
             />
           ) : (
             <ThreadList
               mailboxId={mailboxId}
               view={view}
-              threads={threads.data?.threads ?? []}
-              loading={threads.isLoading}
+              threads={feed.items}
+              loading={feed.loading}
+              hasMore={feed.hasMore}
+              loadingMore={feed.loadingMore}
+              loadMore={feed.loadMore}
               expiresAt={mailbox?.expiresAt ?? null}
             />
           )}
