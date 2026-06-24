@@ -7,6 +7,8 @@ import { api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
 import { type FolderRow, foldersQuery } from "@/lib/queries.ts";
 import { keys } from "@/lib/query-keys.ts";
+import { Button } from "./ui/button.tsx";
+import { ColorField, DEFAULT_COLOR } from "./ui/color-field.tsx";
 import { useConfirmHelpers } from "./ui/confirm.tsx";
 import { Input } from "./ui/input.tsx";
 import { UnreadBadge } from "./ui.tsx";
@@ -22,16 +24,18 @@ export function FoldersNav({ onClose }: { onClose?: () => void }) {
 
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
+  const [color, setColor] = useState(DEFAULT_COLOR);
 
   const create = useMutation({
     mutationFn: () =>
       api<{ id: string }>("/api/folders", {
         method: "POST",
-        body: JSON.stringify({ name: name.trim() }),
+        body: JSON.stringify({ name: name.trim(), color }),
       }),
     onSuccess: () => {
       setCreating(false);
       setName("");
+      setColor(DEFAULT_COLOR);
       qc.invalidateQueries({ queryKey: keys.folders() });
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed to create"),
@@ -73,7 +77,7 @@ export function FoldersNav({ onClose }: { onClose?: () => void }) {
 
       {creating && (
         <form
-          className="mb-1 px-1"
+          className="mb-2 space-y-2 rounded-md border bg-card p-2"
           onSubmit={(e) => {
             e.preventDefault();
             if (name.trim()) create.mutate();
@@ -86,11 +90,25 @@ export function FoldersNav({ onClose }: { onClose?: () => void }) {
             onKeyDown={(e) => {
               if (e.key === "Escape") setCreating(false);
             }}
-            onBlur={() => !name.trim() && setCreating(false)}
             placeholder="Folder name"
             maxLength={64}
             className="h-7 text-[13px]"
           />
+          <ColorField color={color} onChange={setColor} />
+          <div className="flex gap-2">
+            <Button
+              type="submit"
+              variant="primary"
+              size="sm"
+              className="flex-1"
+              disabled={!name.trim() || create.isPending}
+            >
+              {create.isPending ? "Creating…" : "Create"}
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => setCreating(false)}>
+              Cancel
+            </Button>
+          </div>
         </form>
       )}
 
