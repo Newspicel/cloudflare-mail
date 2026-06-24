@@ -112,7 +112,11 @@ function TempForm({ onCreated }: { onCreated: (t: CreatedTemp) => void }) {
       {tempDomains.length > 1 ? (
         <div className="flex flex-col gap-1 text-[11px]">
           <span className="text-muted-foreground">Domain</span>
-          <Select value={domainId} onValueChange={(v) => setDomainId(v as string)}>
+          <Select
+            items={tempDomains.map((d) => ({ value: d.id, label: `@${d.name}` }))}
+            value={domainId}
+            onValueChange={(v) => setDomainId(v as string)}
+          >
             <SelectTrigger aria-label="Domain">
               <SelectValue />
             </SelectTrigger>

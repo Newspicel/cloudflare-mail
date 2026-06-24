@@ -206,7 +206,11 @@ export function MailboxSettingsForm({
             </Field>
             {type !== "service" && admin && (
               <Field label="Spam filter" hint={spamLabel?.hint}>
-                <Select value={spamFilter} onValueChange={(v) => setSpamFilter(v as SpamLevel)}>
+                <Select
+                  items={SPAM_LEVELS}
+                  value={spamFilter}
+                  onValueChange={(v) => setSpamFilter(v as SpamLevel)}
+                >
                   <SelectTrigger aria-label="Spam filter">
                     <SelectValue />
                   </SelectTrigger>
@@ -251,6 +255,10 @@ export function MailboxSettingsForm({
                 hint="Summarise & categorise inbound mail in the list, plus smart replies and thread summaries. Uses Workers AI."
               >
                 <Select
+                  items={[
+                    { value: "off", label: "Off" },
+                    { value: "on", label: "On" },
+                  ]}
                   value={aiFeatures ? "on" : "off"}
                   onValueChange={(v) => setAiFeatures(v === "on")}
                 >
@@ -421,6 +429,7 @@ function MailboxPgpCard({ mailboxId, settingsKey }: { mailboxId: string; setting
           }
         >
           <Select
+            items={PGP_MODES}
             value={s?.pgpMode ?? "off"}
             disabled={!configured || setMode.isPending || settingsQ.isLoading}
             onValueChange={(v) => setMode.mutate(v as PgpMode)}
@@ -661,6 +670,10 @@ export function MailboxImportSection({ mailboxes }: { mailboxes: ImportTarget[] 
     >
       <Field label="Import into">
         <Select
+          items={mailboxes.map((m) => ({
+            value: m.id,
+            label: m.displayName ? `${m.displayName} (${m.address})` : m.address,
+          }))}
           value={mailboxId}
           disabled={running}
           onValueChange={(v) => setMailboxId(v as string)}

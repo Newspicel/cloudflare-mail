@@ -222,6 +222,7 @@ function Select({
 }) {
   return (
     <SelectRoot
+      items={options}
       value={value}
       onValueChange={(v) => onValueChange((v ?? "") as string)}
       disabled={disabled}
