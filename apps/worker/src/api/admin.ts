@@ -1,4 +1,3 @@
-import type { DB } from "@cfmail/db";
 import {
   domain,
   mailbox,
@@ -7,7 +6,6 @@ import {
   mailboxSpamUsage,
   message,
   redirect,
-  thread,
   user,
 } from "@cfmail/db/schema";
 import {
@@ -25,39 +23,13 @@ import { aliasedTable, and, asc, count, desc, eq, inArray, max, ne } from "drizz
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { dbFromCtx } from "../db.ts";
-import type { AppBindings, Env } from "../env.ts";
-import {
-  collectMailboxBlobKeys,
-  collectThreadBlobKeys,
-  deleteBlobs,
-  deleteThreadsByIds,
-} from "../mail/blobs.ts";
+import type { AppBindings } from "../env.ts";
+import { collectMailboxBlobKeys, deleteBlobs } from "../mail/blobs.ts";
 import { authorizeMailboxCreate } from "../mailbox-access.ts";
 import { requireAdmin, requireUser } from "../middleware.ts";
+import { mailboxNotDeletePending } from "../permissions.ts";
 import { sha256Hex } from "./svc.ts";
 import { buildPatch, wrapUnique } from "./util.ts";
-
-// A single cascade-delete of a large mailbox (threads → messages → attachments,
-// plus the per-row FTS triggers) exceeds D1's 30s/per-statement limits and
-// fails with an internal error. Drain its threads in bounded batches instead;
-// blobs (R2) have no FK cascade, so drop those first. (collectThreadBlobKeys /
-// deleteThreadsByIds chunk the ids under D1's bound-parameter cap internally.)
-const PURGE_BATCH = 200;
-async function purgeMailboxThreads(db: DB, env: Env, mailboxId: string): Promise<void> {
-  for (;;) {
-    const batch = await db
-      .select({ id: thread.id })
-      .from(thread)
-      .where(eq(thread.mailboxId, mailboxId))
-      .limit(PURGE_BATCH);
-    if (!batch.length) break;
-
-    const ids = batch.map((t) => t.id);
-    const keys = await collectThreadBlobKeys(db, ids);
-    await deleteBlobs(env, keys);
-    await deleteThreadsByIds(db, ids);
-  }
-}
 
 // Admin-only mailbox & redirect management. Mounted at /api/admin.
 export function adminRoutes() {
@@ -84,8 +56,9 @@ export function adminRoutes() {
       .from(mailbox)
       .innerJoin(domain, eq(mailbox.domainId, domain.id))
       .innerJoin(user, eq(mailbox.ownerUserId, user.id))
-      // service mailboxes have their own section (GET /service).
-      .where(ne(mailbox.type, "service"))
+      // service mailboxes have their own section (GET /service); a mailbox being
+      // hard-deleted in the background is already gone from the admin's view.
+      .where(and(ne(mailbox.type, "service"), mailboxNotDeletePending))
       .orderBy(asc(domain.name), asc(mailbox.localPart));
     return c.json({
       mailboxes: rows.map((m) => ({
@@ -287,11 +260,9 @@ export function adminRoutes() {
       }
     }
 
-    // Drain threads in batches first so the mailbox row's own cascade is small.
-    await purgeMailboxThreads(db, c.env, id);
-    // Deleting frees the (domain, local_part) address before the redirect claims it.
-    await db.delete(mailbox).where(eq(mailbox.id, id));
-
+    // The redirect can claim the address immediately: receive routing skips a
+    // delete-pending mailbox (mailboxNotDeletePending), so its inbound resolves
+    // to the target while the cron drains the old threads in the background.
     if (target) {
       await db.insert(redirect).values({
         id: crypto.randomUUID(),
@@ -300,6 +271,8 @@ export function adminRoutes() {
         targetMailboxId: target.id,
       });
     }
+    // Mark for background purge; the cron drains the threads, then drops the row.
+    await db.update(mailbox).set({ pendingPurge: "delete" }).where(eq(mailbox.id, id));
     return c.body(null, 204);
   });
 
@@ -313,9 +286,9 @@ export function adminRoutes() {
     });
     if (!mb) throw new HTTPException(404, { message: "not found" });
 
-    // The mailbox itself stays; only its threads are purged.
-    await purgeMailboxThreads(db, c.env, id);
-
+    // Mark for background purge: the cron drains the threads (the mailbox stays).
+    // Its threads read as gone immediately (resolveAccess marks it `purging`).
+    await db.update(mailbox).set({ pendingPurge: "empty" }).where(eq(mailbox.id, id));
     return c.body(null, 204);
   });
 
@@ -494,9 +467,14 @@ export function adminRoutes() {
     }
 
     // A real mailbox at this address always wins in receive.ts — refuse to
-    // create a redirect that can never fire.
+    // create a redirect that can never fire. A delete-pending mailbox no longer
+    // wins (receive skips it), so it doesn't block the redirect.
     const clash = await db.query.mailbox.findFirst({
-      where: and(eq(mailbox.domainId, body.domainId), eq(mailbox.localPart, localPart)),
+      where: and(
+        eq(mailbox.domainId, body.domainId),
+        eq(mailbox.localPart, localPart),
+        mailboxNotDeletePending,
+      ),
       columns: { id: true },
     });
     if (clash) throw new HTTPException(409, { message: "a mailbox already owns this address" });

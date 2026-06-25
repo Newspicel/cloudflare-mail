@@ -16,6 +16,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { getOrCreatePgpMasterKey } from "../config.ts";
 import type { Env } from "../env.ts";
 import { broadcastToUsers } from "../hub.ts";
+import { mailboxNotDeletePending } from "../permissions.ts";
 import { generateMessageInsights } from "./ai.ts";
 import { isSenderBlocked } from "./blocklist.ts";
 import { type IngestOptions, ingestRaw, isAuthenticated, MAX_EMAIL_BYTES } from "./ingest.ts";
@@ -59,7 +60,13 @@ export async function handleInbound(
   }
 
   let mb = await db.query.mailbox.findFirst({
-    where: and(eq(mailbox.domainId, dom.id), eq(mailbox.localPart, baseLocal)),
+    // Skip a mailbox being hard-deleted so its address falls through to any
+    // redirect — its inbound is effectively freed the moment delete is requested.
+    where: and(
+      eq(mailbox.domainId, dom.id),
+      eq(mailbox.localPart, baseLocal),
+      mailboxNotDeletePending,
+    ),
     columns: {
       id: true,
       type: true,

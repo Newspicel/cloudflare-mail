@@ -211,6 +211,13 @@
       "when": 1782317265907,
       "tag": "0029_nostalgic_arclight",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1782423259445,
+      "tag": "0030_daily_hairball",
+      "breakpoints": true
     }
   ]
 }

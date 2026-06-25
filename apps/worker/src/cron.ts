@@ -23,6 +23,12 @@ const TRASH_PURGE_LIMIT = 500;
 // there is no user inbox, so retention is automatic rather than user-driven.
 const SERVICE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const SERVICE_PURGE_LIMIT = 500;
+// Background mailbox purge (admin empty/delete). Drain a bounded number of
+// threads per tick across a few pending mailboxes — a synchronous cascade-delete
+// of a large mailbox exceeds D1's per-statement limits.
+const MAILBOX_PURGE_MAILBOXES = 5;
+const MAILBOX_PURGE_THREAD_BATCH = 100;
+const MAILBOX_PURGE_THREADS_PER_TICK = 2000;
 // How many due scheduled sends to dispatch per cron tick.
 const SCHEDULED_SEND_LIMIT = 50;
 // How many due reminders to fire per cron tick.
@@ -89,6 +95,8 @@ export async function runCron(env: Env, now: Date): Promise<void> {
     await deleteThreadsByIds(db, ids);
   }
 
+  await purgePendingMailboxes(env, db);
+
   const stale = new Date(now.getTime() - DNS_RECHECK_INTERVAL_MS);
   const dueDomains = await db
     .select({ id: domain.id, name: domain.name })
@@ -109,6 +117,52 @@ export async function runCron(env: Env, now: Date): Promise<void> {
       }
     }),
   );
+}
+
+// Drain mailboxes an admin marked for background purge (empty/delete). Each tick
+// deletes a bounded number of threads per pending mailbox — blobs first (no FK
+// cascade), then the threads (which cascade to messages/attachments). When a
+// mailbox is fully drained it's finalized: an "empty" clears the flag, a
+// "delete" drops the row. The remaining mailboxes carry over to the next tick.
+async function purgePendingMailboxes(env: Env, db: DB): Promise<void> {
+  const pending = await db
+    .select({ id: mailbox.id, pendingPurge: mailbox.pendingPurge })
+    .from(mailbox)
+    .where(isNotNull(mailbox.pendingPurge))
+    .limit(MAILBOX_PURGE_MAILBOXES);
+
+  for (const mb of pending) {
+    let drained = 0;
+    while (drained < MAILBOX_PURGE_THREADS_PER_TICK) {
+      const batch = await db
+        .select({ id: thread.id })
+        .from(thread)
+        .where(eq(thread.mailboxId, mb.id))
+        .limit(MAILBOX_PURGE_THREAD_BATCH);
+      if (!batch.length) break;
+
+      const ids = batch.map((t) => t.id);
+      const keys = await collectThreadBlobKeys(db, ids);
+      await deleteBlobs(env, keys);
+      await deleteThreadsByIds(db, ids);
+      drained += ids.length;
+    }
+
+    // Finalize only once the mailbox is fully drained; otherwise it stays flagged
+    // and the next tick continues.
+    const more = await db
+      .select({ id: thread.id })
+      .from(thread)
+      .where(eq(thread.mailboxId, mb.id))
+      .limit(1);
+    if (more.length) continue;
+
+    if (mb.pendingPurge === "delete") {
+      await db.delete(mailbox).where(eq(mailbox.id, mb.id));
+    } else {
+      await db.update(mailbox).set({ pendingPurge: null }).where(eq(mailbox.id, mb.id));
+    }
+  }
 }
 
 // Fire reminders whose time has arrived: mark them fired, push a notification to

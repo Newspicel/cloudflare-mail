@@ -265,6 +265,12 @@ export const mailbox = sqliteTable(
     pgpPassphraseWrapped: text("pgp_passphrase_wrapped"),
     pgpFingerprint: text("pgp_fingerprint"),
     expiresAt: integer("expires_at", { mode: "timestamp" }),
+    // Background purge marker (admin empty/delete). "empty" drains the mailbox's
+    // threads then clears; "delete" drains then drops the mailbox row. The cron
+    // does the draining in bounded batches — a synchronous cascade-delete of a
+    // large mailbox exceeds D1's per-statement limits. A delete-pending mailbox
+    // is hidden from listings + receive routing so its address frees at once.
+    pendingPurge: text("pending_purge", { enum: ["empty", "delete"] }),
     createdAt: createdAt(),
   },
   (t) => [
@@ -273,6 +279,7 @@ export const mailbox = sqliteTable(
     index("mailbox_expires_idx").on(t.expiresAt),
     index("mailbox_type_idx").on(t.type),
     uniqueIndex("mailbox_service_key_idx").on(t.serviceKeyHash),
+    index("mailbox_pending_purge_idx").on(t.pendingPurge),
   ],
 );
 
