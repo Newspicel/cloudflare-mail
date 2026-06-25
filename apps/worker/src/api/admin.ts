@@ -1,3 +1,4 @@
+import type { DB } from "@cfmail/db";
 import {
   domain,
   mailbox,
@@ -24,12 +25,34 @@ import { aliasedTable, and, asc, count, desc, eq, inArray, max, ne } from "drizz
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { dbFromCtx } from "../db.ts";
-import type { AppBindings } from "../env.ts";
+import type { AppBindings, Env } from "../env.ts";
 import { collectMailboxBlobKeys, collectThreadBlobKeys, deleteBlobs } from "../mail/blobs.ts";
 import { authorizeMailboxCreate } from "../mailbox-access.ts";
 import { requireAdmin, requireUser } from "../middleware.ts";
 import { sha256Hex } from "./svc.ts";
 import { buildPatch, wrapUnique } from "./util.ts";
+
+// A single cascade-delete of a large mailbox (threads → messages → attachments,
+// plus the per-row FTS triggers) exceeds D1's 30s/per-statement limits and
+// fails with an internal error. Drain its threads in bounded batches instead;
+// blobs (R2) have no FK cascade, so drop those first. Same approach the cron
+// trash purge uses.
+const PURGE_BATCH = 200;
+async function purgeMailboxThreads(db: DB, env: Env, mailboxId: string): Promise<void> {
+  for (;;) {
+    const batch = await db
+      .select({ id: thread.id })
+      .from(thread)
+      .where(eq(thread.mailboxId, mailboxId))
+      .limit(PURGE_BATCH);
+    if (!batch.length) break;
+
+    const ids = batch.map((t) => t.id);
+    const keys = await collectThreadBlobKeys(db, ids);
+    await deleteBlobs(env, keys);
+    await db.delete(thread).where(inArray(thread.id, ids));
+  }
+}
 
 // Admin-only mailbox & redirect management. Mounted at /api/admin.
 export function adminRoutes() {
@@ -259,8 +282,8 @@ export function adminRoutes() {
       }
     }
 
-    const keys = await collectMailboxBlobKeys(db, id);
-    await deleteBlobs(c.env, keys);
+    // Drain threads in batches first so the mailbox row's own cascade is small.
+    await purgeMailboxThreads(db, c.env, id);
     // Deleting frees the (domain, local_part) address before the redirect claims it.
     await db.delete(mailbox).where(eq(mailbox.id, id));
 
@@ -285,23 +308,8 @@ export function adminRoutes() {
     });
     if (!mb) throw new HTTPException(404, { message: "not found" });
 
-    // Purge in thread batches; one bulk cascade-delete of a large mailbox
-    // exceeds D1's per-statement limits. Threads cascade to messages and
-    // attachments; the mailbox itself stays.
-    const EMPTY_BATCH = 200;
-    for (;;) {
-      const batch = await db
-        .select({ id: thread.id })
-        .from(thread)
-        .where(eq(thread.mailboxId, id))
-        .limit(EMPTY_BATCH);
-      if (!batch.length) break;
-
-      const ids = batch.map((t) => t.id);
-      const keys = await collectThreadBlobKeys(db, ids);
-      await deleteBlobs(c.env, keys);
-      await db.delete(thread).where(inArray(thread.id, ids));
-    }
+    // The mailbox itself stays; only its threads are purged.
+    await purgeMailboxThreads(db, c.env, id);
 
     return c.body(null, 204);
   });
