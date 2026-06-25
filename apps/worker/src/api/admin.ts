@@ -25,7 +25,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
-import { collectMailboxBlobKeys, deleteBlobs } from "../mail/blobs.ts";
+import { collectMailboxBlobKeys, collectThreadBlobKeys, deleteBlobs } from "../mail/blobs.ts";
 import { authorizeMailboxCreate } from "../mailbox-access.ts";
 import { requireAdmin, requireUser } from "../middleware.ts";
 import { sha256Hex } from "./svc.ts";
@@ -285,10 +285,23 @@ export function adminRoutes() {
     });
     if (!mb) throw new HTTPException(404, { message: "not found" });
 
-    const keys = await collectMailboxBlobKeys(db, id);
-    await deleteBlobs(c.env, keys);
-    // Threads cascade to messages and attachments; the mailbox itself stays.
-    await db.delete(thread).where(eq(thread.mailboxId, id));
+    // Purge in thread batches; one bulk cascade-delete of a large mailbox
+    // exceeds D1's per-statement limits. Threads cascade to messages and
+    // attachments; the mailbox itself stays.
+    const EMPTY_BATCH = 200;
+    for (;;) {
+      const batch = await db
+        .select({ id: thread.id })
+        .from(thread)
+        .where(eq(thread.mailboxId, id))
+        .limit(EMPTY_BATCH);
+      if (!batch.length) break;
+
+      const ids = batch.map((t) => t.id);
+      const keys = await collectThreadBlobKeys(db, ids);
+      await deleteBlobs(c.env, keys);
+      await db.delete(thread).where(inArray(thread.id, ids));
+    }
 
     return c.body(null, 204);
   });
