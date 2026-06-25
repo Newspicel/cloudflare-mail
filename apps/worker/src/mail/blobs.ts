@@ -1,28 +1,50 @@
 import type { DB } from "@cfmail/db";
-import { attachment, message } from "@cfmail/db/schema";
+import { attachment, message, thread } from "@cfmail/db/schema";
 import { eq, inArray } from "drizzle-orm";
 import type { Env } from "../env.ts";
 
 const R2_DELETE_BATCH = 1000;
+// D1 rejects a query with more than 100 bound parameters, so any `inArray` over
+// a caller-supplied id list must be fed in chunks below that cap.
+const SQL_VARS_LIMIT = 100;
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
 
 export async function collectThreadBlobKeys(db: DB, threadIds: string[]): Promise<string[]> {
   if (!threadIds.length) return [];
-  const msgs = await db
-    .select({ rawR2Key: message.rawR2Key, plainR2Key: message.plainR2Key })
-    .from(message)
-    .where(inArray(message.threadId, threadIds));
+  const keys: string[] = [];
+  for (const ids of chunk(threadIds, SQL_VARS_LIMIT)) {
+    const msgs = await db
+      .select({ rawR2Key: message.rawR2Key, plainR2Key: message.plainR2Key })
+      .from(message)
+      .where(inArray(message.threadId, ids));
 
-  const atts = await db
-    .select({ r2Key: attachment.r2Key })
-    .from(attachment)
-    .innerJoin(message, eq(message.id, attachment.messageId))
-    .where(inArray(message.threadId, threadIds));
+    const atts = await db
+      .select({ r2Key: attachment.r2Key })
+      .from(attachment)
+      .innerJoin(message, eq(message.id, attachment.messageId))
+      .where(inArray(message.threadId, ids));
 
-  return [
-    ...msgs.map((m) => m.rawR2Key).filter((k): k is string => Boolean(k)),
-    ...msgs.map((m) => m.plainR2Key).filter((k): k is string => Boolean(k)),
-    ...atts.map((a) => a.r2Key),
-  ];
+    keys.push(
+      ...msgs.map((m) => m.rawR2Key).filter((k): k is string => Boolean(k)),
+      ...msgs.map((m) => m.plainR2Key).filter((k): k is string => Boolean(k)),
+      ...atts.map((a) => a.r2Key),
+    );
+  }
+  return keys;
+}
+
+// Delete threads by id (cascading to their messages/attachments), chunked under
+// D1's bound-parameter cap. Blobs (R2) have no FK cascade — collect + delete
+// those first via collectThreadBlobKeys/deleteBlobs.
+export async function deleteThreadsByIds(db: DB, ids: string[]): Promise<void> {
+  for (const part of chunk(ids, SQL_VARS_LIMIT)) {
+    await db.delete(thread).where(inArray(thread.id, part));
+  }
 }
 
 // R2 keys owned by a single message (its raw/plaintext `.eml` + attachment

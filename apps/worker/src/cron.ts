@@ -1,9 +1,14 @@
 import { type DB, makeDB } from "@cfmail/db";
 import { domain, draft, mailbox, reminder, thread } from "@cfmail/db/schema";
-import { and, asc, eq, inArray, isNotNull, isNull, lte, or } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, lte, or } from "drizzle-orm";
 import type { Env } from "./env.ts";
 import { broadcastToUsers } from "./hub.ts";
-import { collectMailboxBlobKeys, collectThreadBlobKeys, deleteBlobs } from "./mail/blobs.ts";
+import {
+  collectMailboxBlobKeys,
+  collectThreadBlobKeys,
+  deleteBlobs,
+  deleteThreadsByIds,
+} from "./mail/blobs.ts";
 import { checkDomainHealth } from "./mail/dns.ts";
 import { pushToUsers } from "./mail/push.ts";
 import { buildQuote } from "./mail/quote.ts";
@@ -64,7 +69,7 @@ export async function runCron(env: Env, now: Date): Promise<void> {
     const ids = staleTrash.map((t) => t.id);
     const keys = await collectThreadBlobKeys(db, ids);
     await deleteBlobs(env, keys);
-    await db.delete(thread).where(inArray(thread.id, ids));
+    await deleteThreadsByIds(db, ids);
   }
 
   // Purge service-mailbox threads older than the retention window. Threads
@@ -81,7 +86,7 @@ export async function runCron(env: Env, now: Date): Promise<void> {
     const ids = staleSvc.map((t) => t.id);
     const keys = await collectThreadBlobKeys(db, ids);
     await deleteBlobs(env, keys);
-    await db.delete(thread).where(inArray(thread.id, ids));
+    await deleteThreadsByIds(db, ids);
   }
 
   const stale = new Date(now.getTime() - DNS_RECHECK_INTERVAL_MS);
