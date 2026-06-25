@@ -628,9 +628,10 @@ export function MailboxImportSection({ mailboxes }: { mailboxes: ImportTarget[] 
     setProgress(null);
     try {
       const result = await runImport(mailboxId, files, setProgress);
-      const imported = result.done - result.duplicate - result.failed;
+      const imported = result.done - result.duplicate - result.skipped - result.failed;
       const extra = [
-        result.duplicate ? `${result.duplicate} skipped` : "",
+        result.duplicate ? `${result.duplicate} duplicate` : "",
+        result.skipped ? `${result.skipped} empty` : "",
         result.failed ? `${result.failed} failed` : "",
       ]
         .filter(Boolean)
@@ -746,7 +747,8 @@ export function MailboxImportSection({ mailboxes }: { mailboxes: ImportTarget[] 
           <Progress value={pct} />
           <span className="text-[12px] text-muted-foreground">
             {progress.done} / {progress.total} processed
-            {progress.duplicate ? ` · ${progress.duplicate} skipped` : ""}
+            {progress.duplicate ? ` · ${progress.duplicate} duplicate` : ""}
+            {progress.skipped ? ` · ${progress.skipped} empty` : ""}
             {progress.retried ? ` · ${progress.retried} retried` : ""}
             {progress.failed ? ` · ${progress.failed} failed` : ""}
           </span>
