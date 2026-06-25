@@ -35,9 +35,10 @@ import { buildPatch, wrapUnique } from "./util.ts";
 // A single cascade-delete of a large mailbox (threads → messages → attachments,
 // plus the per-row FTS triggers) exceeds D1's 30s/per-statement limits and
 // fails with an internal error. Drain its threads in bounded batches instead;
-// blobs (R2) have no FK cascade, so drop those first. Same approach the cron
-// trash purge uses.
-const PURGE_BATCH = 200;
+// blobs (R2) have no FK cascade, so drop those first. Capped under D1's 100
+// bound-parameters-per-query limit, since the batched ids fan out into
+// `inArray(...)` placeholders downstream.
+const PURGE_BATCH = 90;
 async function purgeMailboxThreads(db: DB, env: Env, mailboxId: string): Promise<void> {
   for (;;) {
     const batch = await db
