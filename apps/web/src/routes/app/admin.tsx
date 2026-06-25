@@ -1743,6 +1743,7 @@ function AdminMailboxRow({
 }) {
   const [migrateOpen, setMigrateOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [emptyOpen, setEmptyOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [newOwner, setNewOwner] = useState(m.ownerUserId);
@@ -1787,6 +1788,16 @@ function AdminMailboxRow({
       setDeleteOpen(false);
       invalidate();
       toast.success(redirectTo ? "Mailbox deleted, redirect created" : "Mailbox deleted");
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
+  const empty = useMutation({
+    mutationFn: () => api(`/api/admin/mailboxes/${m.id}/empty`, { method: "POST" }),
+    onSuccess: () => {
+      setEmptyOpen(false);
+      invalidate();
+      toast.success("Mailbox emptied");
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
@@ -1841,6 +1852,18 @@ function AdminMailboxRow({
             }}
           >
             Migrate
+          </GhostBtn>
+          <GhostBtn
+            destructive
+            onClick={() => {
+              setEmptyOpen(true);
+              setMigrateOpen(false);
+              setDeleteOpen(false);
+              setMembersOpen(false);
+              setSettingsOpen(false);
+            }}
+          >
+            Empty
           </GhostBtn>
           <GhostBtn
             destructive
@@ -1907,6 +1930,24 @@ function AdminMailboxRow({
           </div>
         </div>
       )}
+
+      <Dialog open={emptyOpen} onOpenChange={setEmptyOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Empty {m.address}?</DialogTitle>
+            <DialogDescription>
+              Permanently deletes all threads, messages, and attachments in this mailbox. The
+              mailbox itself is kept. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline">Cancel</Button>} />
+            <Button variant="destructive" onClick={() => empty.mutate()} disabled={empty.isPending}>
+              {empty.isPending ? "Emptying…" : "Empty mailbox"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent>
