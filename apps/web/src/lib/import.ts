@@ -16,6 +16,9 @@ export interface ImportProgress {
   total: number;
   done: number;
   duplicate: number;
+  // Content-free fragments the server declined to import (e.g. stray mbox
+  // separators that parse into a blank message).
+  skipped: number;
   failed: number;
   // Transient failures we retried (network blips, rate-limits, 5xx). Surfaced so
   // a slow-but-recovering import doesn't look stuck.
@@ -118,7 +121,10 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function postOne(mailboxId: string, item: ImportItem): Promise<{ duplicate: boolean }> {
+async function postOne(
+  mailboxId: string,
+  item: ImportItem,
+): Promise<{ duplicate?: boolean; skipped?: boolean }> {
   const q = new URLSearchParams();
   const s = item.state;
   if (s) {
@@ -140,7 +146,7 @@ async function postOne(mailboxId: string, item: ImportItem): Promise<{ duplicate
     // Network error / connection reset — always worth a retry.
     throw new ImportError(`import failed (network: ${e})`, true);
   }
-  if (res.ok) return (await res.json()) as { duplicate: boolean };
+  if (res.ok) return (await res.json()) as { duplicate?: boolean; skipped?: boolean };
   const retryAfter = Number(res.headers.get("retry-after"));
   throw new ImportError(
     `import failed (${res.status})`,
@@ -158,7 +164,7 @@ async function uploadOne(
   item: ImportItem,
   onRetry: () => void,
   maxRetries = 5,
-): Promise<{ duplicate: boolean }> {
+): Promise<{ duplicate?: boolean; skipped?: boolean }> {
   for (let attempt = 0; ; attempt++) {
     try {
       // eslint-disable-next-line no-await-in-loop -- retry loop is sequential by design
@@ -254,6 +260,7 @@ export async function runImport(
     total: tasks.length,
     done: 0,
     duplicate: 0,
+    skipped: 0,
     failed: 0,
     retried: 0,
   };
@@ -284,7 +291,8 @@ export async function runImport(
         const res = await uploadOne(mailboxId, item, () => {
           progress.retried++;
         });
-        if (res.duplicate) progress.duplicate++;
+        if (res.skipped) progress.skipped++;
+        else if (res.duplicate) progress.duplicate++;
       } catch {
         progress.failed++;
       }

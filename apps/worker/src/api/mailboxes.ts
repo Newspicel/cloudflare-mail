@@ -39,7 +39,7 @@ import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
 import { collectMailboxBlobKeys, deleteBlobs } from "../mail/blobs.ts";
 import { ingestRaw, MAX_EMAIL_BYTES } from "../mail/ingest.ts";
-import { parseMime } from "../mail/mime.ts";
+import { bodyForIndex, parseMime } from "../mail/mime.ts";
 import {
   generateKeypair,
   importPrivateKey,
@@ -438,6 +438,15 @@ export function mailboxesRoutes() {
     if (raw.byteLength > MAX_EMAIL_BYTES) throw new HTTPException(413, { message: "too large" });
 
     const parsed = await parseMime(raw);
+
+    // Skip content-free fragments. An mbox split can emit stray separators or
+    // truncated tails that parse into a message with no subject, no body, and no
+    // attachments — importing those just litters the mailbox with blank rows.
+    const isEmpty =
+      !parsed.subject?.trim() &&
+      !bodyForIndex(parsed.text, parsed.html).trim() &&
+      !(parsed.attachments?.length ?? 0);
+    if (isEmpty) return c.json({ skipped: true });
 
     // Dedup by Message-ID within this mailbox so re-importing is idempotent.
     if (parsed.messageId) {
