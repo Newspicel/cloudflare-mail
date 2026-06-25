@@ -6,6 +6,7 @@ import {
   mailboxSpamUsage,
   message,
   redirect,
+  thread,
   user,
 } from "@cfmail/db/schema";
 import {
@@ -271,6 +272,24 @@ export function adminRoutes() {
         targetMailboxId: target.id,
       });
     }
+    return c.body(null, 204);
+  });
+
+  r.post("/mailboxes/:id/empty", async (c) => {
+    const db = dbFromCtx(c);
+    const id = c.req.param("id");
+
+    const mb = await db.query.mailbox.findFirst({
+      where: eq(mailbox.id, id),
+      columns: { id: true },
+    });
+    if (!mb) throw new HTTPException(404, { message: "not found" });
+
+    const keys = await collectMailboxBlobKeys(db, id);
+    await deleteBlobs(c.env, keys);
+    // Threads cascade to messages and attachments; the mailbox itself stays.
+    await db.delete(thread).where(eq(thread.mailboxId, id));
+
     return c.body(null, 204);
   });
 
