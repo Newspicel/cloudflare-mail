@@ -49,7 +49,7 @@ import {
 } from "../mail/pgp.ts";
 import { authorizeMailboxCreate } from "../mailbox-access.ts";
 import { requireUser } from "../middleware.ts";
-import { requirePerm } from "../permissions.ts";
+import { mailboxNotDeletePending, mailboxNotPurging, requirePerm } from "../permissions.ts";
 
 export function mailboxesRoutes() {
   const r = new Hono<AppBindings>();
@@ -75,7 +75,10 @@ export function mailboxesRoutes() {
       .from(mailbox)
       .innerJoin(domain, eq(mailbox.domainId, domain.id))
       // service mailboxes are key-driven, never user-facing — keep them out.
-      .where(and(eq(mailbox.ownerUserId, u.id), ne(mailbox.type, "service")));
+      // Hide mailboxes being hard-deleted; empty-pending ones stay (shown empty).
+      .where(
+        and(eq(mailbox.ownerUserId, u.id), ne(mailbox.type, "service"), mailboxNotDeletePending),
+      );
 
     const memberRows = await db
       .select({
@@ -92,7 +95,9 @@ export function mailboxesRoutes() {
       .from(mailboxMember)
       .innerJoin(mailbox, eq(mailboxMember.mailboxId, mailbox.id))
       .innerJoin(domain, eq(mailbox.domainId, domain.id))
-      .where(and(eq(mailboxMember.userId, u.id), ne(mailbox.type, "service")));
+      .where(
+        and(eq(mailboxMember.userId, u.id), ne(mailbox.type, "service"), mailboxNotDeletePending),
+      );
 
     const owned = ownerRows.map((m) => ({
       id: m.id,
@@ -129,9 +134,12 @@ export function mailboxesRoutes() {
       ? await db
           .select({ mailboxId: thread.mailboxId, c: count() })
           .from(thread)
+          // Join the mailbox so an empty-pending one reads as zero unread at once.
+          .innerJoin(mailbox, eq(thread.mailboxId, mailbox.id))
           .where(
             and(
               inArray(thread.mailboxId, ids),
+              mailboxNotPurging,
               eq(thread.trashed, false),
               eq(thread.spam, false),
               gt(thread.unreadCount, 0),

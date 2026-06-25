@@ -1,9 +1,19 @@
 import type { DB } from "@cfmail/db";
 import { mailbox, mailboxMember } from "@cfmail/db/schema";
 import { ALL_PERMS, has, type PermBit } from "@cfmail/shared/permissions";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, isNull, ne, or } from "drizzle-orm";
 import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core";
 import { HTTPException } from "hono/http-exception";
+
+// Reusable predicates over the mailbox purge marker (schema: pending_purge).
+// `notPurging` excludes both empty- and delete-pending mailboxes (no live
+// content to show); `notDeletePending` only hides mailboxes being hard-deleted
+// (their address is considered freed) while empty-pending ones stay listed.
+export const mailboxNotPurging = isNull(mailbox.pendingPurge);
+export const mailboxNotDeletePending = or(
+  isNull(mailbox.pendingPurge),
+  ne(mailbox.pendingPurge, "delete"),
+);
 
 // Sentinel mailbox id for the combined "All" view. Real ids are UUIDs, so this
 // can never collide. Used by the threads/drafts list endpoints to aggregate
@@ -15,6 +25,9 @@ export interface MailboxAccess {
   userId: string;
   perms: number;
   isOwner: boolean;
+  // Mailbox is being emptied in the background — it still resolves (the user can
+  // open it) but its threads should read as already gone.
+  purging: boolean;
 }
 
 export async function resolveAccess(
@@ -24,18 +37,21 @@ export async function resolveAccess(
 ): Promise<MailboxAccess | null> {
   const mb = await db.query.mailbox.findFirst({
     where: eq(mailbox.id, mailboxId),
-    columns: { id: true, ownerUserId: true },
+    columns: { id: true, ownerUserId: true, pendingPurge: true },
   });
   if (!mb) return null;
+  // A hard-delete in progress: treat the mailbox as already gone.
+  if (mb.pendingPurge === "delete") return null;
+  const purging = mb.pendingPurge != null;
   if (mb.ownerUserId === userId) {
-    return { mailboxId, userId, perms: ALL_PERMS, isOwner: true };
+    return { mailboxId, userId, perms: ALL_PERMS, isOwner: true, purging };
   }
   const member = await db.query.mailboxMember.findFirst({
     where: and(eq(mailboxMember.mailboxId, mailboxId), eq(mailboxMember.userId, userId)),
     columns: { perms: true },
   });
   if (!member) return null;
-  return { mailboxId, userId, perms: member.perms, isOwner: false };
+  return { mailboxId, userId, perms: member.perms, isOwner: false, purging };
 }
 
 // Every non-service mailbox the user can read (owned + member). Backs the
@@ -44,12 +60,12 @@ export async function accessibleMailboxIds(db: DB, userId: string): Promise<stri
   const owned = await db
     .select({ id: mailbox.id })
     .from(mailbox)
-    .where(and(eq(mailbox.ownerUserId, userId), ne(mailbox.type, "service")));
+    .where(and(eq(mailbox.ownerUserId, userId), ne(mailbox.type, "service"), mailboxNotPurging));
   const member = await db
     .select({ id: mailboxMember.mailboxId })
     .from(mailboxMember)
     .innerJoin(mailbox, eq(mailboxMember.mailboxId, mailbox.id))
-    .where(and(eq(mailboxMember.userId, userId), ne(mailbox.type, "service")));
+    .where(and(eq(mailboxMember.userId, userId), ne(mailbox.type, "service"), mailboxNotPurging));
   return [...new Set([...owned.map((r) => r.id), ...member.map((r) => r.id)])];
 }
 

@@ -41,7 +41,9 @@ export function threadsRoutes() {
       if (ids.length === 0) return c.json({ threads: [] });
       scope = inArray(thread.mailboxId, ids);
     } else {
-      await requirePerm(db, user.id, mailboxId, Perm.READ);
+      const access = await requirePerm(db, user.id, mailboxId, Perm.READ);
+      // Being emptied in the background: its threads are already on their way out.
+      if (access.purging) return c.json({ threads: [] });
       scope = eq(thread.mailboxId, mailboxId);
     }
 
@@ -107,7 +109,9 @@ export function threadsRoutes() {
         return c.json({ counts: emptyCounts() } satisfies FolderCountsResponseDto);
       inMailbox = inArray(thread.mailboxId, ids);
     } else {
-      await requirePerm(db, user.id, mailboxId, Perm.READ);
+      const access = await requirePerm(db, user.id, mailboxId, Perm.READ);
+      if (access.purging)
+        return c.json({ counts: emptyCounts() } satisfies FolderCountsResponseDto);
       inMailbox = eq(thread.mailboxId, mailboxId);
     }
 
