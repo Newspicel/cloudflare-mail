@@ -23,12 +23,18 @@ const TRASH_PURGE_LIMIT = 500;
 // there is no user inbox, so retention is automatic rather than user-driven.
 const SERVICE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const SERVICE_PURGE_LIMIT = 500;
-// Background mailbox purge (admin empty/delete). Drain a bounded number of
-// threads per tick across a few pending mailboxes — a synchronous cascade-delete
-// of a large mailbox exceeds D1's per-statement limits.
+// Background mailbox purge (admin empty/delete). A synchronous cascade-delete of
+// a large mailbox exceeds D1's per-statement limits, so the cron drains it over
+// many ticks. Stay well within the Worker's per-invocation budgets:
+//  - THREAD_BATCH ≤ 100 keeps each delete under D1's 100-param cap and keeps the
+//    per-statement cascade (messages/attachments + FTS triggers) small.
+//  - THREADS_PER_TICK is a GLOBAL drain budget shared across all pending
+//    mailboxes, so the whole pass costs ~THREADS_PER_TICK/THREAD_BATCH * ~5
+//    subrequests regardless of how many mailboxes are pending — far below the
+//    1000-subrequest limit, alongside the rest of the cron.
 const MAILBOX_PURGE_MAILBOXES = 5;
 const MAILBOX_PURGE_THREAD_BATCH = 100;
-const MAILBOX_PURGE_THREADS_PER_TICK = 2000;
+const MAILBOX_PURGE_THREADS_PER_TICK = 1000;
 // How many due scheduled sends to dispatch per cron tick.
 const SCHEDULED_SEND_LIMIT = 50;
 // How many due reminders to fire per cron tick.
@@ -131,32 +137,32 @@ async function purgePendingMailboxes(env: Env, db: DB): Promise<void> {
     .where(isNotNull(mailbox.pendingPurge))
     .limit(MAILBOX_PURGE_MAILBOXES);
 
+  let budget = MAILBOX_PURGE_THREADS_PER_TICK;
   for (const mb of pending) {
-    let drained = 0;
-    while (drained < MAILBOX_PURGE_THREADS_PER_TICK) {
+    let emptied = false;
+    while (budget > 0) {
       const batch = await db
         .select({ id: thread.id })
         .from(thread)
         .where(eq(thread.mailboxId, mb.id))
         .limit(MAILBOX_PURGE_THREAD_BATCH);
-      if (!batch.length) break;
+      if (!batch.length) {
+        emptied = true;
+        break;
+      }
 
       const ids = batch.map((t) => t.id);
       const keys = await collectThreadBlobKeys(db, ids);
       await deleteBlobs(env, keys);
       await deleteThreadsByIds(db, ids);
-      drained += ids.length;
+      budget -= ids.length;
     }
 
-    // Finalize only once the mailbox is fully drained; otherwise it stays flagged
-    // and the next tick continues.
-    const more = await db
-      .select({ id: thread.id })
-      .from(thread)
-      .where(eq(thread.mailboxId, mb.id))
-      .limit(1);
-    if (more.length) continue;
+    // Ran out of this tick's budget mid-mailbox — leave it flagged and resume
+    // next tick (it still has threads).
+    if (!emptied) break;
 
+    // Fully drained: an "empty" clears the flag, a "delete" drops the row.
     if (mb.pendingPurge === "delete") {
       await db.delete(mailbox).where(eq(mailbox.id, mb.id));
     } else {
