@@ -4,6 +4,10 @@ import { Flag } from "@cfmail/shared/flags";
 import { and, count, desc, eq, gte, sql } from "drizzle-orm";
 import { normalizeSubject } from "./mime.ts";
 
+// Same prefixes normalizeSubject strips — used to tell a reply ("Re: X") from a
+// bare first-contact message whose subject merely happens to collide.
+const REPLY_PREFIX = /^\s*(?:(?:re|fwd?|aw|wg)\s*:\s*)+/i;
+
 const SUBJECT_WINDOW_SECONDS = 60 * 60 * 24 * 7;
 // In-Reply-To/References are attacker-controlled, so a header match into an
 // existing thread is only honored when the thread is still recent. Beyond this
@@ -88,17 +92,33 @@ export async function resolveThreadId(
     return { threadId: id, joinedByHeader: false };
   }
 
-  if (norm) {
+  // Subject is the weakest, most error-prone signal: it only ever rescues a
+  // reply whose client stripped In-Reply-To/References. Gate it so it can only
+  // *join* when the message actually looks like a reply — it carries reply
+  // headers, or its raw subject had a Re:/Fwd: prefix. Otherwise a bare
+  // first-contact email (e.g. two separate "Welcome to Bitwarden!" signups)
+  // would wrongly merge with an unrelated message that shares a subject.
+  const looksLikeReply =
+    !!input.inReplyTo || !!input.references?.length || REPLY_PREFIX.test(input.subject);
+  if (norm && looksLikeReply) {
     const since = new Date(Date.now() - SUBJECT_WINDOW_SECONDS * 1000);
-    const hit = await db.query.thread.findFirst({
+    const hits = await db.query.thread.findMany({
       where: and(
         eq(thread.mailboxId, input.mailboxId),
         eq(thread.subjectNorm, norm),
         gte(thread.lastMsgAt, since),
       ),
       orderBy: desc(thread.lastMsgAt),
-      columns: { id: true },
+      columns: { id: true, participants: true },
     });
+    // Require a shared participant so two unrelated "Re: meeting" threads from
+    // different people in the same week don't collapse into one.
+    const addrs = new Set(
+      input.participants.map((p) => p.address.trim().toLowerCase()).filter(Boolean),
+    );
+    const hit = hits.find((h) =>
+      (h.participants ?? []).some((p) => addrs.has(p.address.trim().toLowerCase())),
+    );
     if (hit) return { threadId: hit.id, joinedByHeader: false };
   }
 
