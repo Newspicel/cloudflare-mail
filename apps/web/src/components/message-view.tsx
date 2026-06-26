@@ -257,20 +257,29 @@ export function MessageView({
     const align = () => {
       const card = lastCardRef.current;
       const spacer = spacerRef.current;
-      // Keep the container's top padding visible above the newest message
-      // instead of scrolling the card flush against the border.
-      const padTop = Number.parseFloat(getComputedStyle(container).paddingTop) || 0;
-      // Grow a trailing spacer so the newest message can always be scrolled to
-      // the top — a short last message has no content below it to push against,
-      // otherwise it'd sit mid-viewport instead of leading the thread.
-      if (spacer && card) {
-        const room = Math.max(0, container.clientHeight - card.offsetHeight - padTop);
+      if (!card) return;
+      const cs = getComputedStyle(container);
+      const padTop = Number.parseFloat(cs.paddingTop) || 0;
+      const padBottom = Number.parseFloat(cs.paddingBottom) || 0;
+      // Whitespace shown above the newest message: the container's top padding
+      // when it leads the thread, otherwise just the inter-message gap.
+      const gap = spacer ? Number.parseFloat(getComputedStyle(spacer).marginTop) || 0 : 0;
+      const prev = card.previousElementSibling;
+      const spaceAbove = prev ? gap : padTop;
+      // Size a trailing spacer so the newest message can sit at that position and
+      // no further: enough room below to fill the viewport, but not so much that
+      // it can be overscrolled up into empty space. Subtract everything else that
+      // already sits below the card — the gap to the spacer and the bottom padding.
+      if (spacer) {
+        const room = Math.max(
+          0,
+          container.clientHeight - card.offsetHeight - gap - padBottom - spaceAbove,
+        );
         if (spacer.offsetHeight !== room) spacer.style.height = `${room}px`;
       }
-      if (!pinned || !card) return;
+      if (!pinned) return;
       // Land the newest card just below the previous message (showing only the
       // inter-message gap), or below the container padding when it's the first.
-      const prev = card.previousElementSibling;
       const top = prev
         ? prev.getBoundingClientRect().bottom
         : container.getBoundingClientRect().top + padTop;
