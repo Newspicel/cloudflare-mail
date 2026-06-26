@@ -266,10 +266,13 @@ export function MessageView({
         if (spacer.offsetHeight !== room) spacer.style.height = `${room}px`;
       }
       if (!pinned || !card) return;
-      container.scrollTop +=
-        card.getBoundingClientRect().top -
-        container.getBoundingClientRect().top -
-        padTop;
+      // Land the newest card just below the previous message (showing only the
+      // inter-message gap), or below the container padding when it's the first.
+      const prev = card.previousElementSibling;
+      const top = prev
+        ? prev.getBoundingClientRect().bottom
+        : container.getBoundingClientRect().top + padTop;
+      container.scrollTop += top - container.getBoundingClientRect().top;
     };
     align();
     const ro = new ResizeObserver(align);
