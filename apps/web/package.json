@@ -34,6 +34,7 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "@rolldown/plugin-babel": "^0.2.3",
     "@tailwindcss/vite": "4.3.1",
     "@tanstack/router-cli": "1.167.17",
     "@tanstack/router-plugin": "1.168.18",
@@ -43,6 +44,7 @@
     "@types/react-dom": "19.2.3",
     "@typescript/native-preview": "7.0.0-dev.20260623.1",
     "@vitejs/plugin-react": "6.0.3",
+    "babel-plugin-react-compiler": "^1.0.0",
     "tailwindcss": "4.3.1",
     "vite": "8.1.0"
   }
