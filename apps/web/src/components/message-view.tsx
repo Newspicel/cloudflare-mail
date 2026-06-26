@@ -255,16 +255,21 @@ export function MessageView({
     const align = () => {
       const card = lastCardRef.current;
       const spacer = spacerRef.current;
+      // Keep the container's top padding visible above the newest message
+      // instead of scrolling the card flush against the border.
+      const padTop = Number.parseFloat(getComputedStyle(container).paddingTop) || 0;
       // Grow a trailing spacer so the newest message can always be scrolled to
       // the top — a short last message has no content below it to push against,
       // otherwise it'd sit mid-viewport instead of leading the thread.
       if (spacer && card) {
-        const room = Math.max(0, container.clientHeight - card.offsetHeight);
+        const room = Math.max(0, container.clientHeight - card.offsetHeight - padTop);
         if (spacer.offsetHeight !== room) spacer.style.height = `${room}px`;
       }
       if (!pinned || !card) return;
       container.scrollTop +=
-        card.getBoundingClientRect().top - container.getBoundingClientRect().top;
+        card.getBoundingClientRect().top -
+        container.getBoundingClientRect().top -
+        padTop;
     };
     align();
     const ro = new ResizeObserver(align);
