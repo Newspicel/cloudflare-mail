@@ -64,6 +64,7 @@ import { ReminderMenu } from "./reminder-menu.tsx";
 import { Button } from "./ui/button.tsx";
 import { useConfirmHelpers } from "./ui/confirm.tsx";
 import { IconButton } from "./ui/icon-button.tsx";
+import { Skeleton } from "./ui/skeleton.tsx";
 import { Tooltip, TooltipProvider } from "./ui/tooltip.tsx";
 
 interface Props {
@@ -1047,13 +1048,21 @@ function MessageCard({
       <SpamBanner msg={msg} />
       <UnsubscribeBanner msg={msg} readOnly={readOnly} />
       {body.data?.calendar && <CalendarBanner event={body.data.calendar} />}
-      {bodyHtml ? (
+      {body.isPending ? (
+        // Hold the space with a skeleton while the body loads. Rendering the
+        // snippet here flashed a plain-text preview that then got replaced by the
+        // HTML frame — the "text first, then HTML" lag.
+        <div className="space-y-2 px-4 py-3" aria-hidden>
+          <Skeleton className="h-3 w-2/3" />
+          <Skeleton className="h-3 w-full" />
+          <Skeleton className="h-3 w-5/6" />
+        </div>
+      ) : bodyHtml ? (
         // Untrusted HTML renders in a sandboxed, scriptless iframe so a
         // sanitizer bypass can't reach the app origin or the session.
         <EmailFrame html={bodyHtml} />
       ) : (
-        // Plain-text body once loaded; the snippet shows while the body is in
-        // flight (or if parsing yields neither html nor text).
+        // Plain-text body once loaded (or the snippet if parsing yields neither).
         <pre className="whitespace-pre-wrap px-4 py-3 font-sans text-[13px]">
           {linkifyText(body.data?.text ?? msg.snippet)}
         </pre>
