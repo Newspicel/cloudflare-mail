@@ -1,10 +1,17 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { type LucideIcon, Mails } from "lucide-react";
 import type * as React from "react";
 import { useCallback, useLayoutEffect, useRef } from "react";
 import { cn } from "@/lib/cn.ts";
 import { useDateTimeFmt, useUserPrefs } from "@/lib/prefs.ts";
-import type { MailView, MessageLabel, ThreadRow } from "@/lib/queries.ts";
+import {
+  type MailView,
+  type MessageLabel,
+  messageBodyQuery,
+  type ThreadRow,
+  threadQuery,
+} from "@/lib/queries.ts";
 import { formatStamp } from "@/lib/time.ts";
 import { useSwipeRow } from "@/lib/use-swipe-row.ts";
 import { LabelChip } from "./ui.tsx";
@@ -108,6 +115,32 @@ export function ThreadRowView({
   useLayoutEffect(() => {
     if (node.current && dataIndex !== undefined) remeasure?.(dataIndex, node.current);
   }, [heightKey, dataIndex, remeasure]);
+
+  // Router intent-preload already warms the thread's message list on hover, but
+  // the per-message bodies (the slow part you see render as a skeleton) are
+  // fetched only when the cards mount. Prefetch the newest few bodies on hover
+  // intent so opening the thread paints the HTML at once. Bodies are immutable
+  // (`staleTime: Infinity`), so this is a one-time fetch per message. A short
+  // delay keeps a fast scroll-sweep over rows from firing requests.
+  const qc = useQueryClient();
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const prefetch = useCallback(() => {
+    hoverTimer.current = setTimeout(() => {
+      void qc
+        .ensureQueryData(threadQuery(thread.id))
+        .then((d) => {
+          for (const m of d.messages.slice(-6)) void qc.prefetchQuery(messageBodyQuery(m.id));
+        })
+        .catch(() => {});
+    }, 80);
+  }, [qc, thread.id]);
+  const cancelPrefetch = useCallback(() => clearTimeout(hoverTimer.current), []);
+  useLayoutEffect(() => () => clearTimeout(hoverTimer.current), []);
+  const hoverProps = {
+    onPointerEnter: prefetch,
+    onPointerLeave: cancelPrefetch,
+    onFocus: prefetch,
+  };
 
   const { state: sw, handlers } = useSwipeRow({
     onSwipeRight: swipe?.right?.onCommit,
@@ -221,6 +254,7 @@ export function ThreadRowView({
             search={{ view: link.view }}
             draggable={false}
             className={linkClassName}
+            {...hoverProps}
           >
             {body}
           </Link>
@@ -230,6 +264,7 @@ export function ThreadRowView({
             params={{ folderId: link.folderId, threadId: thread.id }}
             draggable={false}
             className={linkClassName}
+            {...hoverProps}
           >
             {body}
           </Link>
