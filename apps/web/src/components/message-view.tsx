@@ -258,32 +258,34 @@ export function MessageView({
       const card = lastCardRef.current;
       const spacer = spacerRef.current;
       if (!card) return;
+      const rect = container.getBoundingClientRect();
+      const scrollTop = container.scrollTop;
       const cs = getComputedStyle(container);
       const padTop = Number.parseFloat(cs.paddingTop) || 0;
       const padBottom = Number.parseFloat(cs.paddingBottom) || 0;
-      // Whitespace shown above the newest message: the container's top padding
-      // when it leads the thread, otherwise just the inter-message gap.
-      const gap = spacer ? Number.parseFloat(getComputedStyle(spacer).marginTop) || 0 : 0;
+      // The scroll offset at which the newest message rests at the top: just below
+      // the previous message (showing only the inter-message gap), or below the
+      // container padding when it leads the thread. Measured straight from layout
+      // so it's exact regardless of margins/padding/subpixel rounding.
       const prev = card.previousElementSibling;
-      const spaceAbove = prev ? gap : padTop;
-      // Size a trailing spacer so the newest message can sit at that position and
-      // no further: enough room below to fill the viewport, but not so much that
-      // it can be overscrolled up into empty space. Subtract everything else that
-      // already sits below the card — the gap to the spacer and the bottom padding.
+      const ref = prev
+        ? prev.getBoundingClientRect().bottom
+        : card.getBoundingClientRect().top - padTop;
+      const target = ref - rect.top + scrollTop;
+      // Size the trailing spacer so that rest offset is also the furthest you can
+      // scroll, leaving no empty space below the newest message to overscroll into.
+      // Derive the true content height from the spacer's own rect — scrollHeight is
+      // clamped to clientHeight when the whole thread already fits in the viewport.
       if (spacer) {
+        const contentBottom =
+          spacer.getBoundingClientRect().bottom - rect.top + scrollTop + padBottom;
         const room = Math.max(
           0,
-          container.clientHeight - card.offsetHeight - gap - padBottom - spaceAbove,
+          spacer.offsetHeight + target + container.clientHeight - contentBottom,
         );
-        if (spacer.offsetHeight !== room) spacer.style.height = `${room}px`;
+        if (Math.abs(spacer.offsetHeight - room) > 0.5) spacer.style.height = `${room}px`;
       }
-      if (!pinned) return;
-      // Land the newest card just below the previous message (showing only the
-      // inter-message gap), or below the container padding when it's the first.
-      const top = prev
-        ? prev.getBoundingClientRect().bottom
-        : container.getBoundingClientRect().top + padTop;
-      container.scrollTop += top - container.getBoundingClientRect().top;
+      if (pinned) container.scrollTop = target;
     };
     align();
     const ro = new ResizeObserver(align);
