@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/cn.ts";
+import { Skeleton } from "./ui/skeleton.tsx";
 
 // Untrusted email HTML is rendered inside a sandboxed iframe rather than inline
 // in the app DOM, so a sanitizer bypass can't reach the session. The sandbox
@@ -89,19 +90,37 @@ export function EmailFrame({ html, className }: { html: string; className?: stri
 
   useEffect(() => () => roRef.current?.disconnect(), []);
 
+  // Until the first measure lands, the iframe is collapsed to 0 and hidden (a
+  // height-less iframe otherwise defaults to 150px, so it would flash short then
+  // jump to full). A skeleton holds the space so the card never collapses, and
+  // the frame appears once at its final height — one render, no resize step.
+  const measured = height > 0;
+
   return (
-    <iframe
-      ref={ref}
-      title="Message body"
-      srcDoc={doc}
-      onLoad={onLoad}
-      sandbox={SANDBOX}
-      // The frame is sized to its full content, so it must never scroll
-      // internally — only the surrounding thread pane scrolls.
-      scrolling="no"
-      referrerPolicy="no-referrer"
-      className={cn("block w-full", className)}
-      style={{ height: height ? `${height}px` : undefined }}
-    />
+    <div className={cn("relative w-full", className)}>
+      {!measured && (
+        <div className="space-y-2 px-4 py-3" aria-hidden>
+          <Skeleton className="h-3 w-2/3" />
+          <Skeleton className="h-3 w-full" />
+          <Skeleton className="h-3 w-5/6" />
+        </div>
+      )}
+      <iframe
+        ref={ref}
+        title="Message body"
+        srcDoc={doc}
+        onLoad={onLoad}
+        sandbox={SANDBOX}
+        // The frame is sized to its full content, so it must never scroll
+        // internally — only the surrounding thread pane scrolls.
+        scrolling="no"
+        referrerPolicy="no-referrer"
+        className="block w-full"
+        style={{
+          height: measured ? `${height}px` : 0,
+          visibility: measured ? "visible" : "hidden",
+        }}
+      />
+    </div>
   );
 }
