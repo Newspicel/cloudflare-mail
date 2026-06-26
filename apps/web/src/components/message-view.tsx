@@ -246,6 +246,7 @@ export function MessageView({
   // anchor) — until the user scrolls, after which we leave the position alone.
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastCardRef = useRef<HTMLElement>(null);
+  const spacerRef = useRef<HTMLDivElement>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-pin when a new thread opens
   useEffect(() => {
     const container = scrollRef.current;
@@ -253,13 +254,24 @@ export function MessageView({
     let pinned = true;
     const align = () => {
       const card = lastCardRef.current;
+      const spacer = spacerRef.current;
+      // Grow a trailing spacer so the newest message can always be scrolled to
+      // the top — a short last message has no content below it to push against,
+      // otherwise it'd sit mid-viewport instead of leading the thread.
+      if (spacer && card) {
+        const room = Math.max(0, container.clientHeight - card.offsetHeight);
+        if (spacer.offsetHeight !== room) spacer.style.height = `${room}px`;
+      }
       if (!pinned || !card) return;
       container.scrollTop +=
         card.getBoundingClientRect().top - container.getBoundingClientRect().top;
     };
     align();
     const ro = new ResizeObserver(align);
-    for (const child of Array.from(container.children)) ro.observe(child);
+    // The spacer is sized by `align`; observing it would feed its own resize
+    // back in, so only watch the message cards.
+    for (const child of Array.from(container.children))
+      if (child !== spacerRef.current) ro.observe(child);
     const release = () => {
       pinned = false;
       ro.disconnect();
@@ -412,6 +424,7 @@ export function MessageView({
               }
             />
           ))}
+          <div ref={spacerRef} aria-hidden className="shrink-0" />
         </div>
       </div>
     </TooltipProvider>
