@@ -15,6 +15,8 @@ import {
   ArrowLeft,
   CalendarClock,
   CalendarX2,
+  ChevronDown,
+  ChevronUp,
   Download,
   Forward,
   Inbox,
@@ -296,6 +298,30 @@ export function MessageView({
     };
   }, [thread.id]);
 
+  // Side nav arrows: "up" reveals older messages, "down" returns to the newest.
+  // Each shows only while there's room to travel that way.
+  const [canUp, setCanUp] = useState(false);
+  const [canDown, setCanDown] = useState(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-bind when a new thread opens
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+    const update = () => {
+      setCanUp(container.scrollTop > 8);
+      setCanDown(container.scrollTop < container.scrollHeight - container.clientHeight - 8);
+    };
+    update();
+    const opts: AddEventListenerOptions = { passive: true };
+    container.addEventListener("scroll", update, opts);
+    const ro = new ResizeObserver(update);
+    ro.observe(container);
+    return () => {
+      container.removeEventListener("scroll", update, opts);
+      ro.disconnect();
+    };
+  }, [thread.id]);
+  const scrollTo = (top: number) => scrollRef.current?.scrollTo({ top, behavior: "smooth" });
+
   // Individually-trashed messages are hidden from the active folders. The Trash
   // view shows the whole conversation when the thread itself is trashed, else
   // only its deleted messages; "All" shows everything.
@@ -415,24 +441,48 @@ export function MessageView({
 
         {!readOnly && ai.aiOn && <ThreadAiResults ai={ai} />}
 
-        <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-3 sm:p-4">
-          {visibleMessages.map((m, i) => (
-            <MessageCard
-              key={m.id}
-              cardRef={i === visibleMessages.length - 1 ? lastCardRef : undefined}
-              msg={m}
-              readOnly={readOnly}
-              busy={setMsg.isPending || delMsg.isPending}
-              {...messageActions(m)}
-              onToggleStar={() =>
-                setMsg.mutate({
-                  id: m.id,
-                  patch: { starred: !hasFlag(m.flags, Flag.STARRED) },
-                })
-              }
-            />
-          ))}
-          <div ref={spacerRef} aria-hidden className="shrink-0" />
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-3 sm:p-4">
+            {visibleMessages.map((m, i) => (
+              <MessageCard
+                key={m.id}
+                cardRef={i === visibleMessages.length - 1 ? lastCardRef : undefined}
+                msg={m}
+                readOnly={readOnly}
+                busy={setMsg.isPending || delMsg.isPending}
+                {...messageActions(m)}
+                onToggleStar={() =>
+                  setMsg.mutate({
+                    id: m.id,
+                    patch: { starred: !hasFlag(m.flags, Flag.STARRED) },
+                  })
+                }
+              />
+            ))}
+            <div ref={spacerRef} aria-hidden className="shrink-0" />
+          </div>
+          {canUp && (
+            <Button
+              variant="secondary"
+              size="icon-sm"
+              aria-label="Older messages"
+              onClick={() => scrollTo(0)}
+              className="absolute top-2 right-3 z-10 rounded-full bg-background/80 text-muted-foreground shadow-sm backdrop-blur hover:text-foreground"
+            >
+              <ChevronUp />
+            </Button>
+          )}
+          {canDown && (
+            <Button
+              variant="secondary"
+              size="icon-sm"
+              aria-label="Newest message"
+              onClick={() => scrollTo(scrollRef.current?.scrollHeight ?? 0)}
+              className="absolute right-3 bottom-2 z-10 rounded-full bg-background/80 text-muted-foreground shadow-sm backdrop-blur hover:text-foreground"
+            >
+              <ChevronDown />
+            </Button>
+          )}
         </div>
       </div>
     </TooltipProvider>
