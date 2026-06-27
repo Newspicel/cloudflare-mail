@@ -2,9 +2,7 @@ import { X } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/cn.ts";
 import type { Contact } from "@/lib/queries.ts";
-
-const FIELD_LABEL =
-  "w-12 shrink-0 pt-1 text-[11px] text-muted-foreground uppercase tracking-wider leading-5";
+import { Field, fieldLabelClass } from "./ui/field.tsx";
 
 const MAX_SUGGESTIONS = 8;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -104,14 +102,12 @@ export function AddressField({
 
   return (
     <div className="relative">
-      {/* biome-ignore lint/a11y/noStaticElementInteractions: clicking the field focuses its input */}
-      <div
-        className="flex items-start gap-2 border-b py-1.5"
+      <Field
         onMouseDown={(e) => {
           if (e.target === e.currentTarget) inputRef.current?.focus();
         }}
       >
-        <span className={FIELD_LABEL}>{label}</span>
+        <span className={fieldLabelClass}>{label}</span>
         <div className="flex flex-1 flex-wrap items-center gap-1">
           {items.map((it, idx) => {
             const valid = EMAIL_RE.test(it.address);
@@ -179,9 +175,9 @@ export function AddressField({
           />
         </div>
         {trailing}
-      </div>
+      </Field>
       {open && (
-        <ul className="absolute top-full right-0 left-12 z-50 mt-1 max-h-60 overflow-y-auto rounded-lg border bg-popover p-1 text-popover-foreground shadow-black/10 shadow-lg">
+        <ul className="absolute top-full right-0 left-14 z-50 mt-1 max-h-60 overflow-y-auto rounded-lg border bg-popover p-1 text-popover-foreground shadow-black/10 shadow-lg">
           {matches.map((ct, i) => (
             <li key={ct.address}>
               <button

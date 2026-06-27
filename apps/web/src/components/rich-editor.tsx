@@ -4,6 +4,7 @@ import {
   AlignRight,
   Baseline,
   Bold,
+  ChevronDown,
   Italic,
   List,
   ListOrdered,
@@ -18,8 +19,19 @@ import {
   useEffect,
   useImperativeHandle,
   useRef,
+  useState,
 } from "react";
 import { cn } from "@/lib/cn.ts";
+import { Button } from "./ui/button.tsx";
+import { ColorPicker } from "./ui/color-picker.tsx";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu.tsx";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
+import { Separator } from "./ui/separator.tsx";
 
 export interface RichEditorHandle {
   exec(cmd: string, value?: string): void;
@@ -65,7 +77,8 @@ export const RichEditor = forwardRef<
 >(function RichEditor({ initialHtml, onChange, pendingCmd, placeholder, className }, ref) {
   const elRef = useRef<HTMLDivElement>(null);
   // Last in-editor selection, restored before running a command so controls
-  // that steal focus (the native font/size selects) still apply to the text.
+  // that steal focus (the font/size menus, the color popover) still apply to
+  // the text.
   const savedRange = useRef<Range | null>(null);
   // Captured once so the mount effect needs no changing deps (seed-on-mount).
   const initialHtmlRef = useRef(initialHtml);
@@ -156,6 +169,9 @@ export const RichEditor = forwardRef<
   );
 });
 
+// A formatting button that applies an execCommand. `onMouseDown` preventDefault
+// keeps the editor's selection alive so the command lands on the selected text
+// instead of being lost to the button taking focus.
 function ToolBtn({
   onExec,
   cmd,
@@ -170,24 +186,45 @@ function ToolBtn({
   children: ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      // Keep the editor selection — don't let the click blur it first.
+    <Button
+      variant="ghost"
+      size="icon-sm"
       onMouseDown={(e) => e.preventDefault()}
       onClick={() => onExec(cmd, value)}
       aria-label={label}
       title={label}
-      className="grid size-7 shrink-0 place-items-center rounded text-muted-foreground outline-none transition-colors hover:bg-card hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
+      className="shrink-0"
     >
       {children}
-    </button>
+    </Button>
   );
 }
 
-const SEP = <span className="mx-0.5 h-4 w-px shrink-0 bg-border" aria-hidden />;
+const Sep = () => <Separator orientation="vertical" className="mx-0.5 h-4 shrink-0" />;
 
-const PILL =
-  "h-7 shrink-0 rounded px-1.5 font-medium text-[12px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/45";
+// Quick-pick swatches for the text-color popover; the full picker sits above.
+const COLOR_PRESETS = [
+  "#000000",
+  "#ef4444",
+  "#f97316",
+  "#eab308",
+  "#22c55e",
+  "#3b82f6",
+  "#8b5cf6",
+  "#ec4899",
+];
+
+// A "menu" trigger styled like the toolbar buttons — Font / Size open these. No
+// preventDefault here: letting the editor blur saves its selection (RichEditor's
+// onBlur), which `exec` restores before applying the command.
+function MenuTrigger({ label }: { label: string }) {
+  return (
+    <Button variant="ghost" size="sm" className="shrink-0 gap-1 px-2 font-medium">
+      {label}
+      <ChevronDown className="size-3 opacity-70" />
+    </Button>
+  );
+}
 
 export function FormatToolbar({
   mode,
@@ -205,51 +242,38 @@ export function FormatToolbar({
   // Drop an HTML body back to plain text.
   onExitRich: () => void;
 }) {
-  const selectCls =
-    "h-7 shrink-0 rounded border-0 bg-transparent px-1 text-[12px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45";
+  const [color, setColor] = useState("#000000");
   const isMd = mode === "markdown";
   return (
     // One line, never wraps — scrolls horizontally when the dock is narrow.
     <div className="flex items-center gap-0.5 overflow-x-auto border-b py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       {!isMd && (
         <>
-          <select
-            aria-label="Font"
-            className={selectCls}
-            defaultValue=""
-            onChange={(e) => {
-              if (e.target.value) onExec("fontName", e.target.value);
-              e.target.value = "";
-            }}
-          >
-            <option value="" disabled>
-              Font
-            </option>
-            {FONTS.map((f) => (
-              <option key={f.label} value={f.value}>
-                {f.label}
-              </option>
-            ))}
-          </select>
-          <select
-            aria-label="Text size"
-            className={selectCls}
-            defaultValue=""
-            onChange={(e) => {
-              if (e.target.value) onExec("fontSize", e.target.value);
-              e.target.value = "";
-            }}
-          >
-            <option value="" disabled>
-              Size
-            </option>
-            {SIZES.map((s) => (
-              <option key={s.label} value={s.value}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-          {SEP}
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<MenuTrigger label="Font" />} />
+            <DropdownMenuContent side="bottom" align="start" className="min-w-[8rem]">
+              {FONTS.map((f) => (
+                <DropdownMenuItem
+                  key={f.label}
+                  onClick={() => onExec("fontName", f.value)}
+                  style={{ fontFamily: f.value }}
+                >
+                  {f.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<MenuTrigger label="Size" />} />
+            <DropdownMenuContent side="bottom" align="start" className="min-w-[8rem]">
+              {SIZES.map((s) => (
+                <DropdownMenuItem key={s.label} onClick={() => onExec("fontSize", s.value)}>
+                  {s.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Sep />
           <ToolBtn onExec={onExec} cmd="bold" label="Bold">
             <Bold className="size-3.5" />
           </ToolBtn>
@@ -259,28 +283,55 @@ export function FormatToolbar({
           <ToolBtn onExec={onExec} cmd="underline" label="Underline">
             <Underline className="size-3.5" />
           </ToolBtn>
-          {/* Text color — native picker; the label keeps the editor selection. */}
-          <label
-            title="Text color"
-            className="relative grid size-7 shrink-0 cursor-pointer place-items-center rounded text-muted-foreground transition-colors hover:bg-card hover:text-foreground"
-            onMouseDown={(e) => e.preventDefault()}
-          >
-            <Baseline className="size-3.5" />
-            <input
-              type="color"
-              aria-label="Text color"
-              className="absolute inset-0 cursor-pointer opacity-0"
-              onChange={(e) => onExec("foreColor", e.target.value)}
+          <Popover>
+            <PopoverTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Text color"
+                  title="Text color"
+                  className="shrink-0"
+                >
+                  <Baseline className="size-3.5" />
+                </Button>
+              }
             />
-          </label>
-          {SEP}
+            <PopoverContent side="bottom" align="start" className="w-56 p-3">
+              <ColorPicker value={color} onChange={setColor} />
+              <div className="mt-2.5 flex flex-wrap gap-1.5">
+                {COLOR_PRESETS.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    aria-label={`Apply ${c}`}
+                    onClick={() => {
+                      setColor(c);
+                      onExec("foreColor", c);
+                    }}
+                    style={{ backgroundColor: c }}
+                    className="size-5 rounded-md border outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
+                  />
+                ))}
+              </div>
+              <Button
+                variant="primary"
+                size="sm"
+                className="mt-2.5 w-full"
+                onClick={() => onExec("foreColor", color)}
+              >
+                Apply color
+              </Button>
+            </PopoverContent>
+          </Popover>
+          <Sep />
           <ToolBtn onExec={onExec} cmd="insertUnorderedList" label="Bulleted list">
             <List className="size-3.5" />
           </ToolBtn>
           <ToolBtn onExec={onExec} cmd="insertOrderedList" label="Numbered list">
             <ListOrdered className="size-3.5" />
           </ToolBtn>
-          {SEP}
+          <Sep />
           <ToolBtn onExec={onExec} cmd="justifyLeft" label="Align left">
             <AlignLeft className="size-3.5" />
           </ToolBtn>
@@ -290,54 +341,55 @@ export function FormatToolbar({
           <ToolBtn onExec={onExec} cmd="justifyRight" label="Align right">
             <AlignRight className="size-3.5" />
           </ToolBtn>
-          {SEP}
+          <Sep />
           <ToolBtn onExec={onExec} cmd="undo" label="Undo">
             <Undo2 className="size-3.5" />
           </ToolBtn>
           <ToolBtn onExec={onExec} cmd="redo" label="Redo">
             <Redo2 className="size-3.5" />
           </ToolBtn>
-          {SEP}
+          <Sep />
         </>
       )}
       {/* Markdown toggle lives in the editor bar. */}
-      <button
-        type="button"
+      <Button
+        variant="ghost"
+        size="sm"
         onMouseDown={(e) => e.preventDefault()}
         onClick={onToggleMarkdown}
         aria-pressed={isMd}
         title="Write in Markdown"
         className={cn(
-          PILL,
-          isMd
-            ? "bg-primary/10 text-primary"
-            : "text-muted-foreground hover:bg-card hover:text-foreground",
+          "shrink-0 px-2 font-medium",
+          isMd && "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary",
         )}
       >
         MD
-      </button>
+      </Button>
       {isMd && (
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="sm"
           onMouseDown={(e) => e.preventDefault()}
           onClick={onTogglePreview}
           aria-pressed={preview}
           title="Toggle preview"
-          className={cn(PILL, "text-muted-foreground hover:bg-card hover:text-foreground")}
+          className="shrink-0 px-2 font-medium"
         >
           {preview ? "Edit" : "Preview"}
-        </button>
+        </Button>
       )}
       {mode === "html" && (
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="sm"
           onMouseDown={(e) => e.preventDefault()}
           onClick={onExitRich}
-          className={cn(PILL, "ml-auto text-muted-foreground hover:bg-muted hover:text-foreground")}
           title="Switch back to a plain-text message"
+          className="ml-auto shrink-0 px-2 font-medium"
         >
           Plain text
-        </button>
+        </Button>
       )}
     </div>
   );

@@ -8,10 +8,13 @@ import {
   ExternalLink,
   FileText,
   ImageIcon,
+  Lock,
   Maximize2,
   Minimize2,
   Paperclip,
   Plus,
+  Send,
+  ShieldCheck,
   Trash2,
   X,
 } from "lucide-react";
@@ -47,7 +50,9 @@ import {
   type RichEditorHandle,
   textToHtml,
 } from "./rich-editor.tsx";
+import { Badge } from "./ui/badge.tsx";
 import { Button } from "./ui/button.tsx";
+import { ButtonGroup } from "./ui/button-group.tsx";
 import { Calendar } from "./ui/calendar.tsx";
 import { Checkbox } from "./ui/checkbox.tsx";
 import {
@@ -58,9 +63,16 @@ import {
   DialogTitle,
   Dialog as ImageChoiceDialog,
 } from "./ui/dialog.tsx";
+import { Empty, EmptyDescription, EmptyMedia, EmptyTitle } from "./ui/empty.tsx";
+import { Field, FieldContent, FieldGroup, FieldLabel, fieldLabelClass } from "./ui/field.tsx";
+import { IconButton } from "./ui/icon-button.tsx";
+import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from "./ui/input-group.tsx";
+import { Item, ItemActions, ItemContent, ItemMedia, ItemTitle } from "./ui/item.tsx";
 import { Label } from "./ui/label.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select.tsx";
+import { Separator } from "./ui/separator.tsx";
+import { Spinner } from "./ui/spinner.tsx";
 import { Textarea } from "./ui/textarea.tsx";
 import { ToggleGroup, ToggleItem } from "./ui/toggle-group.tsx";
 
@@ -293,13 +305,10 @@ export function ComposeDock() {
   );
 }
 
-// Shared row metrics so From/To/Subject share one default line height and the
-// value text starts on the same baseline as the label, growing only on wrap.
-const FIELD_ROW = "flex items-start gap-2 border-b py-1.5";
-const FIELD_LABEL =
-  "w-12 shrink-0 pt-1 text-[11px] text-muted-foreground uppercase tracking-wider leading-5";
+// Inline value text for a Field's control (From/Subject), aligned to the label
+// baseline and growing only on wrap. Shared by the <Field> rows below.
 const FIELD_INPUT =
-  "flex-1 bg-transparent py-0.5 text-[13px] leading-5 outline-none placeholder:text-muted-foreground";
+  "w-full bg-transparent py-0.5 text-[13px] leading-5 outline-none placeholder:text-muted-foreground";
 
 // Preview URL for an inline image still held under a draft R2 key.
 function draftBlobUrl(r2Key: string): string {
@@ -1243,218 +1252,234 @@ export function ComposeForm({
           </DialogFooter>
         </DialogContent>
       </ImageChoiceDialog>
-      <div className="flex items-center justify-between border-b bg-muted/60 px-4 py-2.5 pt-[max(0.625rem,env(safe-area-inset-top))] sm:pt-2.5">
-        {isWindow ? (
-          <span className="font-semibold text-[13px] text-foreground tracking-tight">
-            {titleText}
-          </span>
-        ) : (
-          <Dialog.Title className="font-semibold text-[13px] text-foreground tracking-tight">
-            {titleText}
-          </Dialog.Title>
-        )}
+      <div className="flex items-center justify-between gap-2 border-b bg-muted/60 px-3 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] sm:py-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <span
+            aria-hidden
+            className={cn(
+              "size-1.5 shrink-0 rounded-full",
+              pgpMode === "sign_encrypt"
+                ? "bg-primary"
+                : pgpMode === "sign"
+                  ? "bg-primary/60"
+                  : "bg-muted-foreground/40",
+            )}
+          />
+          {isWindow ? (
+            <span className="truncate font-semibold text-[13px] text-foreground tracking-tight">
+              {titleText}
+            </span>
+          ) : (
+            <Dialog.Title className="truncate font-semibold text-[13px] text-foreground tracking-tight">
+              {titleText}
+            </Dialog.Title>
+          )}
+        </div>
         <div className="flex items-center gap-0.5">
           {!isWindow && (
             <>
-              <button
-                type="button"
+              <IconButton
+                label="Open in new window"
+                icon={ExternalLink}
+                size="icon-sm"
                 onClick={popOut}
-                className="hidden h-6 w-6 place-items-center rounded text-muted-foreground outline-none transition-colors hover:bg-card hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45 sm:grid"
-                aria-label="Open in new window"
-                title="Open in new window"
-              >
-                <ExternalLink className="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
+                className="hidden sm:inline-flex"
+              />
+              <IconButton
+                label={expanded ? "Shrink" : "Expand"}
+                icon={expanded ? Minimize2 : Maximize2}
+                size="icon-sm"
                 onClick={() => setExpanded((v) => !v)}
-                className="hidden h-6 w-6 place-items-center rounded text-muted-foreground outline-none transition-colors hover:bg-card hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45 sm:grid"
-                aria-label={expanded ? "Shrink" : "Expand"}
-                aria-pressed={expanded}
-              >
-                {expanded ? (
-                  <Minimize2 className="h-3.5 w-3.5" />
-                ) : (
-                  <Maximize2 className="h-3.5 w-3.5" />
-                )}
-              </button>
+                className="hidden sm:inline-flex"
+              />
             </>
           )}
           {isWindow ? (
-            <button
-              type="button"
-              onClick={() => window.close()}
-              className="grid h-6 w-6 place-items-center rounded text-muted-foreground outline-none transition-colors hover:bg-card hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
-              aria-label="Close"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
+            <IconButton label="Close" icon={X} size="icon-sm" onClick={() => window.close()} />
           ) : (
             <Dialog.Close
-              className="grid h-6 w-6 place-items-center rounded text-muted-foreground outline-none transition-colors hover:bg-card hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
+              className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
               aria-label="Close"
             >
-              <X className="h-3.5 w-3.5" />
+              <X className="size-3.5" />
             </Dialog.Close>
           )}
         </div>
       </div>
 
       <div className="flex flex-1 flex-col overflow-y-auto px-4 py-1">
-        <div className={FIELD_ROW}>
-          <span className={FIELD_LABEL}>From</span>
-          <Select
-            value={currentFrom}
-            onValueChange={(v) => {
-              const opt = fromOptions.find((o) => o.address === v);
-              if (!opt) return;
-              setMailboxId(opt.mailboxId);
-              // Track an override only for a plus-alias; a base address is null.
-              setFromAddress(
-                opt.address.toLowerCase() === baseAddr(opt.mailboxId).toLowerCase()
-                  ? null
-                  : opt.address,
-              );
-            }}
-          >
-            <SelectTrigger
-              aria-label="From address"
-              className="h-auto w-auto flex-1 justify-between gap-1 border-0 bg-transparent px-0 py-0.5 text-left text-[13px] leading-5 shadow-none hover:bg-transparent focus-visible:ring-0"
-            >
-              <SelectValue>{(value) => (value as string) ?? ""}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {fromOptions.map((o) => (
-                <SelectItem key={o.address} value={o.address}>
-                  {o.address}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Popover
-            open={plusOpen}
-            onOpenChange={(open) => {
-              setPlusOpen(open);
-              if (open) {
-                const local = plusBase(currentFrom);
-                setPlusTag(
-                  local && currentFrom.toLowerCase() !== local
-                    ? (currentFrom.slice(currentFrom.indexOf("+") + 1).split("@")[0] ?? "")
-                    : "",
-                );
-              }
-            }}
-          >
-            <PopoverTrigger
-              render={
-                <button
-                  type="button"
-                  aria-label="Custom sub-address"
-                  className="mt-0.5 shrink-0 rounded p-0.5 text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                </button>
-              }
-            />
-            <PopoverContent side="bottom" align="start" className="w-72 p-2">
-              <span className="mb-1.5 block px-0.5 text-[11px] text-muted-foreground">
-                Custom sub-address
-              </span>
-              {(() => {
-                const base = baseAddr(mailboxId);
-                const at = base.lastIndexOf("@");
-                const local = at > 0 ? base.slice(0, at) : base;
-                const domain = at > 0 ? base.slice(at + 1) : "";
-                return (
-                  <div className="flex items-center rounded-md border bg-card px-2 text-[13px] focus-within:ring-2 focus-within:ring-ring/40">
-                    <span className="shrink-0 text-muted-foreground">{local}+</span>
-                    <input
-                      // biome-ignore lint/a11y/noAutofocus: focus the field when the picker opens
-                      autoFocus
-                      value={plusTag}
-                      onChange={(e) => setPlusTag(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          applyPlusTag();
-                        }
-                      }}
-                      placeholder="tag"
-                      className="min-w-0 flex-1 bg-transparent py-1 outline-none placeholder:text-muted-foreground"
-                    />
-                    <span className="shrink-0 text-muted-foreground">@{domain}</span>
-                  </div>
-                );
-              })()}
-              <Button variant="primary" size="sm" className="mt-2 w-full" onClick={applyPlusTag}>
-                Use address
-              </Button>
-            </PopoverContent>
-          </Popover>
-        </div>
-        <AddressField
-          label="To"
-          value={to}
-          onChange={setTo}
-          placeholder="name@example.com"
-          contacts={contacts}
-          trailing={
-            !showCc && (
-              <button
-                type="button"
-                onClick={() => setShowCc(true)}
-                className="mt-0.5 shrink-0 rounded px-1.5 py-0.5 font-medium text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        <FieldGroup>
+          <Field>
+            <span className={fieldLabelClass}>From</span>
+            <FieldContent className="flex items-start gap-1">
+              <Select
+                value={currentFrom}
+                onValueChange={(v) => {
+                  const opt = fromOptions.find((o) => o.address === v);
+                  if (!opt) return;
+                  setMailboxId(opt.mailboxId);
+                  // Track an override only for a plus-alias; a base address is null.
+                  setFromAddress(
+                    opt.address.toLowerCase() === baseAddr(opt.mailboxId).toLowerCase()
+                      ? null
+                      : opt.address,
+                  );
+                }}
               >
-                Cc/Bcc
-              </button>
-            )
-          }
-        />
-        {showCc && (
-          <>
-            <AddressField
-              label="Cc"
-              value={cc}
-              onChange={setCc}
-              placeholder="cc@example.com"
-              contacts={contacts}
-            />
-            <AddressField
-              label="Bcc"
-              value={bcc}
-              onChange={setBcc}
-              placeholder="bcc@example.com"
-              contacts={contacts}
-            />
-          </>
-        )}
-        {blockedRecipients.length > 0 && (
-          <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-700 dark:text-amber-400">
-            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <span>
-              {blockedRecipients.length === 1
-                ? `${blockedRecipients[0]} is on your blocklist`
-                : `${blockedRecipients.join(", ")} are on your blocklist`}{" "}
-              — they can't reach this server, so you won't receive any reply.
-            </span>
-          </div>
-        )}
-        <label className={FIELD_ROW}>
-          <span className={FIELD_LABEL}>Sub</span>
-          <input
-            value={subject}
-            onChange={(e) => setSubject(e.target.value)}
-            onKeyDown={(e) => {
-              // Skip the format toolbar — Tab from Subject lands in the body.
-              if (e.key !== "Tab" || e.shiftKey) return;
-              const body = mode === "html" ? editorRef.current : bodyTextareaRef.current;
-              if (!body) return;
-              e.preventDefault();
-              body.focus();
-            }}
-            className={FIELD_INPUT}
+                <SelectTrigger
+                  aria-label="From address"
+                  className="h-auto w-auto flex-1 justify-between gap-1 border-0 bg-transparent px-0 py-0.5 text-left text-[13px] leading-5 shadow-none hover:bg-transparent focus-visible:ring-0"
+                >
+                  <SelectValue>{(value) => (value as string) ?? ""}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {fromOptions.map((o) => (
+                    <SelectItem key={o.address} value={o.address}>
+                      {o.address}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Popover
+                open={plusOpen}
+                onOpenChange={(open) => {
+                  setPlusOpen(open);
+                  if (open) {
+                    const local = plusBase(currentFrom);
+                    setPlusTag(
+                      local && currentFrom.toLowerCase() !== local
+                        ? (currentFrom.slice(currentFrom.indexOf("+") + 1).split("@")[0] ?? "")
+                        : "",
+                    );
+                  }
+                }}
+              >
+                <PopoverTrigger
+                  render={
+                    <button
+                      type="button"
+                      aria-label="Custom sub-address"
+                      className="mt-0.5 grid size-5 shrink-0 place-items-center rounded text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
+                    >
+                      <Plus className="size-3.5" />
+                    </button>
+                  }
+                />
+                <PopoverContent side="bottom" align="start" className="w-72 p-2">
+                  <span className="mb-1.5 block px-0.5 text-[11px] text-muted-foreground">
+                    Custom sub-address
+                  </span>
+                  {(() => {
+                    const base = baseAddr(mailboxId);
+                    const at = base.lastIndexOf("@");
+                    const local = at > 0 ? base.slice(0, at) : base;
+                    const domain = at > 0 ? base.slice(at + 1) : "";
+                    return (
+                      <InputGroup>
+                        <InputGroupAddon className="gap-0">
+                          <InputGroupText>{local}+</InputGroupText>
+                        </InputGroupAddon>
+                        <InputGroupInput
+                          autoFocus
+                          value={plusTag}
+                          onChange={(e) => setPlusTag(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              applyPlusTag();
+                            }
+                          }}
+                          placeholder="tag"
+                          aria-label="Sub-address tag"
+                          className="px-1"
+                        />
+                        <InputGroupAddon align="end">
+                          <InputGroupText>@{domain}</InputGroupText>
+                        </InputGroupAddon>
+                      </InputGroup>
+                    );
+                  })()}
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="mt-2 w-full"
+                    onClick={applyPlusTag}
+                  >
+                    Use address
+                  </Button>
+                </PopoverContent>
+              </Popover>
+            </FieldContent>
+          </Field>
+          <AddressField
+            label="To"
+            value={to}
+            onChange={setTo}
+            placeholder="name@example.com"
+            contacts={contacts}
+            trailing={
+              !showCc && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowCc(true)}
+                  className="mt-px h-6 px-1.5 text-[11px]"
+                >
+                  Cc/Bcc
+                </Button>
+              )
+            }
           />
-        </label>
+          {showCc && (
+            <>
+              <AddressField
+                label="Cc"
+                value={cc}
+                onChange={setCc}
+                placeholder="cc@example.com"
+                contacts={contacts}
+              />
+              <AddressField
+                label="Bcc"
+                value={bcc}
+                onChange={setBcc}
+                placeholder="bcc@example.com"
+                contacts={contacts}
+              />
+            </>
+          )}
+          {blockedRecipients.length > 0 && (
+            <div className="my-1.5 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-700 dark:text-amber-400">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>
+                {blockedRecipients.length === 1
+                  ? `${blockedRecipients[0]} is on your blocklist`
+                  : `${blockedRecipients.join(", ")} are on your blocklist`}{" "}
+                — they can't reach this server, so you won't receive any reply.
+              </span>
+            </div>
+          )}
+          <Field>
+            <FieldLabel htmlFor="compose-subject">Subject</FieldLabel>
+            <FieldContent>
+              <input
+                id="compose-subject"
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                onKeyDown={(e) => {
+                  // Skip the format toolbar — Tab from Subject lands in the body.
+                  if (e.key !== "Tab" || e.shiftKey) return;
+                  const body = mode === "html" ? editorRef.current : bodyTextareaRef.current;
+                  if (!body) return;
+                  e.preventDefault();
+                  body.focus();
+                }}
+                placeholder="Subject"
+                className={FIELD_INPUT}
+              />
+            </FieldContent>
+          </Field>
+        </FieldGroup>
         <FormatToolbar
           mode={mode}
           onExec={runFormat}
@@ -1492,42 +1517,48 @@ export function ComposeForm({
           />
         )}
         {attachments.some((a) => !a.inline) && (
-          <ul className="flex flex-wrap gap-1.5 border-t pt-2">
+          <ul className="mt-2 flex flex-col gap-1 border-t pt-2">
             {attachments
               .filter((a) => !a.inline)
               .map((a) => (
-                <li
-                  key={a.r2Key}
-                  className="flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-0.5 text-[11px]"
-                >
-                  <Paperclip className="h-2.5 w-2.5 shrink-0 text-muted-foreground" />
-                  <span className="max-w-[16rem] truncate" title={a.filename}>
-                    {a.filename}
-                  </span>
-                  <span className="text-muted-foreground">{formatBytes(a.sizeBytes)}</span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setAttachments((prev) => prev.filter((x) => x.r2Key !== a.r2Key))
-                    }
-                    className="ml-0.5 rounded p-0.5 text-muted-foreground hover:bg-card hover:text-foreground"
-                    aria-label={`Remove ${a.filename}`}
-                  >
-                    <X className="h-2.5 w-2.5" />
-                  </button>
+                <li key={a.r2Key}>
+                  <Item variant="outline" size="sm">
+                    <ItemMedia>
+                      <Paperclip />
+                    </ItemMedia>
+                    <ItemContent className="flex-row items-center gap-2">
+                      <ItemTitle title={a.filename} className="min-w-0 flex-1">
+                        {a.filename}
+                      </ItemTitle>
+                      <Badge variant="outline" className="shrink-0 font-normal">
+                        {formatBytes(a.sizeBytes)}
+                      </Badge>
+                    </ItemContent>
+                    <ItemActions>
+                      <IconButton
+                        label={`Remove ${a.filename}`}
+                        icon={X}
+                        size="icon-sm"
+                        onClick={() =>
+                          setAttachments((prev) => prev.filter((x) => x.r2Key !== a.r2Key))
+                        }
+                      />
+                    </ItemActions>
+                  </Item>
                 </li>
               ))}
           </ul>
         )}
         {quoteRef && (
           <div className="mt-2 border-t pt-2">
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setShowQuote((v) => !v)}
-              className="rounded px-1.5 py-0.5 font-medium text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              className="h-6 px-1.5 text-[11px]"
             >
               {showQuote ? "Hide" : "Show"} quoted message
-            </button>
+            </Button>
             <p className="mt-0.5 px-1.5 text-[11px] text-muted-foreground/70">
               The original message is included below your{" "}
               {quoteRef.kind === "forward" ? "forward" : "reply"}.
@@ -1550,8 +1581,8 @@ export function ComposeForm({
       </div>
 
       <div className="flex items-center justify-between gap-3 border-t bg-muted/40 px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:pb-2">
-        <div className="flex items-center gap-1.5">
-          <div className="flex items-center">
+        <div className="flex items-center gap-1">
+          <ButtonGroup>
             <Button
               variant="primary"
               onClick={attemptSend}
@@ -1562,8 +1593,8 @@ export function ComposeForm({
                 !mailboxId ||
                 !hasRecipients(to)
               }
-              className="rounded-r-none"
             >
+              {send.isPending ? <Spinner /> : <Send />}
               {send.isPending ? "Sending…" : "Send"}
             </Button>
             <Popover open={scheduleOpen} onOpenChange={setScheduleOpen}>
@@ -1580,7 +1611,7 @@ export function ComposeForm({
                       !mailboxId ||
                       !hasRecipients(to)
                     }
-                    className="ml-px w-7 rounded-l-none border-primary-foreground/20 border-l"
+                    className="w-7 border-primary-foreground/20 border-l"
                   >
                     <ChevronDown />
                   </Button>
@@ -1601,7 +1632,7 @@ export function ComposeForm({
                     <span className="text-[11px] text-muted-foreground">{formatWhen(p.when)}</span>
                   </button>
                 ))}
-                <div className="my-1 h-px bg-border" />
+                <Separator className="my-1.5" />
                 <div className="px-0.5 pt-0.5 pb-1">
                   <span className="mb-1 block px-1 text-[11px] text-muted-foreground">
                     Custom date &amp; time
@@ -1613,15 +1644,17 @@ export function ComposeForm({
                     disabled={{ before: new Date() }}
                     className="p-0"
                   />
-                  <div className="mt-1 flex items-center gap-2 px-1">
-                    <Clock className="size-3.5 text-muted-foreground" />
-                    <input
+                  <InputGroup className="mt-1.5">
+                    <InputGroupAddon>
+                      <Clock />
+                    </InputGroupAddon>
+                    <InputGroupInput
                       type="time"
+                      aria-label="Time"
                       value={customTime}
                       onChange={(e) => setCustomTime(e.target.value)}
-                      className="flex-1 rounded-md border bg-card px-2 py-1 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
                     />
-                  </div>
+                  </InputGroup>
                   <Button
                     variant="primary"
                     size="sm"
@@ -1636,16 +1669,13 @@ export function ComposeForm({
                 </div>
               </PopoverContent>
             </Popover>
-          </div>
-          <Button
-            variant="ghost"
-            size="icon"
+          </ButtonGroup>
+          <IconButton
+            label="Attach files"
+            icon={Paperclip}
             onClick={() => fileInputRef.current?.click()}
             disabled={attachments.length >= MAX_ATTACHMENTS}
-            aria-label="Attach files"
-          >
-            <Paperclip />
-          </Button>
+          />
           <input
             ref={fileInputRef}
             type="file"
@@ -1669,9 +1699,13 @@ export function ComposeForm({
                 Insert template
               </div>
               {templates.length === 0 ? (
-                <p className="px-1.5 py-1.5 text-[12px] text-muted-foreground">
-                  No templates yet. Add them in Settings → Templates.
-                </p>
+                <Empty>
+                  <EmptyMedia>
+                    <FileText />
+                  </EmptyMedia>
+                  <EmptyTitle>No templates yet</EmptyTitle>
+                  <EmptyDescription>Add them in Settings → Templates.</EmptyDescription>
+                </Empty>
               ) : (
                 templates.map((t) => (
                   <button
@@ -1707,50 +1741,60 @@ export function ComposeForm({
                 <Checkbox checked={followUp} onCheckedChange={(v) => setFollowUp(v === true)} />
                 Remind me if no reply
               </Label>
-              <div className="mt-2 flex items-center gap-2 px-0.5 text-[12px] text-muted-foreground">
-                <Clock className="size-3.5" />
-                <span>after</span>
-                <input
+              <InputGroup className={cn("mt-2", !followUp && "opacity-50")}>
+                <InputGroupAddon>
+                  <Clock />
+                  <InputGroupText>after</InputGroupText>
+                </InputGroupAddon>
+                <InputGroupInput
                   type="number"
                   min={1}
                   max={30}
+                  aria-label="Days until reminder"
                   value={followUpDays}
                   onChange={(e) => {
                     const n = Number.parseInt(e.target.value, 10);
                     if (!Number.isNaN(n)) setFollowUpDays(Math.min(30, Math.max(1, n)));
                   }}
                   disabled={!followUp}
-                  className="w-14 rounded-md border bg-card px-2 py-1 text-[13px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50"
+                  className="text-center"
                 />
-                <span>days</span>
-              </div>
+                <InputGroupAddon align="end">
+                  <InputGroupText>days</InputGroupText>
+                </InputGroupAddon>
+              </InputGroup>
             </PopoverContent>
           </Popover>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           {pgpMode !== "off" && (
-            <span className="text-[11px] font-medium text-primary">
-              {pgpMode === "sign_encrypt" ? "Will encrypt + sign" : "Will sign"}
-            </span>
+            <Badge variant="primary" className="shrink-0">
+              {pgpMode === "sign_encrypt" ? (
+                <Lock className="size-3" />
+              ) : (
+                <ShieldCheck className="size-3" />
+              )}
+              {pgpMode === "sign_encrypt" ? "Encrypt + sign" : "Sign"}
+            </Badge>
           )}
-          <span className="text-[11px] text-muted-foreground">
-            {uploading > 0
-              ? `Uploading ${uploading}…`
-              : sendable.length === 0
-                ? "No sendable mailboxes"
-                : savedHint
-                  ? "Draft saved"
-                  : null}
+          <span className="flex items-center gap-1 truncate text-[11px] text-muted-foreground">
+            {uploading > 0 ? (
+              <>
+                <Spinner className="size-3" />
+                Uploading {uploading}…
+              </>
+            ) : sendable.length === 0 ? (
+              "No sendable mailboxes"
+            ) : savedHint ? (
+              "Draft saved"
+            ) : null}
           </span>
-          <Button
-            variant="ghost"
-            size="icon"
+          <IconButton
+            label="Discard draft"
+            icon={Trash2}
             onClick={discard}
             className="hover:bg-destructive/10 hover:text-destructive"
-            aria-label="Discard draft"
-          >
-            <Trash2 />
-          </Button>
+          />
         </div>
       </div>
     </>
