@@ -121,6 +121,10 @@ export async function readPublicKeyInfo(armored: string): Promise<PublicKeyInfo>
 export interface PgpShape {
   encrypted: boolean;
   signed: boolean;
+  // True for PGP/MIME (RFC 3156): the encrypted payload decrypts to a full MIME
+  // entity that must be re-parsed. False for inline PGP, whose payload is bare
+  // plaintext — parsing it as MIME is both wasteful and unsound.
+  mime: boolean;
 }
 
 // Look at the raw .eml to classify PGP/MIME (RFC 3156) and inline PGP. postal-
@@ -129,16 +133,17 @@ export function detectPgp(rawText: string): PgpShape {
   const { headers } = splitHeadersBody(rawText);
   const ct = (headerValue(headers, "content-type") ?? "").toLowerCase();
   if (ct.includes("multipart/encrypted") && ct.includes("application/pgp-encrypted")) {
-    return { encrypted: true, signed: false };
+    return { encrypted: true, signed: false, mime: true };
   }
   if (ct.includes("multipart/signed") && ct.includes("application/pgp-signature")) {
-    return { encrypted: false, signed: true };
+    return { encrypted: false, signed: true, mime: true };
   }
   // Inline PGP in the body.
-  if (rawText.includes("-----BEGIN PGP MESSAGE-----")) return { encrypted: true, signed: false };
+  if (rawText.includes("-----BEGIN PGP MESSAGE-----"))
+    return { encrypted: true, signed: false, mime: false };
   if (rawText.includes("-----BEGIN PGP SIGNED MESSAGE-----"))
-    return { encrypted: false, signed: true };
-  return { encrypted: false, signed: false };
+    return { encrypted: false, signed: true, mime: false };
+  return { encrypted: false, signed: false, mime: false };
 }
 
 // ─── Outbound: build signed / encrypted PGP/MIME ────────────────────────────
@@ -258,9 +263,12 @@ export interface DecryptResult {
   signed: boolean;
   verify: "good" | "bad" | "unknown" | null;
   signedBy: string | null;
-  // The decrypted inner MIME to re-parse/re-index. Null when the message was
+  // The decrypted inner payload to re-index. Null when the message was
   // signed-only (nothing to substitute) or decryption failed.
   decryptedRaw: string | null;
+  // True when `decryptedRaw` is a full MIME entity (PGP/MIME) needing a re-parse;
+  // false when it's inline-PGP plaintext that should be used as the body verbatim.
+  decryptedMime: boolean;
 }
 
 export async function decryptVerify(args: {
@@ -292,6 +300,7 @@ export async function decryptVerify(args: {
         verify: v.verify,
         signedBy: v.signedBy,
         decryptedRaw: typeof data === "string" ? data : null,
+        decryptedMime: shape.mime,
       };
     } catch {
       return failed(true, false);
@@ -307,6 +316,7 @@ export async function decryptVerify(args: {
         verify: "unknown",
         signedBy: null,
         decryptedRaw: null,
+        decryptedMime: false,
       };
     }
     try {
@@ -318,6 +328,7 @@ export async function decryptVerify(args: {
           verify: "unknown",
           signedBy: null,
           decryptedRaw: null,
+          decryptedMime: false,
         };
       }
       const vr = await openpgp.verify({
@@ -332,6 +343,7 @@ export async function decryptVerify(args: {
         verify: v.verify,
         signedBy: v.signedBy,
         decryptedRaw: null,
+        decryptedMime: false,
       };
     } catch {
       return {
@@ -340,11 +352,19 @@ export async function decryptVerify(args: {
         verify: "unknown",
         signedBy: null,
         decryptedRaw: null,
+        decryptedMime: false,
       };
     }
   }
 
-  return { encrypted: false, signed: false, verify: null, signedBy: null, decryptedRaw: null };
+  return {
+    encrypted: false,
+    signed: false,
+    verify: null,
+    signedBy: null,
+    decryptedRaw: null,
+    decryptedMime: false,
+  };
 }
 
 async function readVerificationKeys(armored?: string | null): Promise<OpenPGP.PublicKey[]> {
@@ -358,7 +378,14 @@ async function readVerificationKeys(armored?: string | null): Promise<OpenPGP.Pu
 }
 
 function failed(encrypted: boolean, signed: boolean): DecryptResult {
-  return { encrypted, signed, verify: "unknown", signedBy: null, decryptedRaw: null };
+  return {
+    encrypted,
+    signed,
+    verify: "unknown",
+    signedBy: null,
+    decryptedRaw: null,
+    decryptedMime: false,
+  };
 }
 
 async function checkSignatures(
