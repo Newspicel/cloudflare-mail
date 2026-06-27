@@ -52,9 +52,17 @@ export type PgpMode = (typeof PGP_MODES)[number];
 export const PGP_VERIFY = ["good", "bad", "unknown"] as const;
 export type PgpVerify = (typeof PGP_VERIFY)[number];
 
-// How a stored correspondent public key was obtained.
-export const CONTACT_KEY_SOURCES = ["import", "tofu"] as const;
+// How a stored correspondent public key was obtained. `tofu` = captured from an
+// inbound signed/attached key; `wkd` = auto-fetched from the sender's Web Key
+// Directory; `import` = added by the owner.
+export const CONTACT_KEY_SOURCES = ["import", "tofu", "wkd"] as const;
 export type ContactKeySource = (typeof CONTACT_KEY_SOURCES)[number];
+
+// A per-message PGP key event the reader surfaces as a banner: a contact key was
+// auto-captured (TOFU/WKD) for the first time, or a known contact signed with a
+// different key than the one on file (possible rotation — or impersonation).
+export const PGP_KEY_EVENTS = ["captured", "rotated"] as const;
+export type PgpKeyEvent = (typeof PGP_KEY_EVENTS)[number];
 
 // A manual blocklist entry targets either a single address or a whole domain.
 export const BLOCK_ENTRY_TYPES = ["email", "domain"] as const;

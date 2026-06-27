@@ -20,6 +20,7 @@ import {
   Download,
   Forward,
   Inbox,
+  KeyRound,
   Loader2,
   Lock,
   LockOpen,
@@ -670,6 +671,129 @@ function SpamBanner({ msg }: { msg: MessageRow }) {
   );
 }
 
+function shortFingerprint(fp: string): string {
+  const s = fp.replace(/\s/g, "").toUpperCase();
+  return s.length > 16 ? `${s.slice(0, 4)}…${s.slice(-8)}` : s;
+}
+
+function PgpBannerShell({
+  tone,
+  Icon,
+  title,
+  action,
+  children,
+}: {
+  tone: "destructive" | "warning" | "muted";
+  Icon: LucideIcon;
+  title: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  const styles =
+    tone === "destructive"
+      ? "bg-destructive/10 text-destructive"
+      : tone === "warning"
+        ? "bg-amber-500/10 text-amber-700 dark:text-amber-400"
+        : "bg-muted/60 text-muted-foreground";
+  return (
+    <div
+      className={cn(
+        "flex items-start justify-between gap-3 border-b px-4 py-2.5 text-[12px]",
+        styles,
+      )}
+    >
+      <div className="flex min-w-0 items-start gap-2">
+        <Icon className="mt-0.5 size-4 shrink-0" />
+        <div className="min-w-0">
+          <div className="font-semibold">{title}</div>
+          <div className="mt-0.5">{children}</div>
+        </div>
+      </div>
+      {action && <div className="shrink-0">{action}</div>}
+    </div>
+  );
+}
+
+// PGP trust banners (inbound only): surface a bad signature, a key rotation, an
+// auto-captured key, or an action to fetch-and-save the key of a signed sender we
+// can't yet verify. The "trust sender" action hits the worker, which extracts the
+// sender's key from the stored message (or fetches it via WKD) and re-verifies.
+function PgpBanner({ msg, readOnly }: { msg: MessageRow; readOnly: boolean }) {
+  const qc = useQueryClient();
+  const trust = useMutation({
+    mutationFn: () => api(`/api/messages/${msg.id}/pgp/trust-sender`, { method: "POST" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.thread(msg.threadId) });
+      toast.success(`Saved key for ${msg.fromAddr}`);
+    },
+    onError: (e: unknown) =>
+      toast.error(e instanceof Error ? e.message : "Couldn't find a key for this sender"),
+  });
+  const trustButton = (label: string, busy: string) =>
+    !readOnly && (
+      <Button
+        size="sm"
+        variant="secondary"
+        disabled={trust.isPending}
+        onClick={() => trust.mutate()}
+      >
+        {trust.isPending ? busy : label}
+      </Button>
+    );
+
+  if (msg.direction !== "in") return null;
+
+  // Loudest: a signature that failed verification — altered or forged.
+  if (msg.pgpSigned && msg.pgpVerify === "bad") {
+    return (
+      <PgpBannerShell tone="destructive" Icon={ShieldAlert} title="Bad PGP signature">
+        This message's signature failed to verify — it may have been altered in transit or forged.
+      </PgpBannerShell>
+    );
+  }
+
+  // A known contact signed with a different key than the one on file.
+  if (msg.pgpKeyEvent === "rotated") {
+    return (
+      <PgpBannerShell
+        tone="warning"
+        Icon={KeyRound}
+        title="Sender used a new PGP key"
+        action={trustButton("Trust new key", "Updating…")}
+      >
+        {msg.fromAddr} signed with a key that doesn't match the one saved for them. If they rotated
+        keys, update it; if this is unexpected, verify the fingerprint out-of-band first.
+      </PgpBannerShell>
+    );
+  }
+
+  // Signed, but we have no key for the sender to check it — offer to fetch + save.
+  if (msg.pgpSigned && msg.pgpVerify === "unknown" && !msg.pgpKey) {
+    return (
+      <PgpBannerShell
+        tone="muted"
+        Icon={ShieldQuestion}
+        title="Signed — can't verify"
+        action={trustButton("Verify & save key", "Saving…")}
+      >
+        This message is PGP-signed but we have no key for {msg.fromAddr} to verify it.
+      </PgpBannerShell>
+    );
+  }
+
+  // A key was just captured from this message (TOFU / WKD) — let the user know.
+  if (msg.pgpKeyEvent === "captured" && msg.pgpKey) {
+    return (
+      <PgpBannerShell tone="muted" Icon={KeyRound} title="Saved sender's PGP key">
+        Stored {shortFingerprint(msg.pgpKey.fingerprint)} for {msg.fromAddr}. Future mail is
+        verified automatically, and replies can be encrypted.
+      </PgpBannerShell>
+    );
+  }
+
+  return null;
+}
+
 // Newsletters carry a List-Unsubscribe header; surface a one-tap opt-out. The
 // worker decides the channel (one-click POST / mailto / link) — a "link" result
 // is an https page we open in a new tab, everything else is handled server-side.
@@ -807,13 +931,22 @@ function senderLock(
         title: "Digitally signed",
         detail: "Signed with your key.",
       };
-    if (msg.pgpVerify === "good")
-      return {
-        Icon: ShieldCheck,
-        tone: "success",
-        title: "Signed — verified",
-        detail: "The sender's PGP signature is valid.",
-      };
+    if (msg.pgpVerify === "good") {
+      const fp = msg.pgpKey ? ` (${shortFingerprint(msg.pgpKey.fingerprint)})` : "";
+      return msg.pgpKey?.verified
+        ? {
+            Icon: ShieldCheck,
+            tone: "success",
+            title: "Signed — verified key",
+            detail: `Valid signature from a confirmed key${fp}.`,
+          }
+        : {
+            Icon: ShieldCheck,
+            tone: "success",
+            title: "Signed — verified",
+            detail: `Valid PGP signature${fp}. Confirm the key's fingerprint to fully trust it.`,
+          };
+    }
     if (msg.pgpVerify === "bad")
       return {
         Icon: ShieldAlert,
@@ -1141,6 +1274,7 @@ function MessageCard({
         </div>
       </header>
       <SpamBanner msg={msg} />
+      <PgpBanner msg={msg} readOnly={readOnly} />
       <UnsubscribeBanner msg={msg} readOnly={readOnly} />
       {body.data?.calendar && <CalendarBanner event={body.data.calendar} />}
       {body.isPending ? (

@@ -1,5 +1,5 @@
 import type { DB } from "@cfmail/db";
-import type { PgpVerify } from "@cfmail/db/enums";
+import type { PgpKeyEvent, PgpVerify } from "@cfmail/db/enums";
 import { attachment, message, thread } from "@cfmail/db/schema";
 import { Flag } from "@cfmail/shared/flags";
 import { eq } from "drizzle-orm";
@@ -46,6 +46,7 @@ export interface IngestOptions {
     signed: boolean;
     verify: PgpVerify | null;
     signedBy: string | null;
+    keyEvent?: PgpKeyEvent | null;
     plainRaw?: Uint8Array;
   };
 }
@@ -153,6 +154,7 @@ export async function ingestRaw(env: Env, db: DB, opts: IngestOptions): Promise<
     pgpSigned: opts.pgp?.signed ?? false,
     pgpVerify: opts.pgp?.verify ?? null,
     pgpSignedBy: opts.pgp?.signedBy ?? null,
+    pgpKeyEvent: opts.pgp?.keyEvent ?? null,
     plainR2Key: plainKey,
   });
 

@@ -17,6 +17,7 @@ import {
   unwrapSecret,
 } from "./pgp.ts";
 import { bumpThread, resolveThreadId } from "./threads.ts";
+import { fetchWkdKey } from "./wkd.ts";
 
 const utf8Encoder = new TextEncoder();
 
@@ -42,6 +43,7 @@ export async function sendFromMailbox(
       pgpPublicKey: true,
       pgpPrivateKeyWrapped: true,
       pgpPassphraseWrapped: true,
+      pgpAutoFetch: true,
     },
   });
   if (!mb) throw new HTTPException(404, { message: "mailbox not found" });
@@ -158,6 +160,7 @@ export async function sendFromMailbox(
     const meta = await sendPgp(env, db, {
       mailboxId: mb.id,
       pgpMode: mb.pgpMode,
+      pgpAutoFetch: mb.pgpAutoFetch,
       pgpPublicKey: mb.pgpPublicKey!,
       pgpPrivateKeyWrapped: mb.pgpPrivateKeyWrapped!,
       pgpPassphraseWrapped: mb.pgpPassphraseWrapped!,
@@ -278,6 +281,7 @@ export async function sendFromMailbox(
 interface PgpSendArgs {
   mailboxId: string;
   pgpMode: "off" | "sign" | "sign_encrypt";
+  pgpAutoFetch: boolean;
   pgpPublicKey: string;
   pgpPrivateKeyWrapped: string;
   pgpPassphraseWrapped: string;
@@ -319,6 +323,36 @@ async function sendPgp(
       })
     : [];
   const keyByEmail = new Map(contacts.map((c) => [c.email, c.publicKey]));
+
+  // For recipients with no key on file, try their WKD so encryption can proceed
+  // without the user manually importing keys. Best-effort and parallel — a miss
+  // just leaves them keyless (signed-only fallback below). Auto-saved as a contact
+  // key (unverified) so the next send is instant.
+  if (args.pgpMode === "sign_encrypt" && args.pgpAutoFetch) {
+    const missing = uniqAddrs.filter((a) => !keyByEmail.has(a));
+    if (missing.length) {
+      await Promise.all(
+        missing.map(async (addr) => {
+          const info = await fetchWkdKey(addr).catch(() => null);
+          if (!info) return;
+          keyByEmail.set(addr, info.publicArmored);
+          await db
+            .insert(contactKey)
+            .values({
+              id: crypto.randomUUID(),
+              mailboxId: args.mailboxId,
+              email: addr,
+              publicKey: info.publicArmored,
+              fingerprint: info.fingerprint,
+              source: "wkd",
+              expiresAt: info.expiresAt ? new Date(info.expiresAt) : null,
+            })
+            .onConflictDoNothing();
+        }),
+      );
+    }
+  }
+
   const allHaveKeys = uniqAddrs.length > 0 && uniqAddrs.every((a) => keyByEmail.has(a));
   const encrypt = args.pgpMode === "sign_encrypt" && allHaveKeys;
 

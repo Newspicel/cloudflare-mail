@@ -1,4 +1,4 @@
-import { draft, message, thread, threadFolder, threadSummary } from "@cfmail/db/schema";
+import { contactKey, draft, message, thread, threadFolder, threadSummary } from "@cfmail/db/schema";
 import { Flag } from "@cfmail/shared/flags";
 import { Perm } from "@cfmail/shared/permissions";
 import type { FolderCountsResponseDto, ThreadSummaryDto } from "@cfmail/shared/responses";
@@ -176,7 +176,34 @@ export function threadsRoutes() {
       .where(and(eq(message.threadId, id), eq(message.mailboxId, th.mailboxId)))
       .orderBy(asc(message.createdAt));
 
-    return c.json({ thread: serializeThread(th), messages: msgs.map(serializeMessage) });
+    // Attach the stored correspondent key for each inbound sender so the reader
+    // can show which key verified a signature and its trust state. One batched
+    // lookup keyed by lowercased From address.
+    const senders = [
+      ...new Set(
+        msgs
+          .filter((m) => m.direction === "in" && (m.pgpSigned || m.pgpEncrypted))
+          .map((m) => m.fromAddr.toLowerCase()),
+      ),
+    ];
+    const keyRows = senders.length
+      ? await db.query.contactKey.findMany({
+          where: and(eq(contactKey.mailboxId, th.mailboxId), inArray(contactKey.email, senders)),
+          columns: { email: true, fingerprint: true, source: true, verified: true },
+        })
+      : [];
+    const keyByEmail = new Map(keyRows.map((k) => [k.email, k]));
+
+    return c.json({
+      thread: serializeThread(th),
+      messages: msgs.map((m) => {
+        const k = m.direction === "in" ? keyByEmail.get(m.fromAddr.toLowerCase()) : undefined;
+        return serializeMessage(
+          m,
+          k ? { fingerprint: k.fingerprint, source: k.source, verified: k.verified } : null,
+        );
+      }),
+    });
   });
 
   // AI catch-up summary of a whole thread (best-effort, on-demand). READ only —

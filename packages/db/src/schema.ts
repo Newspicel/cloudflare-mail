@@ -15,6 +15,7 @@ import {
   EDITOR_FORMATS,
   MAILBOX_TYPES,
   MESSAGE_DIRECTIONS,
+  PGP_KEY_EVENTS,
   PGP_MODES,
   PGP_VERIFY,
   QUOTE_KINDS,
@@ -264,6 +265,11 @@ export const mailbox = sqliteTable(
     pgpPrivateKeyWrapped: text("pgp_private_key_wrapped"),
     pgpPassphraseWrapped: text("pgp_passphrase_wrapped"),
     pgpFingerprint: text("pgp_fingerprint"),
+    // Auto-discover correspondent keys via Web Key Directory (outbound: before
+    // encrypting to a recipient with no key; inbound: to verify a signed sender we
+    // don't have). Outbound lookups reveal who you email to their provider, so
+    // this is a toggle (default on).
+    pgpAutoFetch: integer("pgp_auto_fetch", { mode: "boolean" }).notNull().default(true),
     expiresAt: integer("expires_at", { mode: "timestamp" }),
     // Background purge marker (admin empty/delete). "empty" drains the mailbox's
     // threads then clears; "delete" drains then drops the mailbox row. The cron
@@ -339,6 +345,12 @@ export const contactKey = sqliteTable(
     publicKey: text("public_key").notNull(),
     fingerprint: text("fingerprint").notNull(),
     source: text("source", { enum: CONTACT_KEY_SOURCES }).notNull().default("import"),
+    // Whether the owner has confirmed this fingerprint out-of-band. Auto-captured
+    // (tofu/wkd) keys start unverified; the badge reflects trust, not mere presence.
+    verified: integer("verified", { mode: "boolean" }).notNull().default(false),
+    // Key expiry parsed from the public key (null = no expiry). Used to warn before
+    // encrypting to a dead key and to flag expired contacts in settings.
+    expiresAt: integer("expires_at", { mode: "timestamp" }),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex("contact_key_mailbox_email_uq").on(t.mailboxId, t.email)],
@@ -448,6 +460,11 @@ export const message = sqliteTable(
     pgpSigned: integer("pgp_signed", { mode: "boolean" }).notNull().default(false),
     pgpVerify: text("pgp_verify", { enum: PGP_VERIFY }),
     pgpSignedBy: text("pgp_signed_by"),
+    // Set when delivery auto-captured the sender's key (TOFU/WKD) for the first
+    // time, or detected they signed with a different key than the one on file. The
+    // reader shows a one-time banner; null once acknowledged isn't tracked (the
+    // banner keys off the contact-key state, see message-view).
+    pgpKeyEvent: text("pgp_key_event", { enum: PGP_KEY_EVENTS }),
     plainR2Key: text("plain_r2_key"),
     createdAt: createdAt(),
   },

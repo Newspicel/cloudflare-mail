@@ -1,4 +1,5 @@
 import { type DB, makeDB } from "@cfmail/db";
+import type { PgpKeyEvent } from "@cfmail/db/enums";
 import {
   contactKey,
   domain,
@@ -25,6 +26,7 @@ import {
   decryptVerify,
   detectPgp,
   extractPublicKeyBlock,
+  type PublicKeyInfo,
   readPublicKeyInfo,
   unwrapSecret,
 } from "./pgp.ts";
@@ -32,6 +34,7 @@ import { notifyMailbox } from "./push.ts";
 import { runRuleSends } from "./rule-sends.ts";
 import { evaluateRules, type RuleOutcome } from "./rules.ts";
 import { evaluateSpam, type SpamEvaluation } from "./spam.ts";
+import { fetchWkdKey } from "./wkd.ts";
 
 const latin1Decoder = new TextDecoder("latin1");
 const utf8Encoder = new TextEncoder();
@@ -84,6 +87,7 @@ export async function handleInbound(
       pgpPublicKey: true,
       pgpPrivateKeyWrapped: true,
       pgpPassphraseWrapped: true,
+      pgpAutoFetch: true,
     },
   });
   if (!mb) {
@@ -113,6 +117,7 @@ export async function handleInbound(
           pgpPublicKey: true,
           pgpPrivateKeyWrapped: true,
           pgpPassphraseWrapped: true,
+          pgpAutoFetch: true,
         },
       });
     }
@@ -161,6 +166,7 @@ export async function handleInbound(
   if (mb.pgpMode !== "off") {
     const rawText = latin1Decoder.decode(raw);
     const shape = detectPgp(rawText);
+    let wkdCaptured = false;
     if ((shape.encrypted || shape.signed) && mb.pgpPrivateKeyWrapped && mb.pgpPassphraseWrapped) {
       const fromAddr = parsed.from?.address?.toLowerCase();
       const contact = fromAddr
@@ -169,6 +175,16 @@ export async function handleInbound(
             columns: { publicKey: true },
           })
         : null;
+      // When a message is signed but we have no key to check it, try the sender's
+      // WKD so verification succeeds on first contact instead of going "unknown".
+      let senderKey = contact?.publicKey ?? null;
+      if (!senderKey && fromAddr && shape.signed && mb.pgpAutoFetch) {
+        const wkd = await fetchWkdKey(fromAddr).catch(() => null);
+        if (wkd) {
+          senderKey = wkd.publicArmored;
+          wkdCaptured = await storeDiscoveredKey(db, mb.id, fromAddr, wkd);
+        }
+      }
       const masterKey = await getOrCreatePgpMasterKey(db);
       const privArmored = await unwrapSecret(masterKey, mb.pgpPrivateKeyWrapped);
       const passphrase = await unwrapSecret(masterKey, mb.pgpPassphraseWrapped);
@@ -176,7 +192,7 @@ export async function handleInbound(
         rawText,
         privArmored,
         passphrase,
-        senderPublicKey: contact?.publicKey ?? null,
+        senderPublicKey: senderKey,
       });
       pgp = {
         encrypted: res.encrypted,
@@ -203,8 +219,19 @@ export async function handleInbound(
         pgp.plainRaw = utf8Encoder.encode(res.decryptedRaw);
       }
     }
-    // TOFU: capture an attached/inline sender public key for future encryption.
-    await captureTofuKey(db, mb.id, parsed.from?.address, rawText).catch(() => {});
+    // TOFU: capture an attached/inline sender public key for future encryption,
+    // and flag a rotation when a known contact signs with a different key. The
+    // resulting event surfaces a one-time banner in the reader.
+    const keyEvent = wkdCaptured
+      ? "captured"
+      : await captureSenderKey(
+          db,
+          mb.id,
+          parsed.from?.address,
+          rawText,
+          pgp?.signedBy ?? null,
+        ).catch(() => null);
+    if (pgp) pgp.keyEvent = keyEvent;
   }
 
   let spam: SpamEvaluation | null = null;
@@ -410,28 +437,66 @@ function splitAddr(addr: string): [string | null, string | null] {
   return [addr.slice(0, at), addr.slice(at + 1)];
 }
 
-// Trust-on-first-use: if the sender attached/inlined a public key that claims
-// their From address and we don't already have one, store it so future replies
-// can encrypt. Best-effort — callers swallow errors.
-async function captureTofuKey(
+// Store an auto-discovered (WKD) key for a sender we have none for. Returns true
+// when it actually inserted (so the reader can announce the capture). Never
+// overwrites an existing key — that path goes through explicit trust.
+async function storeDiscoveredKey(
+  db: DB,
+  mailboxId: string,
+  email: string,
+  info: PublicKeyInfo,
+): Promise<boolean> {
+  const inserted = await db
+    .insert(contactKey)
+    .values({
+      id: crypto.randomUUID(),
+      mailboxId,
+      email,
+      publicKey: info.publicArmored,
+      fingerprint: info.fingerprint,
+      source: "wkd",
+      expiresAt: info.expiresAt ? new Date(info.expiresAt) : null,
+    })
+    .onConflictDoNothing()
+    .returning({ id: contactKey.id });
+  return inserted.length > 0;
+}
+
+// Trust-on-first-use + rotation detection. If the sender attached/inlined a
+// public key that claims their From address and we have none, store it (TOFU) and
+// report "captured". If we already have a key but this message was signed by a
+// *different* key, report "rotated" — but never silently overwrite a stored key
+// (could be impersonation; the owner confirms via the reader). Best-effort.
+async function captureSenderKey(
   db: DB,
   mailboxId: string,
   from: string | undefined,
   rawText: string,
-): Promise<void> {
+  signedBy: string | null,
+): Promise<PgpKeyEvent | null> {
   const fromAddr = from?.toLowerCase();
-  if (!fromAddr) return;
-  const block = extractPublicKeyBlock(rawText);
-  if (!block) return;
+  if (!fromAddr) return null;
   const existing = await db.query.contactKey.findFirst({
     where: and(eq(contactKey.mailboxId, mailboxId), eq(contactKey.email, fromAddr)),
-    columns: { id: true },
+    columns: { fingerprint: true },
   });
-  if (existing) return;
+
+  if (existing) {
+    // A v4 key ID is the low 64 bits of the fingerprint. If the message was signed
+    // by a key whose ID isn't a suffix of the stored fingerprint, the sender
+    // rotated (or someone is forging) — flag it for the owner to resolve.
+    if (signedBy && !existing.fingerprint.toLowerCase().endsWith(signedBy.toLowerCase())) {
+      return "rotated";
+    }
+    return null;
+  }
+
+  const block = extractPublicKeyBlock(rawText);
+  if (!block) return null;
   const info = await readPublicKeyInfo(block);
   // Only trust a key that actually claims this sender's address.
-  if (!info.emails.includes(fromAddr)) return;
-  await db
+  if (!info.emails.includes(fromAddr)) return null;
+  const inserted = await db
     .insert(contactKey)
     .values({
       id: crypto.randomUUID(),
@@ -440,6 +505,10 @@ async function captureTofuKey(
       publicKey: info.publicArmored,
       fingerprint: info.fingerprint,
       source: "tofu",
+      expiresAt: info.expiresAt ? new Date(info.expiresAt) : null,
     })
-    .onConflictDoNothing();
+    .onConflictDoNothing()
+    .returning({ id: contactKey.id });
+  // Only announce a capture when we actually inserted (lost races insert nothing).
+  return inserted.length > 0 ? "captured" : null;
 }
