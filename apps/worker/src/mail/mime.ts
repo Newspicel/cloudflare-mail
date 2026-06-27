@@ -173,19 +173,29 @@ const HTML_ENTITIES: Record<string, string> = {
   "&apos;": "'",
 };
 
+const HTML_BLOCK_TAGS_RE = /<(script|style|head|noscript)[\s\S]*?<\/\1>/gi;
+const HTML_COMMENT_RE = /<!--[\s\S]*?-->/g;
+const HTML_BLOCK_BREAK_RE =
+  /<\/?(p|div|br|li|tr|h[1-6]|table|ul|ol|blockquote|section|article)[^>]*>/gi;
+const HTML_TAG_RE = /<[^>]+>/g;
+const HTML_NUM_ENTITY_RE = /&#(\d+);/g;
+const HTML_NAMED_ENTITY_RE = /&[a-z#0-9]+;/gi;
+const HTML_INLINE_WS_RE = /[^\S\n]+/g;
+const HTML_NEWLINE_WS_RE = /\s*\n\s*/g;
+
 // Convert HTML to readable plaintext for indexing: drop script/style blocks
 // entirely (otherwise CSS/JS pollutes the index), turn block-level tags into
 // newlines, strip remaining tags, decode common entities, collapse whitespace.
 export function htmlToText(html: string): string {
   return html
-    .replace(/<(script|style|head|noscript)[\s\S]*?<\/\1>/gi, " ")
-    .replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(/<\/?(p|div|br|li|tr|h[1-6]|table|ul|ol|blockquote|section|article)[^>]*>/gi, "\n")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
-    .replace(/&[a-z#0-9]+;/gi, (m) => HTML_ENTITIES[m.toLowerCase()] ?? " ")
-    .replace(/[^\S\n]+/g, " ")
-    .replace(/\s*\n\s*/g, "\n")
+    .replace(HTML_BLOCK_TAGS_RE, " ")
+    .replace(HTML_COMMENT_RE, " ")
+    .replace(HTML_BLOCK_BREAK_RE, "\n")
+    .replace(HTML_TAG_RE, " ")
+    .replace(HTML_NUM_ENTITY_RE, (_, code) => String.fromCodePoint(Number(code)))
+    .replace(HTML_NAMED_ENTITY_RE, (m) => HTML_ENTITIES[m.toLowerCase()] ?? " ")
+    .replace(HTML_INLINE_WS_RE, " ")
+    .replace(HTML_NEWLINE_WS_RE, "\n")
     .trim();
 }
 
