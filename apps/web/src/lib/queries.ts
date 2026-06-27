@@ -91,6 +91,7 @@ export const threadsQuery = (mailboxId: string, view: MailView = "inbox") =>
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
     enabled: Boolean(mailboxId),
+    staleTime: 30_000,
   });
 
 export const draftsQuery = (mailboxId: string) =>
@@ -201,6 +202,7 @@ export const labelsQuery = (mailboxId: string) =>
     queryFn: () =>
       api<{ labels: LabelDto[] }>(`/api/labels?mailboxId=${encodeURIComponent(mailboxId)}`),
     enabled: Boolean(mailboxId),
+    staleTime: 5 * 60_000,
   });
 
 export const rulesQuery = (mailboxId: string) =>
@@ -209,11 +211,13 @@ export const rulesQuery = (mailboxId: string) =>
     queryFn: () =>
       api<{ rules: RuleDto[] }>(`/api/rules?mailboxId=${encodeURIComponent(mailboxId)}`),
     enabled: Boolean(mailboxId),
+    staleTime: 5 * 60_000,
   });
 
 export const foldersQuery = queryOptions({
   queryKey: keys.folders(),
   queryFn: () => api<{ folders: FolderDto[] }>("/api/folders"),
+  staleTime: 5 * 60_000,
 });
 
 export const folderThreadsQuery = (folderId: string) =>

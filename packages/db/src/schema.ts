@@ -373,9 +373,9 @@ export const thread = sqliteTable(
   },
   (t) => [
     index("thread_mailbox_last_idx").on(t.mailboxId, t.lastMsgAt),
-    index("thread_mailbox_subject_idx").on(t.mailboxId, t.subjectNorm),
+    index("thread_mailbox_subject_idx").on(t.mailboxId, t.subjectNorm, t.lastMsgAt),
     index("thread_mailbox_state_idx").on(t.mailboxId, t.trashed, t.spam),
-    index("thread_trashed_at_idx").on(t.trashedAt),
+    index("thread_trashed_at_idx").on(t.trashed, t.trashedAt),
   ],
 );
 
@@ -623,7 +623,7 @@ export const rule = sqliteTable(
   },
   (t) => [
     uniqueIndex("rule_mailbox_name_uq").on(t.mailboxId, t.name),
-    index("rule_mailbox_priority_idx").on(t.mailboxId, t.priority),
+    index("rule_mailbox_priority_idx").on(t.mailboxId, t.enabled, t.priority, t.createdAt),
   ],
 );
 
