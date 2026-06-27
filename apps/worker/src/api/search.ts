@@ -2,7 +2,7 @@ import { domain, mailbox, mailboxMember } from "@cfmail/db/schema";
 import { has, Perm } from "@cfmail/shared/permissions";
 import type { SearchResultsDto } from "@cfmail/shared/responses";
 import { type SearchFilters, type SearchIn, searchFilters } from "@cfmail/shared/schemas";
-import { eq } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { dbFromCtx } from "../db.ts";
@@ -20,29 +20,29 @@ export function searchRoutes() {
     if (!parsed.success) throw new HTTPException(400, { message: "invalid search filters" });
     const f = parsed.data;
 
-    // Resolve every mailbox the caller may read (owned + shared with READ).
-    const owned = await db
-      .select({ id: mailbox.id, localPart: mailbox.localPart, domainName: domain.name })
-      .from(mailbox)
-      .innerJoin(domain, eq(mailbox.domainId, domain.id))
-      .where(eq(mailbox.ownerUserId, user.id));
-
-    const shared = await db
+    // Resolve every mailbox the caller may read (owned + shared with READ) in one
+    // pass: left-join membership so an owner row has a null perms.
+    const readable = await db
       .select({
         id: mailbox.id,
         localPart: mailbox.localPart,
         domainName: domain.name,
+        ownerUserId: mailbox.ownerUserId,
         perms: mailboxMember.perms,
       })
-      .from(mailboxMember)
-      .innerJoin(mailbox, eq(mailboxMember.mailboxId, mailbox.id))
+      .from(mailbox)
       .innerJoin(domain, eq(mailbox.domainId, domain.id))
-      .where(eq(mailboxMember.userId, user.id));
+      .leftJoin(
+        mailboxMember,
+        and(eq(mailboxMember.mailboxId, mailbox.id), eq(mailboxMember.userId, user.id)),
+      )
+      .where(or(eq(mailbox.ownerUserId, user.id), eq(mailboxMember.userId, user.id)));
 
     const addressById = new Map<string, string>();
-    for (const m of owned) addressById.set(m.id, `${m.localPart}@${m.domainName}`);
-    for (const m of shared) {
-      if (has(m.perms, Perm.READ)) addressById.set(m.id, `${m.localPart}@${m.domainName}`);
+    for (const m of readable) {
+      if (m.ownerUserId === user.id || (m.perms != null && has(m.perms, Perm.READ))) {
+        addressById.set(m.id, `${m.localPart}@${m.domainName}`);
+      }
     }
 
     // Scope to the requested mailbox(es) ("all"/blank = every readable one; a

@@ -57,16 +57,21 @@ export async function resolveAccess(
 // Every non-service mailbox the user can read (owned + member). Backs the
 // combined "All" view; service mailboxes are key-driven and never user-facing.
 export async function accessibleMailboxIds(db: DB, userId: string): Promise<string[]> {
-  const owned = await db
-    .select({ id: mailbox.id })
+  const rows = await db
+    .selectDistinct({ id: mailbox.id })
     .from(mailbox)
-    .where(and(eq(mailbox.ownerUserId, userId), ne(mailbox.type, "service"), mailboxNotPurging));
-  const member = await db
-    .select({ id: mailboxMember.mailboxId })
-    .from(mailboxMember)
-    .innerJoin(mailbox, eq(mailboxMember.mailboxId, mailbox.id))
-    .where(and(eq(mailboxMember.userId, userId), ne(mailbox.type, "service"), mailboxNotPurging));
-  return [...new Set([...owned.map((r) => r.id), ...member.map((r) => r.id)])];
+    .leftJoin(
+      mailboxMember,
+      and(eq(mailboxMember.mailboxId, mailbox.id), eq(mailboxMember.userId, userId)),
+    )
+    .where(
+      and(
+        or(eq(mailbox.ownerUserId, userId), eq(mailboxMember.userId, userId)),
+        ne(mailbox.type, "service"),
+        mailboxNotPurging,
+      ),
+    );
+  return rows.map((r) => r.id);
 }
 
 export async function requirePerm(

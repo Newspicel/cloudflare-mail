@@ -58,6 +58,7 @@ export async function evaluateRules(
     autoReplies: [],
   };
 
+  const labelIds = new Set<string>();
   for (const r of rows) {
     const conditions = r.conditions ?? [];
     // A rule with no conditions never matches — guards against accidental match-all.
@@ -68,7 +69,7 @@ export async function evaluateRules(
     for (const action of r.actions ?? []) {
       switch (action.type) {
         case "applyLabel":
-          if (!outcome.labelIds.includes(action.labelId)) outcome.labelIds.push(action.labelId);
+          labelIds.add(action.labelId);
           break;
         case "moveFolder":
           outcome.folder = { userId: r.createdBy, folderId: action.folderId };
@@ -96,6 +97,7 @@ export async function evaluateRules(
     if (stop) break;
   }
 
+  outcome.labelIds = [...labelIds];
   return outcome;
 }
 

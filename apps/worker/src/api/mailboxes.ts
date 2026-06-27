@@ -60,7 +60,12 @@ export function mailboxesRoutes() {
     const db = dbFromCtx(c);
     const u = c.get("user")!;
 
-    const ownerRows = await db
+    // Owned + shared mailboxes in one pass: left-join membership for this user so
+    // a row is owned (ownerUserId match) and/or shared (non-null perms). Owner
+    // wins when both — it gets full perms regardless of any member grant.
+    // service mailboxes are key-driven, never user-facing — keep them out.
+    // Hide mailboxes being hard-deleted; empty-pending ones stay (shown empty).
+    const rows = await db
       .select({
         id: mailbox.id,
         localPart: mailbox.localPart,
@@ -70,50 +75,26 @@ export function mailboxesRoutes() {
         domainName: domain.name,
         pgpMode: mailbox.pgpMode,
         aiFeatures: mailbox.aiFeatures,
-        access: mailbox.ownerUserId,
+        ownerUserId: mailbox.ownerUserId,
+        perms: mailboxMember.perms,
       })
       .from(mailbox)
       .innerJoin(domain, eq(mailbox.domainId, domain.id))
-      // service mailboxes are key-driven, never user-facing — keep them out.
-      // Hide mailboxes being hard-deleted; empty-pending ones stay (shown empty).
+      .leftJoin(
+        mailboxMember,
+        and(eq(mailboxMember.mailboxId, mailbox.id), eq(mailboxMember.userId, u.id)),
+      )
       .where(
-        and(eq(mailbox.ownerUserId, u.id), ne(mailbox.type, "service"), mailboxNotDeletePending),
+        and(
+          or(eq(mailbox.ownerUserId, u.id), eq(mailboxMember.userId, u.id)),
+          ne(mailbox.type, "service"),
+          mailboxNotDeletePending,
+        ),
       );
 
-    const memberRows = await db
-      .select({
-        id: mailbox.id,
-        localPart: mailbox.localPart,
-        displayName: mailbox.displayName,
-        type: mailbox.type,
-        expiresAt: mailbox.expiresAt,
-        domainName: domain.name,
-        pgpMode: mailbox.pgpMode,
-        aiFeatures: mailbox.aiFeatures,
-        perms: mailboxMember.perms,
-      })
-      .from(mailboxMember)
-      .innerJoin(mailbox, eq(mailboxMember.mailboxId, mailbox.id))
-      .innerJoin(domain, eq(mailbox.domainId, domain.id))
-      .where(
-        and(eq(mailboxMember.userId, u.id), ne(mailbox.type, "service"), mailboxNotDeletePending),
-      );
-
-    const owned = ownerRows.map((m) => ({
-      id: m.id,
-      address: `${m.localPart}@${m.domainName}`,
-      displayName: m.displayName,
-      type: m.type,
-      expiresAt: m.expiresAt,
-      pgpMode: m.pgpMode,
-      aiFeatures: m.aiFeatures,
-      role: "owner" as const,
-      perms: 7,
-    }));
-    const ownedIds = new Set(ownerRows.map((m) => m.id));
-    const shared = memberRows
-      .filter((m) => !ownedIds.has(m.id))
-      .map((m) => ({
+    const all = rows.map((m) => {
+      const isOwner = m.ownerUserId === u.id;
+      return {
         id: m.id,
         address: `${m.localPart}@${m.domainName}`,
         displayName: m.displayName,
@@ -121,14 +102,14 @@ export function mailboxesRoutes() {
         expiresAt: m.expiresAt,
         pgpMode: m.pgpMode,
         aiFeatures: m.aiFeatures,
-        role: "member" as const,
-        perms: m.perms,
-      }));
+        role: isOwner ? ("owner" as const) : ("member" as const),
+        perms: isOwner ? 7 : (m.perms ?? 0),
+      };
+    });
 
     // Unread badge per mailbox: active (non-trash/spam) threads with unread
     // inbound mail. `unreadCount > 0` already implies an unseen inbound message.
     // Threads the user filed into a custom folder are "moved away" and excluded.
-    const all = [...owned, ...shared];
     const ids = all.map((m) => m.id);
     const unreadRows = ids.length
       ? await db
