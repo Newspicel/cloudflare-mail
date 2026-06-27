@@ -1,6 +1,5 @@
 import { Dialog } from "@base-ui/react/dialog";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import DOMPurify from "dompurify";
 import {
   AlertTriangle,
   BellPlus,
@@ -16,7 +15,6 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { marked } from "marked";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ApiError, api } from "@/lib/api.ts";
@@ -32,7 +30,6 @@ import {
 } from "@/lib/queries.ts";
 import { keys } from "@/lib/query-keys.ts";
 import { canDownscale, downscaleImage } from "@/lib/resize-image.ts";
-import { sanitizeEmailHtml } from "@/lib/sanitize-email.ts";
 import { canStripMetadata, stripImageMetadata } from "@/lib/strip-image-metadata.ts";
 import { fillTemplate, type TemplateContext } from "@/lib/templates.ts";
 import {
@@ -67,7 +64,27 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Textarea } from "./ui/textarea.tsx";
 import { ToggleGroup, ToggleItem } from "./ui/toggle-group.tsx";
 
-marked.setOptions({ breaks: true, gfm: true });
+// DOMPurify + marked (~140KB) are only needed once a composer is actually open,
+// so they're loaded on demand rather than dragged into the initial bundle that
+// every (including read-only) user pays for on first paint. The promise is
+// memoized so both ComposeForm instances and repeated opens share one load.
+type MarkdownLibs = {
+  marked: typeof import("marked").marked;
+  DOMPurify: typeof import("dompurify").default;
+};
+let markdownLibs: MarkdownLibs | null = null;
+let markdownLibsPromise: Promise<MarkdownLibs> | null = null;
+function loadMarkdownLibs(): Promise<MarkdownLibs> {
+  if (markdownLibs) return Promise.resolve(markdownLibs);
+  markdownLibsPromise ??= Promise.all([import("marked"), import("dompurify")]).then(
+    ([{ marked }, { default: DOMPurify }]) => {
+      marked.setOptions({ breaks: true, gfm: true });
+      markdownLibs = { marked, DOMPurify };
+      return markdownLibs;
+    },
+  );
+  return markdownLibsPromise;
+}
 
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const MAX_ATTACHMENTS = 20;
@@ -475,10 +492,23 @@ export function ComposeForm({
     ...messageBodyQuery(quoteRef?.messageId ?? ""),
     enabled: Boolean(quoteRef),
   });
-  const quotedHtml = useMemo(
-    () => (origBody.data?.html ? sanitizeEmailHtml(origBody.data.html) : null),
-    [origBody.data?.html],
-  );
+  // sanitize-email pulls in DOMPurify; loaded on demand (only a reply/forward
+  // has a quoted body to sanitize) so it stays out of the first-paint chunk.
+  const [quotedHtml, setQuotedHtml] = useState<string | null>(null);
+  useEffect(() => {
+    const raw = origBody.data?.html;
+    if (!raw) {
+      setQuotedHtml(null);
+      return;
+    }
+    let cancelled = false;
+    void import("@/lib/sanitize-email.ts").then(({ sanitizeEmailHtml }) => {
+      if (!cancelled) setQuotedHtml(sanitizeEmailHtml(raw));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [origBody.data?.html]);
   const [preview, setPreview] = useState(false);
   const [attachments, setAttachments] = useState<UploadedAttachment[]>(d?.attachments ?? []);
   const [uploading, setUploading] = useState(0);
@@ -670,35 +700,45 @@ export function ComposeForm({
     return draftIdRef.current;
   }, [currentSnapshot, flush]);
 
+  // Pull in marked/DOMPurify as soon as a composer mounts so the markdown
+  // preview and the sanitized send path have them ready by the time they fire.
+  const [mdLibs, setMdLibs] = useState<MarkdownLibs | null>(markdownLibs);
+  useEffect(() => {
+    if (!mdLibs) void loadMarkdownLibs().then(setMdLibs);
+  }, [mdLibs]);
+
   const previewHtml = useMemo(() => {
-    if (mode !== "markdown" || !text.trim()) return "";
-    const rendered = marked.parse(text, { async: false }) as string;
-    return DOMPurify.sanitize(rendered, { USE_PROFILES: { html: true } });
-  }, [mode, text]);
+    if (mode !== "markdown" || !text.trim() || !mdLibs) return "";
+    const rendered = mdLibs.marked.parse(text, { async: false }) as string;
+    return mdLibs.DOMPurify.sanitize(rendered, { USE_PROFILES: { html: true } });
+  }, [mode, text, mdLibs]);
 
   // Resolve the editor state into the wire body: plain text → text only;
   // markdown → text source + rendered html; rich → sanitized html plus a derived
   // text alternative for non-HTML clients. Shared by immediate + scheduled send.
-  const buildBody = useCallback((): {
+  const buildBody = useCallback(async (): Promise<{
     text: string | undefined;
     html: string | undefined;
-  } => {
+  }> => {
     if (mode === "html") {
       const { html: resolved } = resolveInlineImages(html);
-      const htmlBody = resolved.trim()
-        ? DOMPurify.sanitize(resolved, { USE_PROFILES: { html: true } })
-        : undefined;
-      return { html: htmlBody, text: htmlBody ? htmlToText(html) || undefined : undefined };
+      if (!resolved.trim()) return { html: undefined, text: undefined };
+      const { DOMPurify } = await loadMarkdownLibs();
+      const htmlBody = DOMPurify.sanitize(resolved, { USE_PROFILES: { html: true } });
+      return { html: htmlBody, text: htmlToText(html) || undefined };
     }
     if (mode === "markdown") {
-      return { text, html: text.trim() ? previewHtml : undefined };
+      if (!text.trim()) return { text, html: undefined };
+      const { marked, DOMPurify } = await loadMarkdownLibs();
+      const rendered = marked.parse(text, { async: false }) as string;
+      return { text, html: DOMPurify.sanitize(rendered, { USE_PROFILES: { html: true } }) };
     }
     return { text, html: undefined };
-  }, [mode, html, text, previewHtml]);
+  }, [mode, html, text]);
 
   // The full outbound payload — identical whether the send fires now or later.
-  const buildSendPayload = useCallback(() => {
-    const body = buildBody();
+  const buildSendPayload = useCallback(async () => {
+    const body = await buildBody();
     const ccList = collectRecipients(cc);
     const bccList = collectRecipients(bcc);
     // Drop inline images whose <img> was removed from the body; they're dead
@@ -751,7 +791,7 @@ export function ComposeForm({
     mutationFn: async () =>
       api<{ messageId: string; threadId: string; pgpWarning?: string }>("/api/messages/send", {
         method: "POST",
-        body: JSON.stringify(buildSendPayload()),
+        body: JSON.stringify(await buildSendPayload()),
       }),
     onSuccess: async (res) => {
       if (res?.pgpWarning) toast.warning(res.pgpWarning);
@@ -779,7 +819,7 @@ export function ComposeForm({
       if (!id) throw new Error("Nothing to schedule");
       return api(`/api/drafts/${id}/schedule`, {
         method: "POST",
-        body: JSON.stringify({ sendAt, payload: buildSendPayload() }),
+        body: JSON.stringify({ sendAt, payload: await buildSendPayload() }),
       });
     },
     onSuccess: (_res, sendAt) => {
