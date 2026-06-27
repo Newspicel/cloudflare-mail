@@ -123,48 +123,42 @@ export function threadsRoutes() {
     );
     const inSpam = and(inMailbox, eq(thread.spam, true), eq(thread.trashed, false));
 
-    const cnt = async (cond: SQL | undefined): Promise<number> => {
-      const rows = await db.select({ c: count() }).from(thread).where(cond);
-      return rows[0]?.c ?? 0;
-    };
-    const draftCnt = async (): Promise<number> => {
-      // Drafts are per-author; the "All" view counts the user's drafts across
-      // every mailbox, otherwise just the one.
-      const where = isAll
-        ? eq(draft.userId, user.id)
-        : and(eq(draft.mailboxId, mailboxId), eq(draft.userId, user.id));
-      const rows = await db.select({ c: count() }).from(draft).where(where);
-      return rows[0]?.c ?? 0;
-    };
+    // Every folder badge is a count over the same `thread` rows, so fold them
+    // into one scan with conditional sums instead of nine separate COUNT(*)
+    // round-trips. Each correlated EXISTS is evaluated once per row in that pass.
+    const unread = gt(thread.unreadCount, 0);
+    const inLive = hasMessage(and(eq(message.direction, "in"), LIVE_MSG));
+    const aggP = db
+      .select({
+        inbox: sumIf(and(active, inLive)!),
+        inboxUnread: sumIf(and(active, inLive, unread)!),
+        sent: sumIf(and(active, hasMessage(and(eq(message.direction, "out"), LIVE_MSG)))!),
+        marked: sumIf(and(active, hasMessage(and(STARRED_MSG, LIVE_MSG)))!),
+        spam: sumIf(inSpam!),
+        spamUnread: sumIf(and(inSpam, unread)!),
+        trash: sumIf(trashFilter!),
+        all: count(),
+      })
+      .from(thread)
+      .where(inMailbox);
+    // Drafts are per-author and live in their own table; the "All" view counts
+    // the user's drafts across every mailbox, otherwise just the one.
+    const draftWhere = isAll
+      ? eq(draft.userId, user.id)
+      : and(eq(draft.mailboxId, mailboxId), eq(draft.userId, user.id));
+    const draftP = db.select({ c: count() }).from(draft).where(draftWhere);
 
-    const [inbox, inboxUnread, sent, marked, spam, spamUnread, trash, all, drafts] =
-      await Promise.all([
-        cnt(and(active, hasMessage(and(eq(message.direction, "in"), LIVE_MSG)))),
-        cnt(
-          and(
-            active,
-            hasMessage(and(eq(message.direction, "in"), LIVE_MSG)),
-            gt(thread.unreadCount, 0),
-          ),
-        ),
-        cnt(and(active, hasMessage(and(eq(message.direction, "out"), LIVE_MSG)))),
-        cnt(and(active, hasMessage(and(STARRED_MSG, LIVE_MSG)))),
-        cnt(inSpam),
-        cnt(and(inSpam, gt(thread.unreadCount, 0))),
-        cnt(and(inMailbox, trashFilter)),
-        cnt(inMailbox),
-        draftCnt(),
-      ]);
+    const [[agg], draftRows] = await Promise.all([aggP, draftP]);
 
     return c.json({
       counts: {
-        inbox: { total: inbox, unread: inboxUnread },
-        drafts: { total: drafts, unread: 0 },
-        sent: { total: sent, unread: 0 },
-        marked: { total: marked, unread: 0 },
-        spam: { total: spam, unread: spamUnread },
-        trash: { total: trash, unread: 0 },
-        all: { total: all, unread: 0 },
+        inbox: { total: n(agg?.inbox), unread: n(agg?.inboxUnread) },
+        drafts: { total: draftRows[0]?.c ?? 0, unread: 0 },
+        sent: { total: n(agg?.sent), unread: 0 },
+        marked: { total: n(agg?.marked), unread: 0 },
+        spam: { total: n(agg?.spam), unread: n(agg?.spamUnread) },
+        trash: { total: n(agg?.trash), unread: 0 },
+        all: { total: n(agg?.all), unread: 0 },
       },
     } satisfies FolderCountsResponseDto);
   });
@@ -338,6 +332,11 @@ function emptyCounts(): FolderCountsResponseDto["counts"] {
 function hasMessage(cond: SQL | undefined): SQL {
   return sql`exists (select 1 from ${message} where ${message.threadId} = ${thread.id}${cond ? sql` and ${cond}` : sql``})`;
 }
+
+// Conditional count for a single-scan badge aggregate, plus a guard coercing a
+// nullable SUM (no matching rows → null) to a number.
+const sumIf = (cond: SQL) => sql<number>`sum(case when ${cond} then 1 else 0 end)`;
+const n = (v: number | null | undefined): number => Number(v ?? 0);
 
 // Message-level flag predicates. LIVE excludes individually-trashed messages so
 // the active folders ignore them; TRASHED surfaces a thread in the Trash view.

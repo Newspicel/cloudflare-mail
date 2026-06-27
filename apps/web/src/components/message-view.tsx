@@ -288,7 +288,18 @@ export function MessageView({
       if (pinned) container.scrollTop = target;
     };
     align();
-    const ro = new ResizeObserver(align);
+    // A resize can fire one callback per observed child in a single frame;
+    // coalesce them into a single align() on the next animation frame so the
+    // layout reads/writes run once, not once per message.
+    let raf = 0;
+    const schedule = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        align();
+      });
+    };
+    const ro = new ResizeObserver(schedule);
     // The spacer is sized by `align`; observing it would feed its own resize
     // back in, so only watch the message cards.
     for (const child of Array.from(container.children))
@@ -296,6 +307,7 @@ export function MessageView({
     const release = () => {
       pinned = false;
       ro.disconnect();
+      if (raf) cancelAnimationFrame(raf);
     };
     const opts: AddEventListenerOptions = { passive: true };
     container.addEventListener("wheel", release, opts);
@@ -303,6 +315,7 @@ export function MessageView({
     container.addEventListener("keydown", release);
     return () => {
       ro.disconnect();
+      if (raf) cancelAnimationFrame(raf);
       container.removeEventListener("wheel", release, opts);
       container.removeEventListener("touchstart", release, opts);
       container.removeEventListener("keydown", release);
