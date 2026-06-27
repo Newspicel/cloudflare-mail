@@ -210,14 +210,16 @@ export function mailboxesRoutes() {
       },
     });
     if (!mb) throw new HTTPException(404, { message: "not found" });
-    const usage = await db.query.mailboxSpamUsage.findFirst({
-      where: eq(mailboxSpamUsage.mailboxId, id),
-      columns: { period: true, calls: true, tokensIn: true, tokensOut: true },
-    });
-    const aiUsage = await db.query.mailboxAiUsage.findFirst({
-      where: eq(mailboxAiUsage.mailboxId, id),
-      columns: { period: true, calls: true, tokensIn: true, tokensOut: true },
-    });
+    const [usage, aiUsage] = await Promise.all([
+      db.query.mailboxSpamUsage.findFirst({
+        where: eq(mailboxSpamUsage.mailboxId, id),
+        columns: { period: true, calls: true, tokensIn: true, tokensOut: true },
+      }),
+      db.query.mailboxAiUsage.findFirst({
+        where: eq(mailboxAiUsage.mailboxId, id),
+        columns: { period: true, calls: true, tokensIn: true, tokensOut: true },
+      }),
+    ]);
     return c.json({
       id: mb.id,
       type: mb.type,

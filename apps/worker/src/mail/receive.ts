@@ -87,15 +87,12 @@ export async function handleInbound(
     // No direct mailbox — fall back to an inbound-only redirect/alias. An exact
     // local part wins over the domain catch-all ("*"), which only fires when no
     // mailbox and no specific redirect match.
+    const reds = await db.query.redirect.findMany({
+      where: and(eq(redirect.domainId, dom.id), inArray(redirect.localPart, [baseLocal, "*"])),
+      columns: { localPart: true, targetMailboxId: true },
+    });
     const red =
-      (await db.query.redirect.findFirst({
-        where: and(eq(redirect.domainId, dom.id), eq(redirect.localPart, baseLocal)),
-        columns: { targetMailboxId: true },
-      })) ??
-      (await db.query.redirect.findFirst({
-        where: and(eq(redirect.domainId, dom.id), eq(redirect.localPart, "*")),
-        columns: { targetMailboxId: true },
-      }));
+      reds.find((r) => r.localPart === baseLocal) ?? reds.find((r) => r.localPart === "*");
     if (red) {
       mb = await db.query.mailbox.findFirst({
         where: eq(mailbox.id, red.targetMailboxId),
@@ -247,28 +244,35 @@ export async function handleInbound(
   await applyRuleActions(db, outcome, mb.id, messageId, threadId);
 
   // A reply landed in this thread — satisfy any pending follow-up reminders
-  // ("remind me if no reply") so they never fire.
-  await db
-    .update(reminder)
-    .set({ status: "cancelled", updatedAt: new Date() })
-    .where(
-      and(
-        eq(reminder.threadId, threadId),
-        eq(reminder.kind, "follow_up"),
-        eq(reminder.status, "pending"),
+  // ("remind me if no reply") so they never fire. Best-effort, off the delivery
+  // path (invariant 8).
+  await defer(
+    ctx,
+    db
+      .update(reminder)
+      .set({ status: "cancelled", updatedAt: new Date() })
+      .where(
+        and(
+          eq(reminder.threadId, threadId),
+          eq(reminder.kind, "follow_up"),
+          eq(reminder.status, "pending"),
+        ),
       ),
-    );
+  );
 
   // Best-effort outbound rule actions (forward / auto-reply). Never block
   // delivery — the message is already stored (invariant 8).
-  await runRuleSends(env, db, {
-    mailboxId: mb.id,
-    selfAddr: `${baseLocal}@${domainName}`,
-    domainName,
-    outcome,
-    parsed: effectiveParsed,
-    envelopeFrom: msg.from,
-  }).catch(() => {});
+  await defer(
+    ctx,
+    runRuleSends(env, db, {
+      mailboxId: mb.id,
+      selfAddr: `${baseLocal}@${domainName}`,
+      domainName,
+      outcome,
+      parsed: effectiveParsed,
+      envelopeFrom: msg.from,
+    }),
+  );
 
   const memberIds = await db
     .select({ userId: mailboxMember.userId })
@@ -276,12 +280,15 @@ export async function handleInbound(
     .where(eq(mailboxMember.mailboxId, mb.id));
   const userIds = new Set<string>([mb.ownerUserId, ...memberIds.map((m) => m.userId)]);
 
-  await broadcastToUsers(env, [...userIds], {
-    type: "new_message",
-    mailboxId: mb.id,
-    messageId,
-    threadId,
-  });
+  await defer(
+    ctx,
+    broadcastToUsers(env, [...userIds], {
+      type: "new_message",
+      mailboxId: mb.id,
+      messageId,
+      threadId,
+    }),
+  );
 
   // Best-effort AI summary + category. Runs after delivery is committed so it
   // never adds latency to the SMTP accept, nor blocks on failure (invariant 8).
@@ -319,6 +326,24 @@ export async function handleInbound(
       threadId,
     });
   }
+}
+
+// Run a best-effort side effect off the SMTP-accept path. With an
+// ExecutionContext (the live email handler) the work is handed to waitUntil so
+// it runs after the response without adding latency; without one (tests, replay)
+// we await it inline. Errors are swallowed either way — these steps must never
+// fail delivery (invariant 8). The D1 handle stays valid past handler return, so
+// waitUntil work can keep using `db`.
+function defer(ctx: ExecutionContext | undefined, work: PromiseLike<unknown>): Promise<void> {
+  const safe = Promise.resolve(work).then(
+    () => {},
+    () => {},
+  );
+  if (ctx) {
+    ctx.waitUntil(safe);
+    return Promise.resolve();
+  }
+  return safe;
 }
 
 function addrList(
