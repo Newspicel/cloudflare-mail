@@ -18,14 +18,13 @@ export function contactsRoutes() {
     const db = dbFromCtx(c);
     const u = c.get("user")!;
 
-    const owned = await db
-      .select({ id: mailbox.id })
-      .from(mailbox)
-      .where(eq(mailbox.ownerUserId, u.id));
-    const member = await db
-      .select({ id: mailboxMember.mailboxId })
-      .from(mailboxMember)
-      .where(eq(mailboxMember.userId, u.id));
+    const [owned, member] = await Promise.all([
+      db.select({ id: mailbox.id }).from(mailbox).where(eq(mailbox.ownerUserId, u.id)),
+      db
+        .select({ id: mailboxMember.mailboxId })
+        .from(mailboxMember)
+        .where(eq(mailboxMember.userId, u.id)),
+    ]);
     const accessibleIds = [...new Set([...owned.map((m) => m.id), ...member.map((m) => m.id)])];
 
     const map = new Map<string, { address: string; name?: string }>();

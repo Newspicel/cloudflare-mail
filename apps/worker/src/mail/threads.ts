@@ -1,7 +1,7 @@
 import type { DB } from "@cfmail/db";
 import { message, thread } from "@cfmail/db/schema";
 import { Flag } from "@cfmail/shared/flags";
-import { and, count, desc, eq, gte, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { normalizeSubject } from "./mime.ts";
 
 // Same prefixes normalizeSubject strips — used to tell a reply ("Re: X") from a
@@ -45,26 +45,26 @@ export async function resolveThreadId(
   ].filter(Boolean);
 
   if (headerIds.length) {
-    const headerHits = await Promise.all(
-      headerIds.map((mid) =>
-        db.query.message.findFirst({
-          where: and(eq(message.mailboxId, input.mailboxId), eq(message.messageIdHdr, mid)),
-          columns: { threadId: true },
-        }),
-      ),
-    );
+    const headerHits = await db.query.message.findMany({
+      where: and(eq(message.mailboxId, input.mailboxId), inArray(message.messageIdHdr, headerIds)),
+      columns: { messageIdHdr: true, threadId: true },
+    });
     // A header match alone is forgeable: anyone who learns a Message-ID (from a
     // reply, NDR, or list archive) can send In-Reply-To: <that-id> to graft
     // into the thread. Require a corroborating signal — the sender is already a
     // participant of the matched thread and the thread is recent — before
     // trusting the splice. Otherwise fall through and treat it as new mail.
-    const candidates = [...new Set(headerHits.filter((h) => h).map((h) => h!.threadId))];
+    const byHeader = new Map(headerHits.map((h) => [h.messageIdHdr, h.threadId]));
+    // Keep header order so the earliest-referenced thread wins the tie.
+    const candidates = [
+      ...new Set(headerIds.map((mid) => byHeader.get(mid)).filter((t): t is string => !!t)),
+    ];
     if (candidates.length) {
       // Our own outbound mail is trusted; inbound must be corroborated.
       if (input.trustHeaders) return { threadId: candidates[0]!, joinedByHeader: true };
-      const ok = await Promise.all(candidates.map((tid) => corroboratesThread(db, tid, input)));
-      const idx = ok.findIndex(Boolean);
-      if (idx >= 0) return { threadId: candidates[idx]!, joinedByHeader: true };
+      const corroborated = await corroboratedThreadIds(db, candidates, input);
+      const hit = candidates.find((tid) => corroborated.has(tid));
+      if (hit) return { threadId: hit, joinedByHeader: true };
     }
   }
 
@@ -137,21 +137,26 @@ export async function resolveThreadId(
 
 // A header match is only trusted when the inbound sender is already a known
 // participant of the matched thread (participant signal) and the thread is
-// still recent (recency signal). Either missing → don't splice.
-async function corroboratesThread(
+// still recent (recency signal). Either missing → don't splice. Batched over
+// all candidates so a long References chain stays one query, not one per row.
+async function corroboratedThreadIds(
   db: DB,
-  threadId: string,
+  threadIds: string[],
   input: ResolveThreadInput,
-): Promise<boolean> {
-  const t = await db.query.thread.findFirst({
-    where: eq(thread.id, threadId),
-    columns: { participants: true, lastMsgAt: true },
-  });
-  if (!t) return false;
-  if (t.lastMsgAt.getTime() < Date.now() - HEADER_MATCH_WINDOW_SECONDS * 1000) return false;
+): Promise<Set<string>> {
   const from = input.fromAddr.trim().toLowerCase();
-  if (!from) return false;
-  return (t.participants ?? []).some((p) => p.address.trim().toLowerCase() === from);
+  if (!from) return new Set();
+  const rows = await db.query.thread.findMany({
+    where: inArray(thread.id, threadIds),
+    columns: { id: true, participants: true, lastMsgAt: true },
+  });
+  const cutoff = Date.now() - HEADER_MATCH_WINDOW_SECONDS * 1000;
+  const ok = new Set<string>();
+  for (const t of rows) {
+    if (t.lastMsgAt.getTime() < cutoff) continue;
+    if ((t.participants ?? []).some((p) => p.address.trim().toLowerCase() === from)) ok.add(t.id);
+  }
+  return ok;
 }
 
 async function deriveThreadId(mailboxId: string, rootHeader: string): Promise<string> {
