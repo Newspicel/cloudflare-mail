@@ -17,6 +17,8 @@ import { bumpThread, resolveThreadId } from "./threads.ts";
 
 export const MAX_EMAIL_BYTES = 25 * 1024 * 1024;
 
+const utf8Encoder = new TextEncoder();
+
 export interface IngestOptions {
   mailboxId: string;
   raw: ArrayBuffer;
@@ -163,7 +165,7 @@ export async function ingestRaw(env: Env, db: DB, opts: IngestOptions): Promise<
       const attKey = `att/${messageId}/${idx}-${sanitizeFilename(att.filename ?? `file-${idx}`)}`;
       const bytes =
         typeof att.content === "string"
-          ? new TextEncoder().encode(att.content)
+          ? utf8Encoder.encode(att.content)
           : new Uint8Array(att.content);
       await env.BLOBS.put(attKey, bytes, {
         httpMetadata: { contentType: att.mimeType ?? "application/octet-stream" },

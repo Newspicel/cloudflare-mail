@@ -29,11 +29,11 @@ export async function collectThreadBlobKeys(db: DB, threadIds: string[]): Promis
       .innerJoin(message, eq(message.id, attachment.messageId))
       .where(inArray(message.threadId, ids));
 
-    keys.push(
-      ...msgs.map((m) => m.rawR2Key).filter((k): k is string => Boolean(k)),
-      ...msgs.map((m) => m.plainR2Key).filter((k): k is string => Boolean(k)),
-      ...atts.map((a) => a.r2Key),
-    );
+    for (const m of msgs) {
+      if (m.rawR2Key) keys.push(m.rawR2Key);
+      if (m.plainR2Key) keys.push(m.plainR2Key);
+    }
+    for (const a of atts) keys.push(a.r2Key);
   }
   return keys;
 }

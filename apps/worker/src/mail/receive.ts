@@ -33,6 +33,9 @@ import { runRuleSends } from "./rule-sends.ts";
 import { evaluateRules, type RuleOutcome } from "./rules.ts";
 import { evaluateSpam, type SpamEvaluation } from "./spam.ts";
 
+const latin1Decoder = new TextDecoder("latin1");
+const utf8Encoder = new TextEncoder();
+
 export async function handleInbound(
   msg: ForwardableEmailMessage,
   env: Env,
@@ -156,7 +159,7 @@ export async function handleInbound(
   let effectiveParsed = parsed;
   let pgp: IngestOptions["pgp"];
   if (mb.pgpMode !== "off") {
-    const rawText = new TextDecoder("latin1").decode(raw);
+    const rawText = latin1Decoder.decode(raw);
     const shape = detectPgp(rawText);
     if ((shape.encrypted || shape.signed) && mb.pgpPrivateKeyWrapped && mb.pgpPassphraseWrapped) {
       const fromAddr = parsed.from?.address?.toLowerCase();
@@ -182,16 +185,22 @@ export async function handleInbound(
         signedBy: res.signedBy,
       };
       if (res.decryptedRaw) {
-        const inner = await parseMime(res.decryptedRaw);
-        // Keep the outer envelope/threading headers but take the body +
-        // attachments from the decrypted inner MIME.
-        effectiveParsed = {
-          ...parsed,
-          text: inner.text,
-          html: inner.html,
-          attachments: inner.attachments,
-        };
-        pgp.plainRaw = new TextEncoder().encode(res.decryptedRaw);
+        // Keep the outer envelope/threading headers but swap in the decrypted
+        // body. PGP/MIME decrypts to a full MIME entity (re-parse for body +
+        // attachments); inline PGP decrypts to bare plaintext (use it verbatim —
+        // no second MIME parse).
+        if (res.decryptedMime) {
+          const inner = await parseMime(res.decryptedRaw);
+          effectiveParsed = {
+            ...parsed,
+            text: inner.text,
+            html: inner.html,
+            attachments: inner.attachments,
+          };
+        } else {
+          effectiveParsed = { ...parsed, text: res.decryptedRaw, html: undefined, attachments: [] };
+        }
+        pgp.plainRaw = utf8Encoder.encode(res.decryptedRaw);
       }
     }
     // TOFU: capture an attached/inline sender public key for future encryption.

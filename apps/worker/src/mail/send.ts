@@ -18,6 +18,8 @@ import {
 } from "./pgp.ts";
 import { bumpThread, resolveThreadId } from "./threads.ts";
 
+const utf8Encoder = new TextEncoder();
+
 export async function sendFromMailbox(
   env: Env,
   db: DB,
@@ -228,7 +230,7 @@ export async function sendFromMailbox(
       receivedAt: null,
       sentAt,
       rawR2Key: rawKey,
-      sizeBytes: new TextEncoder().encode(raw).byteLength,
+      sizeBytes: utf8Encoder.encode(raw).byteLength,
       pgpEncrypted,
       pgpSigned,
     }),
