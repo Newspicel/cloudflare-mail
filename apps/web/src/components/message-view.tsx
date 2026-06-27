@@ -453,7 +453,7 @@ export function MessageView({
         {!readOnly && ai.aiOn && <ThreadAiResults ai={ai} />}
 
         <div className="relative flex min-h-0 flex-1 flex-col">
-          <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-3 sm:p-4">
+          <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-3 sm:space-y-4 sm:p-4">
             {visibleMessages.map((m, i) => (
               <MessageCard
                 key={m.id}
