@@ -231,15 +231,17 @@ async function loadLabelAndMessage(
   labelId: string,
   messageId: string,
 ): Promise<{ mailboxId: string }> {
-  const lab = await db.query.label.findFirst({
-    where: eq(label.id, labelId),
-    columns: { mailboxId: true },
-  });
+  const [lab, msg] = await Promise.all([
+    db.query.label.findFirst({
+      where: eq(label.id, labelId),
+      columns: { mailboxId: true },
+    }),
+    db.query.message.findFirst({
+      where: eq(message.id, messageId),
+      columns: { mailboxId: true },
+    }),
+  ]);
   if (!lab) throw new HTTPException(404, { message: "label not found" });
-  const msg = await db.query.message.findFirst({
-    where: eq(message.id, messageId),
-    columns: { mailboxId: true },
-  });
   if (!msg) throw new HTTPException(404, { message: "message not found" });
   if (msg.mailboxId !== lab.mailboxId) {
     throw new HTTPException(400, { message: "label/message mailbox mismatch" });
