@@ -146,6 +146,7 @@ function verdictRank(v: SpamVerdict): number {
 // ─── Authentication-Results parsing ─────────────────────────────────────────
 
 const AUTH_METHODS = ["spf", "dkim", "dmarc"] as const;
+const AUTH_METHOD_RE = new Map(AUTH_METHODS.map((m) => [m, new RegExp(`\\b${m}=(\\w+)`)]));
 
 export function parseAuthResults(parsed: ParsedEmail): AuthResult {
   const headers = parsed.headers ?? [];
@@ -157,7 +158,7 @@ export function parseAuthResults(parsed: ParsedEmail): AuthResult {
   const out: AuthResult = {};
   for (const m of AUTH_METHODS) {
     // e.g. "spf=pass", "dkim=fail (...)", "dmarc=none"
-    const match = combined.match(new RegExp(`\\b${m}=(\\w+)`));
+    const match = combined.match(AUTH_METHOD_RE.get(m)!);
     if (match) out[m] = match[1];
   }
 

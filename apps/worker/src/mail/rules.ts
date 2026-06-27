@@ -153,25 +153,38 @@ function matchOp(haystack: string, op: RuleCondition["op"], value: string): bool
   }
 }
 
+// Compiled patterns are cached across calls — rule sets are evaluated against
+// many messages, so the same glob/regex string recompiles otherwise.
+const wildcardCache = new Map<string, RegExp | null>();
+const safeRegexCache = new Map<string, RegExp | null>();
+
 // Compile a `*`/`?` glob to an anchored, linear regex (all other metacharacters
 // escaped) — no backtracking blow-up. Returns null only if compilation throws.
 function wildcardRegex(glob: string): RegExp | null {
+  if (wildcardCache.has(glob)) return wildcardCache.get(glob) ?? null;
   const body = glob.replace(/[.*+?^${}()|[\]\\]/g, (ch) =>
     ch === "*" ? ".*" : ch === "?" ? "." : `\\${ch}`,
   );
+  let re: RegExp | null;
   try {
-    return new RegExp(`^${body}$`);
+    re = new RegExp(`^${body}$`);
   } catch {
-    return null;
+    re = null;
   }
+  wildcardCache.set(glob, re);
+  return re;
 }
 
 // User regex is opt-in power matching; invalid patterns (or any throw) match
 // nothing rather than crashing receive. Case-insensitive by default.
 function safeRegex(pattern: string): RegExp | null {
+  if (safeRegexCache.has(pattern)) return safeRegexCache.get(pattern) ?? null;
+  let re: RegExp | null;
   try {
-    return new RegExp(pattern, "i");
+    re = new RegExp(pattern, "i");
   } catch {
-    return null;
+    re = null;
   }
+  safeRegexCache.set(pattern, re);
+  return re;
 }
