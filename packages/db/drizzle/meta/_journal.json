@@ -225,6 +225,20 @@
       "when": 1782592920370,
       "tag": "0031_old_ultimo",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1782593929162,
+      "tag": "0032_slimy_texas_twister",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1782594465850,
+      "tag": "0033_colossal_annihilus",
+      "breakpoints": true
     }
   ]
 }

@@ -29,6 +29,7 @@ import {
   importPgpKey,
   type PgpMode,
   updateMailboxSettings,
+  verifyContactKey,
 } from "@cfmail/shared/schemas";
 import { zValidator } from "@hono/zod-validator";
 import { and, count, eq, gt, inArray, ne, or, sql } from "drizzle-orm";
@@ -188,6 +189,7 @@ export function mailboxesRoutes() {
         pgpMode: true,
         pgpFingerprint: true,
         pgpPublicKey: true,
+        pgpAutoFetch: true,
       },
     });
     if (!mb) throw new HTTPException(404, { message: "not found" });
@@ -229,6 +231,7 @@ export function mailboxesRoutes() {
       pgpFingerprint: mb.pgpFingerprint,
       pgpPublicKey: mb.pgpPublicKey,
       pgpConfigured: Boolean(mb.pgpPublicKey),
+      pgpAutoFetch: mb.pgpAutoFetch,
     } satisfies MailboxSettingsDto);
   });
 
@@ -255,6 +258,7 @@ export function mailboxesRoutes() {
       signature: string | null;
       replyTo: string | null;
       pgpMode: PgpMode;
+      pgpAutoFetch: boolean;
     }> = {};
     if (body.displayName !== undefined) {
       patch.displayName = body.displayName?.trim() ? body.displayName.trim() : null;
@@ -271,6 +275,9 @@ export function mailboxesRoutes() {
         throw new HTTPException(400, { message: "generate or import a PGP key first" });
       }
       patch.pgpMode = body.pgpMode;
+    }
+    if (body.pgpAutoFetch !== undefined) {
+      patch.pgpAutoFetch = body.pgpAutoFetch;
     }
     if (Object.keys(patch).length === 0) return c.json({ ok: true });
 
@@ -348,7 +355,15 @@ export function mailboxesRoutes() {
     await requirePerm(db, u.id, id, Perm.READ);
     const rows = await db.query.contactKey.findMany({
       where: eq(contactKey.mailboxId, id),
-      columns: { id: true, email: true, fingerprint: true, source: true, createdAt: true },
+      columns: {
+        id: true,
+        email: true,
+        fingerprint: true,
+        source: true,
+        verified: true,
+        expiresAt: true,
+        createdAt: true,
+      },
     });
     return c.json({
       keys: rows.map((row) => ({
@@ -356,6 +371,8 @@ export function mailboxesRoutes() {
         email: row.email,
         fingerprint: row.fingerprint,
         source: row.source,
+        verified: row.verified,
+        expiresAt: row.expiresAt?.toISOString() ?? null,
         createdAt: row.createdAt.toISOString(),
       })),
     } satisfies ContactKeysDto);
@@ -377,6 +394,8 @@ export function mailboxesRoutes() {
     }
     const email = (body.email ?? info.emails[0])?.toLowerCase();
     if (!email) throw new HTTPException(400, { message: "no email in key; provide one" });
+    // An owner pasting a key is an explicit trust decision — mark it verified.
+    const expiresAt = info.expiresAt ? new Date(info.expiresAt) : null;
     await db
       .insert(contactKey)
       .values({
@@ -386,12 +405,36 @@ export function mailboxesRoutes() {
         publicKey: info.publicArmored,
         fingerprint: info.fingerprint,
         source: "import",
+        verified: true,
+        expiresAt,
       })
       .onConflictDoUpdate({
         target: [contactKey.mailboxId, contactKey.email],
-        set: { publicKey: info.publicArmored, fingerprint: info.fingerprint, source: "import" },
+        set: {
+          publicKey: info.publicArmored,
+          fingerprint: info.fingerprint,
+          source: "import",
+          verified: true,
+          expiresAt,
+        },
       });
     return c.json({ ok: true }, 201);
+  });
+
+  // Mark a contact key verified/unverified — the owner confirming a fingerprint
+  // out-of-band. Lifts an auto-captured (tofu/wkd) key to fully trusted.
+  r.patch("/:id/contacts/:contactId", zValidator("json", verifyContactKey), async (c) => {
+    const db = dbFromCtx(c);
+    const u = c.get("user")!;
+    const id = c.req.param("id");
+    const contactId = c.req.param("contactId");
+    const body = c.req.valid("json");
+    await requirePerm(db, u.id, id, Perm.MANAGE);
+    await db
+      .update(contactKey)
+      .set({ verified: body.verified })
+      .where(and(eq(contactKey.id, contactId), eq(contactKey.mailboxId, id)));
+    return c.json({ ok: true });
   });
 
   r.delete("/:id/contacts/:contactId", async (c) => {

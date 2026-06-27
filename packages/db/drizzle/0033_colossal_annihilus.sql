@@ -1,0 +1,1 @@
+ALTER TABLE `mailbox` ADD `pgp_auto_fetch` integer DEFAULT true NOT NULL;

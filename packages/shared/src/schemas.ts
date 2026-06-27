@@ -444,6 +444,7 @@ export const updateMailboxSettings = z.object({
   aiFeatures: z.boolean().optional(),
   aiTokenCap: z.number().int().positive().max(100_000_000).nullable().optional(),
   pgpMode: pgpMode.optional(),
+  pgpAutoFetch: z.boolean().optional(),
 });
 
 // Import an existing armored PGP private key for a mailbox. Bounded so a giant
@@ -461,6 +462,10 @@ export const addContactKey = z.object({
   email: emailAddress.optional(),
 });
 export type AddContactKeyInput = z.infer<typeof addContactKey>;
+
+// Toggle a stored contact key's verified flag (owner confirmed the fingerprint).
+export const verifyContactKey = z.object({ verified: z.boolean() });
+export type VerifyContactKeyInput = z.infer<typeof verifyContactKey>;
 export type UpdateMailboxSettingsInput = z.infer<typeof updateMailboxSettings>;
 
 export const grantMember = z.object({

@@ -96,12 +96,23 @@ export interface PublicKeyInfo {
   publicArmored: string;
   fingerprint: string;
   emails: string[];
+  // Key expiry as epoch ms, or null when the key never expires.
+  expiresAt: number | null;
 }
 
 // Parse an armored public key for the contact-key store.
 export async function readPublicKeyInfo(armored: string): Promise<PublicKeyInfo> {
   const openpgp = await loadPgp();
-  const key = await openpgp.readKey({ armoredKey: armored });
+  return keyInfo(await openpgp.readKey({ armoredKey: armored }));
+}
+
+// Same, from a binary key (e.g. a WKD response body, which is not armored).
+export async function readPublicKeyInfoBinary(bytes: Uint8Array): Promise<PublicKeyInfo> {
+  const openpgp = await loadPgp();
+  return keyInfo(await openpgp.readKey({ binaryKey: bytes }));
+}
+
+async function keyInfo(key: OpenPGP.Key): Promise<PublicKeyInfo> {
   if (key.isPrivate()) throw new Error("expected a public key, got a private key");
   const emails = key
     .getUserIDs()
@@ -113,7 +124,23 @@ export async function readPublicKeyInfo(armored: string): Promise<PublicKeyInfo>
           .trim() ?? uid.toLowerCase().trim(),
     )
     .filter(Boolean);
-  return { publicArmored: key.armor(), fingerprint: key.getFingerprint(), emails };
+  return {
+    publicArmored: key.armor(),
+    fingerprint: key.getFingerprint(),
+    emails,
+    expiresAt: await keyExpiry(key),
+  };
+}
+
+// openpgp returns a Date, Infinity (never expires), or null (unknown). Normalise
+// to epoch ms or null. Best-effort — any parse hiccup means "no known expiry".
+async function keyExpiry(key: OpenPGP.Key): Promise<number | null> {
+  try {
+    const exp = await key.getExpirationTime();
+    return exp instanceof Date ? exp.getTime() : null;
+  } catch {
+    return null;
+  }
 }
 
 // ─── PGP detection on a received message ────────────────────────────────────

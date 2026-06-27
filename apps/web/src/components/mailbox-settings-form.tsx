@@ -23,6 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select.tsx";
+import { Switch } from "@/components/ui/switch.tsx";
 import { api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
 import { type ImportProgress, runImport } from "@/lib/import.ts";
@@ -47,6 +48,7 @@ interface MailboxSettings {
   pgpFingerprint: string | null;
   pgpPublicKey: string | null;
   pgpConfigured: boolean;
+  pgpAutoFetch: boolean;
 }
 
 interface ImportTarget {
@@ -59,7 +61,9 @@ interface ContactKey {
   id: string;
   email: string;
   fingerprint: string;
-  source: "import" | "tofu";
+  source: "import" | "tofu" | "wkd";
+  verified: boolean;
+  expiresAt: string | null;
   createdAt: string;
 }
 
@@ -412,6 +416,20 @@ function MailboxPgpCard({ mailboxId, settingsKey }: { mailboxId: string; setting
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
+  const setVerified = useMutation({
+    mutationFn: ({ id, verified }: { id: string; verified: boolean }) =>
+      api(`${base}/contacts/${id}`, { method: "PATCH", body: JSON.stringify({ verified }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: contactsKey }),
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
+  const setAutoFetch = useMutation({
+    mutationFn: (pgpAutoFetch: boolean) =>
+      api(`${base}/settings`, { method: "PATCH", body: JSON.stringify({ pgpAutoFetch }) }),
+    onSuccess: refreshSettings,
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
   const contacts = contactsQ.data?.keys ?? [];
 
   return (
@@ -528,35 +546,75 @@ function MailboxPgpCard({ mailboxId, settingsKey }: { mailboxId: string; setting
           </div>
         )}
 
+        <div className="flex items-start justify-between gap-3 border-t pt-4">
+          <div className="min-w-0">
+            <GroupLabel>Auto-discover keys (WKD)</GroupLabel>
+            <p className="mt-1 text-[12px] leading-snug text-muted-foreground">
+              Fetch a recipient's key from their provider when encrypting, and verify signed mail
+              from senders you don't have a key for. Outbound lookups reveal who you email to their
+              provider.
+            </p>
+          </div>
+          <Switch
+            checked={s?.pgpAutoFetch ?? true}
+            disabled={setAutoFetch.isPending || settingsQ.isLoading}
+            onCheckedChange={(v) => setAutoFetch.mutate(v)}
+            aria-label="Auto-discover keys via WKD"
+          />
+        </div>
+
         <div className="space-y-2 border-t pt-4">
           <GroupLabel>Recipient keys</GroupLabel>
           <p className="text-[12px] leading-snug text-muted-foreground">
             Public keys of people you email. Needed to encrypt to them; captured automatically when
-            a signed message includes one.
+            a signed message includes one or via WKD.
           </p>
           {contacts.length > 0 && (
             <ul className="divide-y overflow-hidden rounded-md border">
-              {contacts.map((k) => (
-                <li key={k.id} className="flex items-center justify-between gap-2 px-2.5 py-1.5">
-                  <div className="min-w-0">
-                    <div className="truncate text-[12px]">{k.email}</div>
-                    <div className="truncate font-mono text-[10px] text-muted-foreground">
-                      {shortFp(k.fingerprint)} · {k.source}
+              {contacts.map((k) => {
+                const expired = k.expiresAt != null && new Date(k.expiresAt).getTime() < Date.now();
+                return (
+                  <li key={k.id} className="flex items-center justify-between gap-2 px-2.5 py-1.5">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 text-[12px]">
+                        <span className="truncate">{k.email}</span>
+                        <Badge variant={k.verified ? "success" : "outline"} className="shrink-0">
+                          {k.verified ? "Verified" : "Unverified"}
+                        </Badge>
+                        {expired && (
+                          <Badge variant="destructive" className="shrink-0">
+                            Expired
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="truncate font-mono text-[10px] text-muted-foreground">
+                        {shortFp(k.fingerprint)} · {k.source}
+                      </div>
                     </div>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={async () => {
-                      if (await confirmDelete(`recipient key for ${k.email}`))
-                        removeContact.mutate(k.id);
-                    }}
-                    disabled={removeContact.isPending}
-                  >
-                    Remove
-                  </Button>
-                </li>
-              ))}
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setVerified.mutate({ id: k.id, verified: !k.verified })}
+                        disabled={setVerified.isPending}
+                      >
+                        {k.verified ? "Unverify" : "Mark verified"}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={async () => {
+                          if (await confirmDelete(`recipient key for ${k.email}`))
+                            removeContact.mutate(k.id);
+                        }}
+                        disabled={removeContact.isPending}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           )}
           <div className="space-y-2 rounded-md border bg-muted/30 p-3">

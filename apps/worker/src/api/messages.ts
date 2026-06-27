@@ -1,14 +1,22 @@
-import { attachment, blocklist, blockRequest, message, thread } from "@cfmail/db/schema";
+import {
+  attachment,
+  blocklist,
+  blockRequest,
+  contactKey,
+  mailbox,
+  message,
+  thread,
+} from "@cfmail/db/schema";
 import { Flag, setFlag } from "@cfmail/shared/flags";
 import { Perm } from "@cfmail/shared/permissions";
-import type { MessageBodyDto, SmartReplyDto } from "@cfmail/shared/responses";
+import type { MessageBodyDto, SmartReplyDto, TrustSenderDto } from "@cfmail/shared/responses";
 import { createBlockRequest, sendMessage } from "@cfmail/shared/schemas";
 import { zValidator } from "@hono/zod-validator";
 import { and, count, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { getOrCreateAuthSecret } from "../config.ts";
+import { getOrCreateAuthSecret, getOrCreatePgpMasterKey } from "../config.ts";
 import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
 import { broadcastToUsers } from "../hub.ts";
@@ -25,10 +33,18 @@ import {
   verifyProxyUrl,
 } from "../mail/img-proxy.ts";
 import { parseMime } from "../mail/mime.ts";
+import {
+  decryptVerify,
+  extractPublicKeyBlock,
+  type PublicKeyInfo,
+  readPublicKeyInfo,
+  unwrapSecret,
+} from "../mail/pgp.ts";
 import { buildQuote } from "../mail/quote.ts";
 import { sendFromMailbox } from "../mail/send.ts";
 import { recomputeThreadAfterMessageDelete, recomputeThreadUnread } from "../mail/threads.ts";
 import { performUnsubscribe } from "../mail/unsubscribe.ts";
+import { fetchWkdKey } from "../mail/wkd.ts";
 import { requireUser } from "../middleware.ts";
 import { requireEntityAccess, requirePerm } from "../permissions.ts";
 
@@ -265,6 +281,105 @@ export function messagesRoutes() {
       attachments: atts,
       calendar: extractCalendar(parsed),
     } satisfies MessageBodyDto);
+  });
+
+  // Trust an inbound sender's PGP key: extract it from the stored message (an
+  // attached/inline public key) or fetch it via WKD, save it as a contact key,
+  // and re-verify this message's signature against it. Turns a "signed — can't
+  // verify" or "new key" message into a resolved, verified one. Perm.MANAGE — it
+  // changes the mailbox's trust state.
+  r.post("/:id/pgp/trust-sender", async (c) => {
+    const db = dbFromCtx(c);
+    const user = c.get("user")!;
+    const id = c.req.param("id");
+    const msg = await requireEntityAccess(db, user.id, message, id, Perm.MANAGE);
+    const sender = msg.fromAddr.toLowerCase();
+    if (msg.direction !== "in") {
+      throw new HTTPException(400, { message: "not an inbound message" });
+    }
+
+    // Read the stored raw once: used both to extract an embedded key and to
+    // re-verify the signature below.
+    let rawText: string | null = null;
+    if (msg.rawR2Key) {
+      const obj = await c.env.BLOBS.get(msg.rawR2Key);
+      if (obj) rawText = new TextDecoder("latin1").decode(await obj.arrayBuffer());
+    }
+
+    // Prefer the key carried in the message; fall back to the sender's WKD.
+    let info: PublicKeyInfo | null = null;
+    let source: "tofu" | "wkd" = "tofu";
+    if (rawText) {
+      const block = extractPublicKeyBlock(rawText);
+      if (block) {
+        try {
+          const parsed = await readPublicKeyInfo(block);
+          if (parsed.emails.includes(sender)) info = parsed;
+        } catch {
+          // not a usable key — fall through to WKD
+        }
+      }
+    }
+    if (!info) {
+      info = await fetchWkdKey(sender);
+      source = "wkd";
+    }
+    if (!info) throw new HTTPException(404, { message: "no public key found for this sender" });
+
+    // Save (or replace, for a rotated key). Auto-discovered → unverified; the
+    // owner can confirm the fingerprint in settings.
+    const expiresAt = info.expiresAt ? new Date(info.expiresAt) : null;
+    await db
+      .insert(contactKey)
+      .values({
+        id: crypto.randomUUID(),
+        mailboxId: msg.mailboxId,
+        email: sender,
+        publicKey: info.publicArmored,
+        fingerprint: info.fingerprint,
+        source,
+        verified: false,
+        expiresAt,
+      })
+      .onConflictDoUpdate({
+        target: [contactKey.mailboxId, contactKey.email],
+        set: {
+          publicKey: info.publicArmored,
+          fingerprint: info.fingerprint,
+          source,
+          verified: false,
+          expiresAt,
+        },
+      });
+
+    // Re-verify this message's signature against the freshly trusted key.
+    let verify = msg.pgpVerify;
+    let signedBy = msg.pgpSignedBy;
+    if (rawText) {
+      const mb = await db.query.mailbox.findFirst({
+        where: eq(mailbox.id, msg.mailboxId),
+        columns: { pgpPrivateKeyWrapped: true, pgpPassphraseWrapped: true },
+      });
+      if (mb?.pgpPrivateKeyWrapped && mb.pgpPassphraseWrapped) {
+        const masterKey = await getOrCreatePgpMasterKey(db);
+        const res = await decryptVerify({
+          rawText,
+          privArmored: await unwrapSecret(masterKey, mb.pgpPrivateKeyWrapped),
+          passphrase: await unwrapSecret(masterKey, mb.pgpPassphraseWrapped),
+          senderPublicKey: info.publicArmored,
+        }).catch(() => null);
+        if (res) {
+          verify = res.verify;
+          signedBy = res.signedBy;
+        }
+      }
+    }
+    await db
+      .update(message)
+      .set({ pgpVerify: verify, pgpSignedBy: signedBy, pgpKeyEvent: null })
+      .where(eq(message.id, id));
+
+    return c.json({ fingerprint: info.fingerprint, source, verify } satisfies TrustSenderDto);
   });
 
   // Fetches a remote image referenced by a message body. Only URLs we signed

@@ -40,7 +40,17 @@ export type Serialized<T> = {
 // ─── Raw-row DTOs ───────────────────────────────────────────────────────────
 
 export type ThreadDto = Serialized<typeof thread.$inferSelect>;
-export type MessageDto = Serialized<typeof message.$inferSelect>;
+// The stored correspondent key matching a message's sender, attached by the
+// thread-detail route so the reader can show which key verified a signature and
+// whether the owner has confirmed it out-of-band.
+export interface MessagePgpKeyDto {
+  fingerprint: string;
+  source: ContactKeySource;
+  verified: boolean;
+}
+export type MessageDto = Serialized<typeof message.$inferSelect> & {
+  pgpKey?: MessagePgpKeyDto | null;
+};
 // The resolved outbound payload + attempt counter stay server-side — drafts only
 // expose `scheduledFor` (pending) and `scheduledError` (terminal failure) so the
 // UI can show/cancel/flag a scheduled send.
@@ -291,6 +301,8 @@ export interface MailboxSettingsDto {
   pgpFingerprint: string | null;
   pgpPublicKey: string | null;
   pgpConfigured: boolean;
+  // Auto-discover correspondent keys via WKD (see schema). Toggle in settings.
+  pgpAutoFetch: boolean;
 }
 
 export interface ContactKeyDto {
@@ -298,6 +310,8 @@ export interface ContactKeyDto {
   email: string;
   fingerprint: string;
   source: ContactKeySource;
+  verified: boolean;
+  expiresAt: string | null;
   createdAt: string;
 }
 export interface ContactKeysDto {
@@ -307,6 +321,12 @@ export interface ContactKeysDto {
 export interface PgpKeyResultDto {
   fingerprint: string;
   publicKey: string;
+}
+/** Result of trusting an inbound sender's key (from the message or via WKD). */
+export interface TrustSenderDto {
+  fingerprint: string;
+  source: ContactKeySource;
+  verify: "good" | "bad" | "unknown" | null;
 }
 export interface MailboxMemberDto {
   userId: string;
