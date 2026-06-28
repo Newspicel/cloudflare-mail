@@ -54,6 +54,8 @@ export async function fetchWkdKey(email: string): Promise<PublicKeyInfo | null> 
     `https://${domain}/.well-known/openpgpkey/hu/${hash}${q}`,
   ];
   for (const url of urls) {
+    // Ordered fallback: try the advanced URL first and skip the direct one on a hit.
+    // eslint-disable-next-line no-await-in-loop
     const info = await tryUrl(url, addr);
     if (info) return info;
   }

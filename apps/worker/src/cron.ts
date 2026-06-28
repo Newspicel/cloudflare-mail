@@ -130,6 +130,9 @@ export async function runCron(env: Env, now: Date): Promise<void> {
 // cascade), then the threads (which cascade to messages/attachments). When a
 // mailbox is fully drained it's finalized: an "empty" clears the flag, a
 // "delete" drops the row. The remaining mailboxes carry over to the next tick.
+// Awaits here are intentionally sequential: each batch is bounded by a shared
+// per-tick budget and a batch must commit before the next select runs.
+/* eslint-disable no-await-in-loop */
 async function purgePendingMailboxes(env: Env, db: DB): Promise<void> {
   const pending = await db
     .select({ id: mailbox.id, pendingPurge: mailbox.pendingPurge })
@@ -170,6 +173,7 @@ async function purgePendingMailboxes(env: Env, db: DB): Promise<void> {
     }
   }
 }
+/* eslint-enable no-await-in-loop */
 
 // Fire reminders whose time has arrived: mark them fired, push a notification to
 // the owner's devices, and broadcast over SSE so the bell updates live. A

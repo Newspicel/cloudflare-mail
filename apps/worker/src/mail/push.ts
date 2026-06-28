@@ -146,11 +146,11 @@ export async function notifyMailbox(db: DB, n: MailNotification): Promise<void> 
     }
 
     const payload = { title: n.title, body: n.body, url: n.url, threadId: n.threadId };
-    for (const style of ["normal", "important"] as const) {
-      if (byStyle[style].length > 0) {
-        await pushToUsers(db, byStyle[style], { ...payload, level: style });
-      }
-    }
+    await Promise.all(
+      (["normal", "important"] as const)
+        .filter((style) => byStyle[style].length > 0)
+        .map((style) => pushToUsers(db, byStyle[style], { ...payload, level: style })),
+    );
   } catch (err) {
     console.error("notifyMailbox failed", err);
   }

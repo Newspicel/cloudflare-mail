@@ -16,35 +16,39 @@ function chunk<T>(arr: T[], size: number): T[][] {
 
 export async function collectThreadBlobKeys(db: DB, threadIds: string[]): Promise<string[]> {
   if (!threadIds.length) return [];
-  const keys: string[] = [];
-  for (const ids of chunk(threadIds, SQL_VARS_LIMIT)) {
-    const msgs = await db
-      .select({ rawR2Key: message.rawR2Key, plainR2Key: message.plainR2Key })
-      .from(message)
-      .where(inArray(message.threadId, ids));
+  const perChunk = await Promise.all(
+    chunk(threadIds, SQL_VARS_LIMIT).map(async (ids) => {
+      const [msgs, atts] = await Promise.all([
+        db
+          .select({ rawR2Key: message.rawR2Key, plainR2Key: message.plainR2Key })
+          .from(message)
+          .where(inArray(message.threadId, ids)),
+        db
+          .select({ r2Key: attachment.r2Key })
+          .from(attachment)
+          .innerJoin(message, eq(message.id, attachment.messageId))
+          .where(inArray(message.threadId, ids)),
+      ]);
 
-    const atts = await db
-      .select({ r2Key: attachment.r2Key })
-      .from(attachment)
-      .innerJoin(message, eq(message.id, attachment.messageId))
-      .where(inArray(message.threadId, ids));
-
-    for (const m of msgs) {
-      if (m.rawR2Key) keys.push(m.rawR2Key);
-      if (m.plainR2Key) keys.push(m.plainR2Key);
-    }
-    for (const a of atts) keys.push(a.r2Key);
-  }
-  return keys;
+      const keys: string[] = [];
+      for (const m of msgs) {
+        if (m.rawR2Key) keys.push(m.rawR2Key);
+        if (m.plainR2Key) keys.push(m.plainR2Key);
+      }
+      for (const a of atts) keys.push(a.r2Key);
+      return keys;
+    }),
+  );
+  return perChunk.flat();
 }
 
 // Delete threads by id (cascading to their messages/attachments), chunked under
 // D1's bound-parameter cap. Blobs (R2) have no FK cascade — collect + delete
 // those first via collectThreadBlobKeys/deleteBlobs.
 export async function deleteThreadsByIds(db: DB, ids: string[]): Promise<void> {
-  for (const part of chunk(ids, SQL_VARS_LIMIT)) {
-    await db.delete(thread).where(inArray(thread.id, part));
-  }
+  await Promise.all(
+    chunk(ids, SQL_VARS_LIMIT).map((part) => db.delete(thread).where(inArray(thread.id, part))),
+  );
 }
 
 // R2 keys owned by a single message (its raw/plaintext `.eml` + attachment
