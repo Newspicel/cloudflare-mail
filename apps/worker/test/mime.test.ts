@@ -89,10 +89,10 @@ describe("addrsToText", () => {
   });
 });
 
-describe("extractUnsubscribe", () => {
-  const parsed = (headers: { key: string; value: string }[]) =>
-    ({ headers }) as unknown as ParsedEmail;
+const parsed = (headers: { key: string; value: string }[]) =>
+  ({ headers }) as unknown as ParsedEmail;
 
+describe("extractUnsubscribe", () => {
   it("reads RFC 2369/8058 headers case-insensitively and trims", () => {
     expect(
       extractUnsubscribe(
