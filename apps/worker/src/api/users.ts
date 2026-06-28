@@ -123,7 +123,7 @@ export function usersRoutes() {
     if (Object.keys(patch).length === 0) return c.json({ ok: true });
 
     const res = await db.update(user).set(patch).where(eq(user.id, id));
-    if (!res.success) throw new HTTPException(404, { message: "not found" });
+    if (res.meta.changes === 0) throw new HTTPException(404, { message: "not found" });
     return c.json({ ok: true });
   });
 
@@ -133,7 +133,7 @@ export function usersRoutes() {
     const id = c.req.param("id");
     if (id === me.id) throw new HTTPException(400, { message: "cannot delete yourself" });
     const res = await db.delete(user).where(eq(user.id, id));
-    if (!res.success) throw new HTTPException(404, { message: "not found" });
+    if (res.meta.changes === 0) throw new HTTPException(404, { message: "not found" });
     return c.body(null, 204);
   });
 
@@ -193,7 +193,7 @@ export function usersRoutes() {
     const db = dbFromCtx(c);
     const id = c.req.param("id");
     const res = await db.delete(userInvite).where(eq(userInvite.id, id));
-    if (!res.success) throw new HTTPException(404, { message: "not found" });
+    if (res.meta.changes === 0) throw new HTTPException(404, { message: "not found" });
     return c.body(null, 204);
   });
 
