@@ -72,7 +72,7 @@ export function domainsRoutes() {
     if (body.allowedKinds !== undefined) patch.allowedKinds = body.allowedKinds;
     if (Object.keys(patch).length === 0) return c.json({ ok: true });
     const res = await db.update(domain).set(patch).where(eq(domain.id, id));
-    if (!res.success) throw new HTTPException(404, { message: "not found" });
+    if (res.meta.changes === 0) throw new HTTPException(404, { message: "not found" });
     return c.json({ ok: true });
   });
 
@@ -80,7 +80,7 @@ export function domainsRoutes() {
     const db = dbFromCtx(c);
     const id = c.req.param("id");
     const res = await db.delete(domain).where(eq(domain.id, id));
-    if (!res.success) throw new HTTPException(404, { message: "not found" });
+    if (res.meta.changes === 0) throw new HTTPException(404, { message: "not found" });
     return c.body(null, 204);
   });
 

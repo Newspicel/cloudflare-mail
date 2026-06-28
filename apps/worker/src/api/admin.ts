@@ -508,7 +508,7 @@ export function adminRoutes() {
       .update(redirect)
       .set({ targetMailboxId: target.id })
       .where(eq(redirect.id, id));
-    if (!res.success) throw new HTTPException(404, { message: "not found" });
+    if (res.meta.changes === 0) throw new HTTPException(404, { message: "not found" });
     return c.json({ ok: true });
   });
 
@@ -516,7 +516,7 @@ export function adminRoutes() {
     const db = dbFromCtx(c);
     const id = c.req.param("id");
     const res = await db.delete(redirect).where(eq(redirect.id, id));
-    if (!res.success) throw new HTTPException(404, { message: "not found" });
+    if (res.meta.changes === 0) throw new HTTPException(404, { message: "not found" });
     return c.body(null, 204);
   });
 

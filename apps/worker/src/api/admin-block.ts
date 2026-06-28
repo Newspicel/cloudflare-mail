@@ -68,7 +68,7 @@ export function adminBlockRoutes() {
   r.delete("/entries/:id", async (c) => {
     const db = dbFromCtx(c);
     const res = await db.delete(blocklist).where(eq(blocklist.id, c.req.param("id")));
-    if (!res.success) throw new HTTPException(404, { message: "not found" });
+    if (res.meta.changes === 0) throw new HTTPException(404, { message: "not found" });
     return c.body(null, 204);
   });
 
@@ -137,14 +137,14 @@ export function adminBlockRoutes() {
       .update(blockRequest)
       .set({ status: "denied", reviewedByUserId: me.id, reviewedAt: new Date() })
       .where(eq(blockRequest.id, c.req.param("id")));
-    if (!res.success) throw new HTTPException(404, { message: "not found" });
+    if (res.meta.changes === 0) throw new HTTPException(404, { message: "not found" });
     return c.json({ ok: true });
   });
 
   r.delete("/requests/:id", async (c) => {
     const db = dbFromCtx(c);
     const res = await db.delete(blockRequest).where(eq(blockRequest.id, c.req.param("id")));
-    if (!res.success) throw new HTTPException(404, { message: "not found" });
+    if (res.meta.changes === 0) throw new HTTPException(404, { message: "not found" });
     return c.body(null, 204);
   });
 

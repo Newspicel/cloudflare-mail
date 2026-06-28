@@ -29,13 +29,22 @@ export function buildPatch<Out extends Record<string, unknown> = Record<string, 
 
 // Run an insert/update, mapping a SQLite UNIQUE violation to a 409 while letting
 // every other error surface — so FK/schema bugs aren't masked as "already in use".
+// Drizzle wraps the driver error ("Failed query: …") and stashes the original
+// "UNIQUE constraint failed" text on `.cause`, so match the whole cause chain.
 export async function wrapUnique<T>(fn: () => Promise<T>, message: string): Promise<T> {
   try {
     return await fn();
   } catch (err) {
-    if (/UNIQUE/i.test(err instanceof Error ? err.message : "")) {
+    if (isUniqueViolation(err)) {
       throw new HTTPException(409, { message });
     }
     throw err;
   }
+}
+
+function isUniqueViolation(err: unknown): boolean {
+  for (let e = err; e instanceof Error; e = e.cause) {
+    if (/UNIQUE/i.test(e.message)) return true;
+  }
+  return false;
 }
