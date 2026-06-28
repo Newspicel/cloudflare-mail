@@ -38,6 +38,17 @@ export const AI_CATEGORIES = [
 ] as const;
 export type AiCategory = (typeof AI_CATEGORIES)[number];
 
+// AI-judged importance of inbound mail (best-effort, Workers AI). Drives which
+// kind of push notification a mailbox sends. "high" only for genuinely
+// time-sensitive/personal mail; "low" for bulk/automated.
+export const AI_PRIORITIES = ["high", "normal", "low"] as const;
+export type AiPriority = (typeof AI_PRIORITIES)[number];
+
+// Per-mailbox, per-priority-tier notification style. "none" = silent,
+// "important" = attention-grabbing (sticky/vibrate).
+export const NOTIFY_LEVELS = ["none", "normal", "important"] as const;
+export type NotifyLevel = (typeof NOTIFY_LEVELS)[number];
+
 export const EDITOR_FORMATS = ["text", "markdown", "html"] as const;
 export type EditorFormat = (typeof EDITOR_FORMATS)[number];
 

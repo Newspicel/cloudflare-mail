@@ -1,4 +1,5 @@
 import type { DB } from "@cfmail/db";
+import type { AiPriority } from "@cfmail/db/enums";
 import { mailboxNotify, pushSubscription } from "@cfmail/db/schema";
 import { buildPushHTTPRequest } from "@pushforge/builder";
 import { and, eq, inArray } from "drizzle-orm";
@@ -48,11 +49,16 @@ export type PushPayload = {
   body: string;
   url: string;
   threadId: string;
+  // Resolved notification style the SW renders. "important" is sticky/vibrates.
+  level?: "normal" | "important";
 };
 
-export interface MailNotification extends PushPayload {
+export interface MailNotification extends Omit<PushPayload, "level"> {
   mailboxId: string;
   userIds: string[];
+  // AI-judged priority of the message; resolved per-user against the mailbox's
+  // per-tier config to pick the notification style (or skip).
+  priority: AiPriority;
 }
 
 // Best-effort push fan-out to every device of the given users; prunes
@@ -111,30 +117,40 @@ export async function pushToUsers(db: DB, userIds: string[], payload: PushPayloa
   }
 }
 
-// Push fan-out gated on the per-mailbox opt-in: only users who opted into
-// notifications for this mailbox are notified. Never throws (invariant 8).
+// Push fan-out gated on each user's per-mailbox config. The message's AI
+// priority selects which configured tier (high/normal/low) applies; each user's
+// tier value maps to a notification style — "none" skips them, otherwise we fan
+// out with the resolved "normal"/"important" style. Never throws (invariant 8).
 export async function notifyMailbox(db: DB, n: MailNotification): Promise<void> {
   try {
     if (n.userIds.length === 0) return;
 
-    const opted = await db
-      .select({ userId: mailboxNotify.userId })
+    const rows = await db
+      .select({
+        userId: mailboxNotify.userId,
+        high: mailboxNotify.high,
+        normal: mailboxNotify.normal,
+        low: mailboxNotify.low,
+      })
       .from(mailboxNotify)
       .where(
         and(eq(mailboxNotify.mailboxId, n.mailboxId), inArray(mailboxNotify.userId, n.userIds)),
       );
-    if (opted.length === 0) return;
+    if (rows.length === 0) return;
 
-    await pushToUsers(
-      db,
-      opted.map((o) => o.userId),
-      {
-        title: n.title,
-        body: n.body,
-        url: n.url,
-        threadId: n.threadId,
-      },
-    );
+    const byStyle: Record<"normal" | "important", string[]> = { normal: [], important: [] };
+    for (const r of rows) {
+      const style = r[n.priority];
+      if (style === "none") continue;
+      byStyle[style].push(r.userId);
+    }
+
+    const payload = { title: n.title, body: n.body, url: n.url, threadId: n.threadId };
+    for (const style of ["normal", "important"] as const) {
+      if (byStyle[style].length > 0) {
+        await pushToUsers(db, byStyle[style], { ...payload, level: style });
+      }
+    }
   } catch (err) {
     console.error("notifyMailbox failed", err);
   }

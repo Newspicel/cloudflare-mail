@@ -1,5 +1,5 @@
 import { type DB, makeDB } from "@cfmail/db";
-import type { PgpKeyEvent } from "@cfmail/db/enums";
+import type { AiPriority, PgpKeyEvent } from "@cfmail/db/enums";
 import {
   contactKey,
   domain,
@@ -326,41 +326,53 @@ export async function handleInbound(
     }),
   );
 
-  // Best-effort AI summary + category. Runs after delivery is committed so it
-  // never adds latency to the SMTP accept, nor blocks on failure (invariant 8).
-  if (mb.aiFeatures && !outcome.markSpam && spam?.verdict !== "spam") {
-    const job = generateMessageInsights(env, db, {
-      mailboxId: mb.id,
-      messageId,
-      threadId,
-      cap: mb.aiTokenCap ?? null,
-      userIds: [...userIds],
-      from: effectiveParsed.from?.address ?? msg.from,
-      subject: effectiveParsed.subject ?? "",
-      text: effectiveParsed.text,
-      html: effectiveParsed.html,
-    });
-    if (ctx) ctx.waitUntil(job);
-    else await job;
-  }
-
+  // Best-effort AI insights then push notification, both off the SMTP-accept
+  // path. The AI runs first so the push can reflect the detected priority; when
+  // AI is off/exhausted/failed we fall back to "normal". Never blocks delivery
+  // and never throws (invariant 8) — `defer` swallows errors and awaits inline
+  // in tests (no ctx).
+  const wantInsights = mb.aiFeatures && !outcome.markSpam && spam?.verdict !== "spam";
   // Don't push-notify mail filed straight into Spam, nor mail a rule already
   // auto-read or auto-filed to spam on the user's behalf.
-  if (spam?.verdict !== "spam" && !outcome.markSpam && !outcome.markRead) {
-    // Surface the authentication result so a spoofed From isn't rendered as a
-    // trusted sender in the notification.
-    const fromAddr = parsed.from?.address ?? msg.from;
-    const fromName = parsed.from?.name;
-    const sender = fromName ? `${fromName} <${fromAddr}>` : fromAddr;
-    const unverified = spam ? !isAuthenticated(spam.auth) : false;
-    await notifyMailbox(db, {
-      mailboxId: mb.id,
-      userIds: [...userIds],
-      title: unverified ? `⚠ Unverified sender: ${sender}` : sender,
-      body: parsed.subject?.trim() ? parsed.subject : "(no subject)",
-      url: `/app/m/${mb.id}/t/${threadId}`,
-      threadId,
-    });
+  const wantNotify = spam?.verdict !== "spam" && !outcome.markSpam && !outcome.markRead;
+
+  if (wantInsights || wantNotify) {
+    await defer(
+      ctx,
+      (async () => {
+        let priority: AiPriority | null = null;
+        if (wantInsights) {
+          priority = await generateMessageInsights(env, db, {
+            mailboxId: mb.id,
+            messageId,
+            threadId,
+            cap: mb.aiTokenCap ?? null,
+            userIds: [...userIds],
+            from: effectiveParsed.from?.address ?? msg.from,
+            subject: effectiveParsed.subject ?? "",
+            text: effectiveParsed.text,
+            html: effectiveParsed.html,
+          });
+        }
+        if (wantNotify) {
+          // Surface the authentication result so a spoofed From isn't rendered
+          // as a trusted sender in the notification.
+          const fromAddr = parsed.from?.address ?? msg.from;
+          const fromName = parsed.from?.name;
+          const sender = fromName ? `${fromName} <${fromAddr}>` : fromAddr;
+          const unverified = spam ? !isAuthenticated(spam.auth) : false;
+          await notifyMailbox(db, {
+            mailboxId: mb.id,
+            userIds: [...userIds],
+            title: unverified ? `⚠ Unverified sender: ${sender}` : sender,
+            body: parsed.subject?.trim() ? parsed.subject : "(no subject)",
+            url: `/app/m/${mb.id}/t/${threadId}`,
+            threadId,
+            priority: priority ?? "normal",
+          });
+        }
+      })(),
+    );
   }
 }
 

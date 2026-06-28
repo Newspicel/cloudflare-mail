@@ -95,6 +95,7 @@ export function ThreadRowView({
   const unread = thread.unreadCount > 0;
   const showSummary = prefs.aiSummaries !== false && !!thread.aiSummary;
   const category = thread.aiCategory && thread.aiCategory !== "other" ? thread.aiCategory : null;
+  const important = thread.aiPriority === "high";
 
   // Label chips come from a separate query that resolves after the row first
   // measures, growing it a line taller. The virtualizer's ResizeObserver doesn't
@@ -195,8 +196,13 @@ export function ThreadRowView({
           {thread.aiSummary}
         </span>
       )}
-      {(category || (labels && labels.length > 0)) && (
+      {(important || category || (labels && labels.length > 0)) && (
         <div className="flex flex-wrap items-center gap-1">
+          {important && (
+            <span className="inline-flex items-center rounded-full bg-red-500/10 px-1.5 py-px font-medium text-[10px] text-red-600 dark:text-red-400">
+              Important
+            </span>
+          )}
           {category && (
             <span
               className={cn(

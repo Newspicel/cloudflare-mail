@@ -25,6 +25,13 @@ import { Button } from "@/components/ui/button.tsx";
 import { ColorField } from "@/components/ui/color-field.tsx";
 import { useConfirmHelpers } from "@/components/ui/confirm.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover.tsx";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select.tsx";
 import { Switch } from "@/components/ui/switch.tsx";
 import { api } from "@/lib/api.ts";
 import { authClient } from "@/lib/auth-client.ts";
@@ -1299,15 +1306,15 @@ function NotificationsSection({ mailboxes }: { mailboxes: MailboxSummary[] }) {
     }
   };
 
-  const enabledQ = useQuery({
+  const configsQ = useQuery({
     queryKey: ["push-mailboxes"],
-    queryFn: () => api<{ enabled: string[] }>("/api/push/mailboxes"),
+    queryFn: () => api<{ configs: NotifyConfig[] }>("/api/push/mailboxes"),
   });
-  const enabledSet = new Set(enabledQ.data?.enabled ?? []);
+  const configById = new Map((configsQ.data?.configs ?? []).map((c) => [c.mailboxId, c]));
 
-  const toggleMailbox = useMutation({
-    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
-      api(`/api/push/mailboxes/${id}`, { method: "PUT", body: JSON.stringify({ enabled }) }),
+  const saveConfig = useMutation({
+    mutationFn: ({ id, cfg }: { id: string; cfg: NotifyTiers }) =>
+      api(`/api/push/mailboxes/${id}`, { method: "PUT", body: JSON.stringify(cfg) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["push-mailboxes"] }),
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
@@ -1319,7 +1326,7 @@ function NotificationsSection({ mailboxes }: { mailboxes: MailboxSummary[] }) {
     <Section
       id="notifications"
       title="Notifications"
-      description="Get a push notification when new mail arrives. Enable this device, then choose which mailboxes notify you."
+      description="Get a push notification when new mail arrives. Enable this device, then choose how each mailbox notifies you — AI tags every email's priority so important mail can stand out."
     >
       <div className="flex items-center justify-between gap-4">
         <div className="text-[13px]">
@@ -1341,21 +1348,83 @@ function NotificationsSection({ mailboxes }: { mailboxes: MailboxSummary[] }) {
         <div className="mt-4 border-t pt-4">
           <GroupLabel className="mb-1.5">Per mailbox</GroupLabel>
           <ul className="divide-y">
-            {receivable.map((m) => (
-              <li key={m.id} className="flex items-center justify-between gap-4 py-2.5 text-[13px]">
-                <span className="min-w-0 truncate">{m.displayName ?? m.address}</span>
-                <Switch
-                  checked={enabledSet.has(m.id)}
-                  disabled={toggleMailbox.isPending}
-                  onCheckedChange={(checked) =>
-                    toggleMailbox.mutate({ id: m.id, enabled: checked })
-                  }
-                />
-              </li>
-            ))}
+            {receivable.map((m) => {
+              const cfg = configById.get(m.id);
+              const on = !!cfg;
+              return (
+                <li key={m.id} className="py-2.5 text-[13px]">
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="min-w-0 truncate">{m.displayName ?? m.address}</span>
+                    <Switch
+                      checked={on}
+                      disabled={saveConfig.isPending}
+                      onCheckedChange={(checked) =>
+                        saveConfig.mutate({
+                          id: m.id,
+                          cfg: checked ? DEFAULT_TIERS : OFF_TIERS,
+                        })
+                      }
+                    />
+                  </div>
+                  {on && (
+                    <div className="mt-2 grid gap-2 pl-0.5 sm:grid-cols-3">
+                      {NOTIFY_TIERS.map((tier) => (
+                        <div key={tier.key} className="flex flex-col gap-1">
+                          <span className="text-[12px] text-muted-foreground">{tier.label}</span>
+                          <Select
+                            items={LEVEL_OPTS}
+                            value={cfg[tier.key]}
+                            onValueChange={(v) =>
+                              saveConfig.mutate({
+                                id: m.id,
+                                cfg: { ...stripId(cfg), [tier.key]: v as NotifyLevel },
+                              })
+                            }
+                          >
+                            <SelectTrigger aria-label={`${tier.label} notification`}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {LEVEL_OPTS.map((o) => (
+                                <SelectItem key={o.value} value={o.value}>
+                                  {o.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
     </Section>
   );
+}
+
+type NotifyLevel = "none" | "normal" | "important";
+type NotifyTiers = { high: NotifyLevel; normal: NotifyLevel; low: NotifyLevel };
+type NotifyConfig = NotifyTiers & { mailboxId: string };
+
+const DEFAULT_TIERS: NotifyTiers = { high: "important", normal: "normal", low: "normal" };
+const OFF_TIERS: NotifyTiers = { high: "none", normal: "none", low: "none" };
+
+const NOTIFY_TIERS = [
+  { key: "high", label: "Important email" },
+  { key: "normal", label: "Normal email" },
+  { key: "low", label: "Low-priority email" },
+] as const;
+
+const LEVEL_OPTS = [
+  { value: "none", label: "None" },
+  { value: "normal", label: "Normal" },
+  { value: "important", label: "Important" },
+];
+
+function stripId(c: NotifyConfig): NotifyTiers {
+  return { high: c.high, normal: c.normal, low: c.low };
 }

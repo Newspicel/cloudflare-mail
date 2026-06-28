@@ -1,3 +1,4 @@
+import { NOTIFY_LEVELS } from "@cfmail/db/enums";
 import { mailboxNotify, pushSubscription } from "@cfmail/db/schema";
 import { Perm } from "@cfmail/shared/permissions";
 import { zValidator } from "@hono/zod-validator";
@@ -39,7 +40,8 @@ const subscribeBody = z.object({
   keys: z.object({ p256dh: z.string().min(1), auth: z.string().min(1) }),
 });
 
-const toggleBody = z.object({ enabled: z.boolean() });
+const lvl = z.enum(NOTIFY_LEVELS);
+const configBody = z.object({ high: lvl, normal: lvl, low: lvl });
 
 export function pushRoutes() {
   const r = new Hono<AppBindings>();
@@ -84,31 +86,44 @@ export function pushRoutes() {
     return c.body(null, 204);
   });
 
-  // Mailboxes this user has opted into notifications for.
+  // Per-mailbox notification config for this user. Each tier (high/normal/low)
+  // maps to a style; an absent mailbox means off.
   r.get("/mailboxes", async (c) => {
     const db = dbFromCtx(c);
     const u = c.get("user")!;
     const rows = await db
-      .select({ mailboxId: mailboxNotify.mailboxId })
+      .select({
+        mailboxId: mailboxNotify.mailboxId,
+        high: mailboxNotify.high,
+        normal: mailboxNotify.normal,
+        low: mailboxNotify.low,
+      })
       .from(mailboxNotify)
       .where(eq(mailboxNotify.userId, u.id));
-    return c.json({ enabled: rows.map((row) => row.mailboxId) });
+    return c.json({ configs: rows });
   });
 
-  r.put("/mailboxes/:id", zValidator("json", toggleBody), async (c) => {
+  r.put("/mailboxes/:id", zValidator("json", configBody), async (c) => {
     const db = dbFromCtx(c);
     const u = c.get("user")!;
     const id = c.req.param("id");
-    const { enabled } = c.req.valid("json");
+    const cfg = c.req.valid("json");
     await requirePerm(db, u.id, id, Perm.READ);
-    if (enabled) {
-      await db.insert(mailboxNotify).values({ mailboxId: id, userId: u.id }).onConflictDoNothing();
-    } else {
+    // All-none means "off" — drop the row so it no longer notifies.
+    if (cfg.high === "none" && cfg.normal === "none" && cfg.low === "none") {
       await db
         .delete(mailboxNotify)
         .where(and(eq(mailboxNotify.mailboxId, id), eq(mailboxNotify.userId, u.id)));
+      return c.json({ ok: true });
     }
-    return c.json({ ok: true, enabled });
+    await db
+      .insert(mailboxNotify)
+      .values({ mailboxId: id, userId: u.id, ...cfg })
+      .onConflictDoUpdate({
+        target: [mailboxNotify.mailboxId, mailboxNotify.userId],
+        set: cfg,
+      });
+    return c.json({ ok: true });
   });
 
   return r;
