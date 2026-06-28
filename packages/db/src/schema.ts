@@ -9,12 +9,14 @@ import {
 } from "drizzle-orm/sqlite-core";
 import {
   AI_CATEGORIES,
+  AI_PRIORITIES,
   BLOCK_ENTRY_TYPES,
   BLOCK_REQUEST_STATUS,
   CONTACT_KEY_SOURCES,
   EDITOR_FORMATS,
   MAILBOX_TYPES,
   MESSAGE_DIRECTIONS,
+  NOTIFY_LEVELS,
   PGP_KEY_EVENTS,
   PGP_MODES,
   PGP_VERIFY,
@@ -377,6 +379,7 @@ export const thread = sqliteTable(
     // list query needs no join. Null until the best-effort AI job fills them in.
     aiSummary: text("ai_summary"),
     aiCategory: text("ai_category", { enum: AI_CATEGORIES }),
+    aiPriority: text("ai_priority", { enum: AI_PRIORITIES }),
     trashed: integer("trashed", { mode: "boolean" }).notNull().default(false),
     // When the thread entered the trash; null unless trashed. The cron purges
     // threads trashed longer than the retention window.
@@ -426,6 +429,7 @@ export const message = sqliteTable(
     // `aiCategory` is the auto-category chip.
     aiSummary: text("ai_summary"),
     aiCategory: text("ai_category", { enum: AI_CATEGORIES }),
+    aiPriority: text("ai_priority", { enum: AI_PRIORITIES }),
     // Recipient names+addresses concatenated, so search matches To/Cc too.
     toText: text("to_text"),
     flags: integer("flags").notNull().default(0),
@@ -804,8 +808,9 @@ export const pushSubscription = sqliteTable(
   (t) => [index("push_subscription_user_idx").on(t.userId)],
 );
 
-// Per-user opt-in to push notifications for a mailbox. Presence of a row means
-// "notify me about new mail in this mailbox"; absence means off (the default).
+// Per-user notification config for a mailbox. Presence of a row means
+// "configured"; absence means off (the default). Each AI priority tier maps to
+// a notification style: none (silent), normal, or important (attention-grabbing).
 export const mailboxNotify = sqliteTable(
   "mailbox_notify",
   {
@@ -815,6 +820,9 @@ export const mailboxNotify = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
+    high: text("high", { enum: NOTIFY_LEVELS }).notNull().default("important"),
+    normal: text("normal", { enum: NOTIFY_LEVELS }).notNull().default("normal"),
+    low: text("low", { enum: NOTIFY_LEVELS }).notNull().default("normal"),
     createdAt: createdAt(),
   },
   (t) => [

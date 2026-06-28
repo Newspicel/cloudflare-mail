@@ -3,7 +3,7 @@
 // runtime (stale-while-revalidate) and serves the cached shell when offline.
 // API traffic (auth + SSE realtime) is never intercepted.
 
-const CACHE = "cfmail-v1";
+const CACHE = "cfmail-v2";
 const SHELL = "/index.html";
 
 self.addEventListener("install", (event) => {
@@ -75,7 +75,9 @@ async function syncAppBadge() {
   }
 }
 
-// Incoming push: show a notification. Payload is JSON {title, body, url, threadId}.
+// Incoming push: show a notification. Payload is JSON
+// {title, body, url, threadId, level}. level "important" renders an
+// attention-grabbing notification (sticky, vibrates, ❗ prefix).
 self.addEventListener("push", (event) => {
   let data = {};
   try {
@@ -83,7 +85,8 @@ self.addEventListener("push", (event) => {
   } catch {
     data = { body: event.data ? event.data.text() : "" };
   }
-  const title = data.title || "New mail";
+  const important = data.level === "important";
+  const title = (important ? "❗ " : "") + (data.title || "New mail");
   event.waitUntil(
     self.registration
       .showNotification(title, {
@@ -92,7 +95,10 @@ self.addEventListener("push", (event) => {
         badge: "/pwa-192.png",
         // Tag by thread so repeat alerts coalesce and peers can target a dismiss.
         tag: data.threadId || data.url || title,
-        data: { url: data.url || "/", threadId: data.threadId },
+        requireInteraction: important,
+        renotify: important,
+        vibrate: important ? [200, 100, 200] : undefined,
+        data: { url: data.url || "/", threadId: data.threadId, level: data.level },
       })
       .then(syncAppBadge),
   );
