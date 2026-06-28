@@ -79,6 +79,7 @@ describe("resolveAccess", () => {
       userId: OWNER_ID,
       perms: ALL_PERMS,
       isOwner: true,
+      purging: false,
     });
   });
 
@@ -90,6 +91,7 @@ describe("resolveAccess", () => {
       userId: MEMBER_ID,
       perms: Perm.READ | Perm.WRITE,
       isOwner: false,
+      purging: false,
     });
   });
 
