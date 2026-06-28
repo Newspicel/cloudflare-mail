@@ -351,15 +351,15 @@ describe("admin service mailboxes", () => {
   });
 });
 
-describe("admin redirects", () => {
-  async function seedRedirect(localPart = "alias", target = MAILBOX_ID): Promise<string> {
-    const id = `rd-${localPart}`;
-    await db()
-      .insert(redirect)
-      .values({ id, domainId: DOMAIN_ID, localPart, targetMailboxId: target });
-    return id;
-  }
+async function seedRedirect(localPart = "alias", target = MAILBOX_ID): Promise<string> {
+  const id = `rd-${localPart}`;
+  await db()
+    .insert(redirect)
+    .values({ id, domainId: DOMAIN_ID, localPart, targetMailboxId: target });
+  return id;
+}
 
+describe("admin redirects", () => {
   it("lists redirects with resolved addresses", async () => {
     await seedRedirect("alias");
     const res = await request(asAdmin(), "GET", "/redirects");
