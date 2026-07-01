@@ -96,7 +96,7 @@ export function CodeBanner({
               className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 font-medium text-[12px] text-primary-foreground transition-colors hover:bg-primary/90"
             >
               <Truck className="size-3.5 shrink-0" />
-              {t.carrier ? `Track with ${t.carrier}` : "Track package"}
+              {t.carrier ? `Track with ${t.carrier}` : "Open tracking page"}
               {t.number && (
                 <span className="font-mono font-normal opacity-80">
                   ·&nbsp;{t.number.length > 12 ? `…${t.number.slice(-8)}` : t.number}
