@@ -20,7 +20,9 @@ export interface DetectedLink {
 export type Carrier = "UPS" | "USPS" | "FedEx" | "DHL";
 
 export interface DetectedTracking {
-  carrier: Carrier;
+  // Known carrier when we recognised the number/host; undefined for a generic
+  // "track your order" link whose carrier is hidden behind a merchant redirect.
+  carrier?: Carrier;
   // The tracking number, when we could read one out of the text/link.
   number?: string;
   // Carrier page to open (built from the number, or the link that was in the mail).
@@ -180,6 +182,9 @@ const TRACK_LINK = /track|trknbr|tracknum|tLabels|awb|tracking[-_]?id/i;
 // Pull a number out of a carrier tracking link when it carries one.
 const LINK_NUMBER =
   /(?:tracknum|trknbr|tLabels|awb|tracking[-_]?id|qtc_tLabels1)=([0-9A-Z]{8,35})/i;
+// Anchor text of a "track your order / Sendung verfolgen" button. Carrier is
+// unknown here (the link is usually a merchant redirect) — we just open it.
+const TRACK_TEXT = /(track|trace|verfolg|nachverfolg|sendungsverfolgung)/i;
 
 const carrierOf = (c: Carrier | ((n: string) => Carrier), n: string): Carrier =>
   typeof c === "function" ? c(n) : c;
@@ -190,7 +195,7 @@ function detectTracking(
   links: { url: string; text: string }[],
 ): DetectedTracking[] {
   const out = new Map<string, DetectedTracking>();
-  const add = (carrier: Carrier, number: string | undefined, url: string) => {
+  const add = (carrier: Carrier | undefined, number: string | undefined, url: string) => {
     const key = number ?? url;
     if (!out.has(key)) out.set(key, { carrier, number, url });
   };
@@ -212,6 +217,16 @@ function detectTracking(
 
   const hay = `${subject}\n${text}`;
   if (!SHIP_KEYWORDS.test(hay)) return [...out.values()].slice(0, MAX_TRACKING);
+
+  // 1b. A "track your order / Sendung verfolgen" button on any host — carrier is
+  // hidden behind the merchant's redirect, so we just open the link.
+  for (const { url, text: anchor } of links) {
+    if (out.size >= MAX_TRACKING) break;
+    if (!/^https?:\/\//i.test(url) || out.has(url)) continue;
+    if (EXCLUDE_LINK.test(url) || EXCLUDE_LINK.test(anchor)) continue;
+    if (!TRACK_TEXT.test(anchor)) continue;
+    add(undefined, url.match(LINK_NUMBER)?.[1], url);
+  }
 
   // 2. Distinctive tracking-number formats anywhere in the body.
   for (const { carrier, re } of STRONG) {
