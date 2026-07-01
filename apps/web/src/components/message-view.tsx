@@ -42,6 +42,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { CodeBanner } from "@/components/code-banner.tsx";
 import { api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
 import {
@@ -1274,6 +1275,12 @@ function MessageCard({
         </div>
       </header>
       <SpamBanner msg={msg} />
+      <CodeBanner
+        subject={msg.subject}
+        text={body.data?.text}
+        html={body.data?.html}
+        direction={msg.direction}
+      />
       <PgpBanner msg={msg} readOnly={readOnly} />
       <UnsubscribeBanner msg={msg} readOnly={readOnly} />
       {body.data?.calendar && <CalendarBanner event={body.data.calendar} />}
