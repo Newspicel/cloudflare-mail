@@ -180,6 +180,8 @@ function ProfileSection({
   // react-doctor-disable-next-line no-derived-useState -- editable draft seeded from the prop; re-seeded via the parent's key remount when the server value changes
   const [draftImage, setDraftImage] = useState(image);
   const [uploading, setUploading] = useState(false);
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [draftEmail, setDraftEmail] = useState("");
 
   const dirty = draftName.trim() !== name || draftImage.trim() !== (image ?? "");
 
@@ -225,6 +227,23 @@ function ProfileSection({
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
+
+  const changeEmail = useMutation({
+    mutationFn: async () => {
+      const next = draftEmail.trim().toLowerCase();
+      const res = await authClient.changeEmail({ newEmail: next, callbackURL: "/app/settings" });
+      if (res.error) throw new Error(res.error.message ?? "Failed");
+      return next;
+    },
+    onSuccess: (next) => {
+      setEmailOpen(false);
+      setDraftEmail("");
+      toast.success(`Confirmation link sent to ${next}`);
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
+  const nextEmail = draftEmail.trim().toLowerCase();
 
   return (
     <Section id="profile" title="Profile" description="Your name and avatar, shown across the app.">
@@ -277,7 +296,16 @@ function ProfileSection({
           </Field>
           <dl className="grid grid-cols-[72px_1fr] items-center gap-y-2 text-[13px]">
             <dt className="text-[12px] text-muted-foreground">Email</dt>
-            <dd className="truncate">{email}</dd>
+            <dd className="flex min-w-0 items-center gap-2">
+              <span className="truncate">{email}</span>
+              <button
+                type="button"
+                onClick={() => setEmailOpen((v) => !v)}
+                className="shrink-0 text-[12px] font-medium text-primary hover:underline"
+              >
+                {emailOpen ? "Cancel" : "Change"}
+              </button>
+            </dd>
             <dt className="text-[12px] text-muted-foreground">Role</dt>
             <dd>
               <Badge variant="outline" className="uppercase tracking-wider">
@@ -285,6 +313,33 @@ function ProfileSection({
               </Badge>
             </dd>
           </dl>
+          {emailOpen && (
+            <div className="space-y-1.5">
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  type="email"
+                  placeholder="New email address"
+                  value={draftEmail}
+                  onChange={(e) => setDraftEmail(e.target.value)}
+                  className="flex-1"
+                  autoComplete="email"
+                />
+                <Button
+                  variant="primary"
+                  onClick={() => changeEmail.mutate()}
+                  disabled={
+                    !nextEmail.includes("@") || nextEmail === email || changeEmail.isPending
+                  }
+                >
+                  Send confirmation
+                </Button>
+              </div>
+              <p className="text-[12px] text-muted-foreground">
+                A confirmation link goes to the new address; your sign-in email changes once you
+                open it.
+              </p>
+            </div>
+          )}
           <Button
             variant="primary"
             onClick={() => save.mutate()}

@@ -97,8 +97,28 @@ export async function createAuth({ env, db, baseURL }: CreateAuthOpts) {
       },
       resetPasswordTokenExpiresIn: 3600,
     },
+    // Only reachable via the change-email flow below: sign-up is closed and
+    // all accounts are created pre-verified, so plain verify-email never runs.
+    emailVerification: {
+      sendVerificationEmail: async ({ user, url }) => {
+        const from = await getConfig(database, "auth_from_address");
+        if (!from) return;
+        await sendMail(env, {
+          from,
+          to: user.email,
+          subject: "Confirm your new email address",
+          text:
+            `A request was made to use this address for your account.\n\n` +
+            `Confirm the change:\n${url}\n\n` +
+            `If you didn't request this, ignore this email.`,
+        });
+      },
+    },
     user: {
       additionalFields: userAdditionalFields,
+      // Sends the confirmation link to the NEW address (accounts are always
+      // email-verified); the email only changes once that link is clicked.
+      changeEmail: { enabled: true },
     },
     advanced: {
       crossSubDomainCookies: { enabled: false },
