@@ -3,8 +3,6 @@ import type * as React from "react";
 import { cn } from "@/lib/cn";
 
 export const AlertDialog = BaseAlertDialog.Root;
-export const AlertDialogTrigger = BaseAlertDialog.Trigger;
-export const AlertDialogClose = BaseAlertDialog.Close;
 
 export function AlertDialogContent({
   className,

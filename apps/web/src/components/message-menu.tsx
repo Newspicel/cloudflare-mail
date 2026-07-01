@@ -106,6 +106,7 @@ export function MessageMenu({
   const [source, setSource] = useState<Source | null>(null);
   const [loadingRaw, setLoadingRaw] = useState(false);
 
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- creates an admin-side block request; no client cache to update
   const requestBlock = useMutation({
     mutationFn: () =>
       api<{ status: string }>(`/api/messages/${msg.id}/block-request`, {

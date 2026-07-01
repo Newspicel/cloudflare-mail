@@ -1,5 +1,5 @@
 import { Check, Copy, KeyRound, LogIn } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { detectCodesAndLinks } from "@/lib/detect-codes.ts";
 
@@ -46,10 +46,7 @@ export function CodeBanner({
   html?: string | null;
   direction: string;
 }) {
-  const detected = useMemo(
-    () => detectCodesAndLinks({ subject, text, html }),
-    [subject, text, html],
-  );
+  const detected = detectCodesAndLinks({ subject, text, html });
 
   if (direction !== "in") return null;
   if (detected.codes.length === 0 && detected.links.length === 0) return null;

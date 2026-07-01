@@ -167,7 +167,7 @@ async function uploadOne(
 ): Promise<{ duplicate?: boolean; skipped?: boolean }> {
   for (let attempt = 0; ; attempt++) {
     try {
-      // eslint-disable-next-line no-await-in-loop -- retry loop is sequential by design
+      // eslint-disable-next-line no-await-in-loop, react-doctor/async-await-in-loop -- retry loop is sequential by design
       return await postOne(mailboxId, item);
     } catch (e) {
       const retryable = e instanceof ImportError ? e.retryable : true;
@@ -216,10 +216,10 @@ async function plan(files: File[]): Promise<Task[]> {
     if (lower.endsWith(".zip")) {
       // A zip is fully in memory once unpacked; two-pass its entries so .eml
       // items can resolve metadata that may appear after them.
-      // eslint-disable-next-line no-await-in-loop -- one archive at a time bounds peak memory
-      const entries = Object.entries(unzipSync(u8(await file.arrayBuffer())))
-        .filter(([p]) => !p.endsWith("/"))
-        .map(([p, b]) => [basename(p), b] as const);
+      // eslint-disable-next-line no-await-in-loop, react-doctor/async-await-in-loop -- one archive at a time bounds peak memory
+      const entries = Object.entries(unzipSync(u8(await file.arrayBuffer()))).flatMap(([p, b]) =>
+        p.endsWith("/") ? [] : [[basename(p), b] as const],
+      );
       for (const [name, b] of entries) {
         if (name.toLowerCase().endsWith(META_SUFFIX)) registerMeta(name, b);
       }
@@ -237,7 +237,7 @@ async function plan(files: File[]): Promise<Task[]> {
   for (const f of looseMessages) {
     const lower = f.name.toLowerCase();
     if (lower.endsWith(".mbox")) {
-      // eslint-disable-next-line no-await-in-loop -- mbox archives are rare and read one at a time
+      // eslint-disable-next-line no-await-in-loop, react-doctor/async-await-in-loop -- mbox archives are rare and read one at a time
       for (const raw of splitMbox(u8(await f.arrayBuffer()))) tasks.push(async () => ({ raw }));
     } else {
       const state = lower.endsWith(".eml") ? stateByBase.get(f.name.slice(0, -4)) : undefined;
@@ -285,7 +285,7 @@ export async function runImport(
       const i = next++;
       if (i >= tasks.length) return;
       try {
-        // eslint-disable-next-line no-await-in-loop -- a worker drains items sequentially; parallelism is across workers
+        // eslint-disable-next-line no-await-in-loop, react-doctor/async-await-in-loop -- a worker drains items sequentially; parallelism is across workers
         const item = await tasks[i]!();
         // eslint-disable-next-line no-await-in-loop -- same as above
         const res = await uploadOne(mailboxId, item, () => {

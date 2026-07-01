@@ -1,4 +1,4 @@
-import { type PointerEvent as ReactPointerEvent, useCallback, useRef, useState } from "react";
+import { type PointerEvent as ReactPointerEvent, useRef, useState } from "react";
 import { haptic } from "./haptics.ts";
 
 // Past this horizontal travel a release commits the swipe action; below it the
@@ -46,71 +46,65 @@ export function useSwipeRow(config: SwipeConfig): { state: SwipeState; handlers:
   const longTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suppressClick = useRef(false);
 
-  const clearLong = useCallback(() => {
+  const clearLong = () => {
     if (longTimer.current) {
       clearTimeout(longTimer.current);
       longTimer.current = null;
     }
-  }, []);
+  };
 
-  const reset = useCallback(() => {
+  const reset = () => {
     start.current = null;
     axis.current = "none";
     armedRef.current = false;
     clearLong();
     setState({ dx: 0, dragging: false, armed: false });
-  }, [clearLong]);
+  };
 
-  const onPointerDown = useCallback(
-    (e: ReactPointerEvent) => {
-      if (config.disabled || e.pointerType !== "touch") return;
-      start.current = { x: e.clientX, y: e.clientY };
-      axis.current = "none";
-      suppressClick.current = false;
-      if (config.onLongPress) {
-        longTimer.current = setTimeout(() => {
-          // Long-press wins only if the finger never started a drag.
-          if (axis.current === "none") {
-            suppressClick.current = true;
-            haptic(15);
-            config.onLongPress?.();
-            reset();
-          }
-        }, LONG_PRESS_MS);
-      }
-    },
-    [config, reset],
-  );
+  const onPointerDown = (e: ReactPointerEvent) => {
+    if (config.disabled || e.pointerType !== "touch") return;
+    start.current = { x: e.clientX, y: e.clientY };
+    axis.current = "none";
+    suppressClick.current = false;
+    if (config.onLongPress) {
+      longTimer.current = setTimeout(() => {
+        // Long-press wins only if the finger never started a drag.
+        if (axis.current === "none") {
+          suppressClick.current = true;
+          haptic(15);
+          config.onLongPress?.();
+          reset();
+        }
+      }, LONG_PRESS_MS);
+    }
+  };
 
-  const onPointerMove = useCallback(
-    (e: ReactPointerEvent) => {
-      if (!start.current) return;
-      const dx = e.clientX - start.current.x;
-      const dy = e.clientY - start.current.y;
+  const onPointerMove = (e: ReactPointerEvent) => {
+    if (!start.current) return;
+    const dx = e.clientX - start.current.x;
+    const dy = e.clientY - start.current.y;
 
-      if (axis.current === "none") {
-        if (Math.abs(dx) < TAP_SLOP_PX && Math.abs(dy) < TAP_SLOP_PX) return;
-        // Lock to the dominant axis on first real movement. Vertical hands the
-        // gesture back to the scroller; horizontal becomes a swipe.
-        axis.current = Math.abs(dx) > Math.abs(dy) ? "x" : "y";
-        clearLong();
-        if (axis.current === "y") return;
-      }
-      if (axis.current !== "x") return;
+    if (axis.current === "none") {
+      if (Math.abs(dx) < TAP_SLOP_PX && Math.abs(dy) < TAP_SLOP_PX) return;
+      // Lock to the dominant axis on first real movement. Vertical hands the
+      // gesture back to the scroller; horizontal becomes a swipe.
+      axis.current = Math.abs(dx) > Math.abs(dy) ? "x" : "y";
+      clearLong();
+      if (axis.current === "y") return;
+    }
+    if (axis.current !== "x") return;
 
-      // Only allow swipes for which an action is wired; clamp the rest at 0 so
-      // the row can't be dragged into an empty reveal.
-      const allowed = (dx > 0 && config.onSwipeRight) || (dx < 0 && config.onSwipeLeft) ? dx : 0;
-      const armed = Math.abs(allowed) >= COMMIT_PX;
-      // A short tick the moment the row crosses (or leaves) the commit point.
-      if (armed !== armedRef.current && allowed !== 0) haptic(8);
-      armedRef.current = armed;
-      setState({ dx: allowed, dragging: true, armed });
-    },
-    [config, clearLong],
-  );
+    // Only allow swipes for which an action is wired; clamp the rest at 0 so
+    // the row can't be dragged into an empty reveal.
+    const allowed = (dx > 0 && config.onSwipeRight) || (dx < 0 && config.onSwipeLeft) ? dx : 0;
+    const armed = Math.abs(allowed) >= COMMIT_PX;
+    // A short tick the moment the row crosses (or leaves) the commit point.
+    if (armed !== armedRef.current && allowed !== 0) haptic(8);
+    armedRef.current = armed;
+    setState({ dx: allowed, dragging: true, armed });
+  };
 
-  const finish = useCallback(() => {
+  const finish = () => {
     if (axis.current === "x" && Math.abs(state.dx) >= COMMIT_PX) {
       suppressClick.current = true;
       haptic(12);
@@ -118,18 +112,15 @@ export function useSwipeRow(config: SwipeConfig): { state: SwipeState; handlers:
       else config.onSwipeLeft?.();
     }
     reset();
-  }, [state.dx, config, reset]);
+  };
 
-  const onClickCapture = useCallback(
-    (e: { preventDefault: () => void; stopPropagation: () => void }) => {
-      if (suppressClick.current) {
-        e.preventDefault();
-        e.stopPropagation();
-        suppressClick.current = false;
-      }
-    },
-    [],
-  );
+  const onClickCapture = (e: { preventDefault: () => void; stopPropagation: () => void }) => {
+    if (suppressClick.current) {
+      e.preventDefault();
+      e.stopPropagation();
+      suppressClick.current = false;
+    }
+  };
 
   return {
     state,

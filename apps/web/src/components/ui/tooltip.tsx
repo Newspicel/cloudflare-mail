@@ -3,10 +3,8 @@ import type * as React from "react";
 import { cn } from "@/lib/cn";
 
 export const TooltipProvider = BaseTooltip.Provider;
-export const TooltipRoot = BaseTooltip.Root;
-export const TooltipTrigger = BaseTooltip.Trigger;
 
-export function TooltipContent({
+function TooltipContent({
   className,
   side = "top",
   sideOffset = 6,

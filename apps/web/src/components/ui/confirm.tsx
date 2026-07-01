@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
+import { createContext, use, useRef, useState } from "react";
 import { Button } from "./button";
 import {
   AlertDialog,
@@ -26,19 +26,19 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
   const [options, setOptions] = useState<ConfirmOptions | null>(null);
   const resolver = useRef<((value: boolean) => void) | null>(null);
 
-  const confirm = useCallback<ConfirmFn>((opts) => {
+  const confirm: ConfirmFn = (opts) => {
     setOptions(opts);
     setOpen(true);
     return new Promise<boolean>((resolve) => {
       resolver.current = resolve;
     });
-  }, []);
+  };
 
-  const settle = useCallback((value: boolean) => {
+  const settle = (value: boolean) => {
     resolver.current?.(value);
     resolver.current = null;
     setOpen(false);
-  }, []);
+  };
 
   return (
     <ConfirmContext.Provider value={confirm}>
@@ -76,24 +76,21 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
 }
 
 export function useConfirm(): ConfirmFn {
-  const ctx = useContext(ConfirmContext);
+  const ctx = use(ConfirmContext);
   if (!ctx) throw new Error("useConfirm must be used within a ConfirmProvider");
   return ctx;
 }
 
 export function useConfirmHelpers() {
   const confirm = useConfirm();
-  return useMemo(
-    () => ({
-      confirm,
-      confirmDelete: (subject: string, description?: string) =>
-        confirm({
-          title: `Delete ${subject}?`,
-          description: description ?? "This action cannot be undone.",
-          confirmLabel: "Delete",
-          destructive: true,
-        }),
-    }),
-    [confirm],
-  );
+  return {
+    confirm,
+    confirmDelete: (subject: string, description?: string) =>
+      confirm({
+        title: `Delete ${subject}?`,
+        description: description ?? "This action cannot be undone.",
+        confirmLabel: "Delete",
+        destructive: true,
+      }),
+  };
 }

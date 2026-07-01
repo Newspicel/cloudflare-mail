@@ -51,15 +51,6 @@ export function ItemTitle({ className, ...props }: React.HTMLAttributes<HTMLSpan
   );
 }
 
-export function ItemDescription({ className, ...props }: React.HTMLAttributes<HTMLSpanElement>) {
-  return (
-    <span
-      className={cn("truncate text-[11px] text-muted-foreground leading-tight", className)}
-      {...props}
-    />
-  );
-}
-
 export function ItemActions({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return <div className={cn("flex shrink-0 items-center gap-1", className)} {...props} />;
 }

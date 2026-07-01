@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/cn.ts";
 import type { Contact } from "@/lib/queries.ts";
 import { Field, fieldLabelClass } from "./ui/field.tsx";
@@ -52,23 +52,23 @@ export function AddressField({
 
   const f = input.trim().toLowerCase();
 
-  const used = useMemo(() => new Set(items.map((i) => i.address.toLowerCase())), [items]);
+  const used = new Set(items.map((i) => i.address.toLowerCase()));
 
-  const matches = useMemo(() => {
-    if (!focused) return [];
-    const out: Contact[] = [];
+  const matches: Contact[] = [];
+  if (focused) {
     for (const ct of contacts) {
       const addr = ct.address.toLowerCase();
       if (used.has(addr)) continue;
+      // eslint-disable-next-line react-doctor/js-set-map-lookups -- substring match on strings; membership already uses the `used` Set.
       if (f && !(addr.includes(f) || ct.name?.toLowerCase().includes(f))) continue;
-      out.push(ct);
-      if (out.length >= MAX_SUGGESTIONS) break;
+      matches.push(ct);
+      if (matches.length >= MAX_SUGGESTIONS) break;
     }
-    return out;
-  }, [contacts, focused, f, used]);
+  }
 
+  // Highlight cursor resets when the derived filter fragment `f` (from the `value` prop) changes; an arrow-key cursor can't be derived during render.
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset cursor as the typed fragment changes.
-  useEffect(() => setHighlight(0), [f]);
+  useEffect(() => setHighlight(0), [f]); // react-doctor-disable-line no-adjust-state-on-prop-change
 
   const open = focused && matches.length > 0;
   const hi = highlight < matches.length ? highlight : 0;
@@ -136,6 +136,7 @@ export function AddressField({
           <input
             ref={inputRef}
             value={input}
+            aria-label={label}
             onChange={(e) => handleInput(e.target.value)}
             onFocus={() => setFocused(true)}
             onBlur={() => {

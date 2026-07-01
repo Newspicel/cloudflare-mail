@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/cn.ts";
 import { Skeleton } from "./ui/skeleton.tsx";
 
@@ -59,18 +59,20 @@ export function EmailFrame({ html, className }: { html: string; className?: stri
   const [colors, setColors] = useState<Colors>(frameColors);
   const [height, setHeight] = useState(0);
 
-  // Re-theme the frame when the app toggles dark mode.
+  // Re-theme the frame when the app toggles dark mode. State is lazily seeded
+  // from the DOM above; this is a MutationObserver subscription, not an init.
   useEffect(() => {
     const obs = new MutationObserver(() => setColors(frameColors()));
+    // react-doctor-disable-next-line no-initialize-state -- live theme subscription, not a one-time initializer
     obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
     return () => obs.disconnect();
   }, []);
 
-  const doc = useMemo(() => buildDoc(html, colors), [html, colors]);
+  const doc = buildDoc(html, colors);
 
   // `allow-same-origin` + no scripts lets us read the child document to size it;
   // re-observe on every (re)load so late reflow (image loads) keeps it exact.
-  const onLoad = useCallback(() => {
+  const onLoad = () => {
     roRef.current?.disconnect();
     const d = ref.current?.contentDocument;
     const root = d?.documentElement;
@@ -86,7 +88,7 @@ export function EmailFrame({ html, className }: { html: string; className?: stri
     ro.observe(root);
     ro.observe(body);
     roRef.current = ro;
-  }, []);
+  };
 
   useEffect(() => () => roRef.current?.disconnect(), []);
 

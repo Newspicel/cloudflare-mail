@@ -69,9 +69,9 @@ const NAV = [
 ] as const;
 
 function SettingsPage() {
-  const me = useQuery(meQuery);
-  const mailboxesQ = useQuery(mailboxesQuery);
-  const editable = (mailboxesQ.data?.mailboxes ?? []).filter(
+  const { data: meData } = useQuery(meQuery);
+  const { data: mailboxesData } = useQuery(mailboxesQuery);
+  const editable = (mailboxesData?.mailboxes ?? []).filter(
     (m) => m.type !== "temp" && has(m.perms, Perm.MANAGE),
   );
   // Service mailboxes can't be imported into (no owner-facing inbox).
@@ -101,10 +101,11 @@ function SettingsPage() {
           </header>
 
           <ProfileSection
-            name={me.data?.user?.name ?? ""}
-            email={me.data?.user?.email ?? ""}
-            image={me.data?.user?.image ?? ""}
-            role={me.data?.user?.role}
+            key={`${meData?.user?.name ?? ""}|${meData?.user?.image ?? ""}`}
+            name={meData?.user?.name ?? ""}
+            email={meData?.user?.email ?? ""}
+            image={meData?.user?.image ?? ""}
+            role={meData?.user?.role}
           />
           <AppearanceSection />
           <ReadingSection />
@@ -112,8 +113,8 @@ function SettingsPage() {
           <ComposeSection />
           <TemplatesSection />
           <SecuritySection />
-          <TwoFactorSection enabled={!!me.data?.user?.twoFactorEnabled} />
-          <NotificationsSection mailboxes={mailboxesQ.data?.mailboxes ?? []} />
+          <TwoFactorSection enabled={!!meData?.user?.twoFactorEnabled} />
+          <NotificationsSection mailboxes={mailboxesData?.mailboxes ?? []} />
           <FoldersSection />
           <RulesSection mailboxes={editable} />
 
@@ -174,16 +175,11 @@ function ProfileSection({
 }) {
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
+  // react-doctor-disable-next-line no-derived-useState -- editable draft seeded from the prop; re-seeded via the parent's key remount when the server value changes
   const [draftName, setDraftName] = useState(name);
+  // react-doctor-disable-next-line no-derived-useState -- editable draft seeded from the prop; re-seeded via the parent's key remount when the server value changes
   const [draftImage, setDraftImage] = useState(image);
   const [uploading, setUploading] = useState(false);
-
-  useEffect(() => {
-    setDraftName(name);
-  }, [name]);
-  useEffect(() => {
-    setDraftImage(image);
-  }, [image]);
 
   const dirty = draftName.trim() !== name || draftImage.trim() !== (image ?? "");
 
@@ -242,6 +238,7 @@ function ProfileSection({
             ref={fileRef}
             type="file"
             accept="image/png,image/jpeg,image/webp,image/gif"
+            aria-label="Upload avatar image"
             className="hidden"
             onChange={(e) => {
               void onPickFile(e.target.files?.[0]);
@@ -642,7 +639,6 @@ function PasskeyRowEditor({
   onDelete: () => void;
 }) {
   const [name, setName] = useState(passkey.name ?? "");
-  useEffect(() => setName(passkey.name ?? ""), [passkey.name]);
   const created = new Date(passkey.createdAt).toLocaleDateString();
 
   return (
@@ -726,7 +722,7 @@ function SecuritySection() {
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
-  const passkeysQ = useQuery({
+  const { data: passkeysData, isLoading: passkeysLoading } = useQuery({
     queryKey: ["passkeys"],
     queryFn: async () => {
       const res = await authClient.passkey.listUserPasskeys();
@@ -767,9 +763,9 @@ function SecuritySection() {
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
-  const passkeys = passkeysQ.data ?? [];
+  const passkeys = passkeysData ?? [];
 
-  const sessionsQ = useQuery({
+  const { data: sessionsData, isLoading: sessionsLoading } = useQuery({
     queryKey: ["sessions"],
     queryFn: async () => {
       const res = await authClient.listSessions();
@@ -799,7 +795,7 @@ function SecuritySection() {
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
-  const sessions = sessionsQ.data ?? [];
+  const sessions = sessionsData ?? [];
   const hasOthers = sessions.some((s) => s.token !== currentToken);
 
   return (
@@ -857,14 +853,14 @@ function SecuritySection() {
         <p className="text-[12px] text-muted-foreground">
           Sign in with your fingerprint, face, or a security key instead of a password.
         </p>
-        {passkeysQ.isLoading && <div className="text-[12px] text-muted-foreground">Loading…</div>}
-        {!passkeysQ.isLoading && passkeys.length === 0 && (
+        {passkeysLoading && <div className="text-[12px] text-muted-foreground">Loading…</div>}
+        {!passkeysLoading && passkeys.length === 0 && (
           <div className="text-[13px] text-muted-foreground">No passkeys yet.</div>
         )}
         <ul className="divide-y">
           {passkeys.map((p) => (
             <PasskeyRowEditor
-              key={p.id}
+              key={`${p.id}:${p.name ?? ""}`}
               passkey={p}
               busy={renamePasskey.isPending || removePasskey.isPending}
               onRename={(name) =>
@@ -904,7 +900,7 @@ function SecuritySection() {
             </Button>
           )}
         </div>
-        {sessionsQ.isLoading && <div className="text-[12px] text-muted-foreground">Loading…</div>}
+        {sessionsLoading && <div className="text-[12px] text-muted-foreground">Loading…</div>}
         <ul className="divide-y">
           {sessions.map((s) => {
             const isCurrent = s.token === currentToken;
@@ -1009,7 +1005,7 @@ function FoldersSection() {
         <ul className="divide-y">
           {folders.map((f, i) => (
             <FolderRowEditor
-              key={f.id}
+              key={`${f.id}:${f.name}`}
               folder={f}
               isFirst={i === 0}
               isLast={i === folders.length - 1}
@@ -1048,8 +1044,8 @@ function FolderRowEditor({
   onMoveDown: () => void;
   onDelete: () => void;
 }) {
+  // react-doctor-disable-next-line no-derived-useState -- editable draft seeded from the prop; re-seeded via the parent's key remount when the folder name changes
   const [name, setName] = useState(folder.name);
-  useEffect(() => setName(folder.name), [folder.name]);
 
   return (
     <li className="flex items-center gap-2 py-2">
@@ -1138,6 +1134,7 @@ function TwoFactorSection({ enabled }: { enabled: boolean }) {
       setTotpUri(data?.totpURI ?? null);
       setBackupCodes(data?.backupCodes ?? null);
       setPassword("");
+      qc.invalidateQueries({ queryKey: meQuery.queryKey });
       toast.success("Scan the QR / save backup codes, then verify below");
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
@@ -1306,11 +1303,11 @@ function NotificationsSection({ mailboxes }: { mailboxes: MailboxSummary[] }) {
     }
   };
 
-  const configsQ = useQuery({
+  const { data: configsData } = useQuery({
     queryKey: ["push-mailboxes"],
     queryFn: () => api<{ configs: NotifyConfig[] }>("/api/push/mailboxes"),
   });
-  const configById = new Map((configsQ.data?.configs ?? []).map((c) => [c.mailboxId, c]));
+  const configById = new Map((configsData?.configs ?? []).map((c) => [c.mailboxId, c]));
 
   const saveConfig = useMutation({
     mutationFn: ({ id, cfg }: { id: string; cfg: NotifyTiers }) =>

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, Timer } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
@@ -35,12 +35,11 @@ const TTL_PRESETS: { label: string; seconds: number }[] = [
 export function NewTempMailbox() {
   const [open, setOpen] = useState(false);
   const [created, setCreated] = useState<CreatedTemp | null>(null);
-  const domainsQ = useQuery(tempDomainsQueryOptions);
+  const { data: domainsData } = useQuery(tempDomainsQueryOptions);
 
   // Hide entirely when the user can't create a temp mailbox on any domain, but
   // keep its slot so the sidebar header height stays the same with or without it.
-  if ((domainsQ.data?.domains.length ?? 0) === 0)
-    return <div className="h-8 shrink-0" aria-hidden />;
+  if ((domainsData?.domains.length ?? 0) === 0) return <div className="h-8 shrink-0" aria-hidden />;
 
   return (
     <Popover
@@ -74,16 +73,11 @@ export function NewTempMailbox() {
 
 function TempForm({ onCreated }: { onCreated: (t: CreatedTemp) => void }) {
   const qc = useQueryClient();
-  const domainsQ = useQuery(tempDomainsQueryOptions);
-  const tempDomains = domainsQ.data?.domains ?? [];
-  const firstDomainId = tempDomains[0]?.id;
+  const { data: domainsData } = useQuery(tempDomainsQueryOptions);
+  const tempDomains = domainsData?.domains ?? [];
 
-  const [domainId, setDomainId] = useState("");
+  const [domainId, setDomainId] = useState(() => tempDomains[0]?.id ?? "");
   const [ttlSeconds, setTtlSeconds] = useState(TTL_PRESETS[0]!.seconds);
-
-  useEffect(() => {
-    if (!domainId && firstDomainId) setDomainId(firstDomainId);
-  }, [domainId, firstDomainId]);
 
   const create = useMutation({
     mutationFn: () =>

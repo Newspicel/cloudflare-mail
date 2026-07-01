@@ -11,7 +11,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   // Close the mobile drawer on navigation.
   // biome-ignore lint/correctness/useExhaustiveDependencies: close on every path change
-  useEffect(() => setNavOpen(false), [location.pathname]);
+  useEffect(() => setNavOpen(false), [location.pathname]); // react-doctor-disable-line no-mutable-in-deps
 
   return (
     <div className="flex h-dvh flex-col bg-background text-foreground">

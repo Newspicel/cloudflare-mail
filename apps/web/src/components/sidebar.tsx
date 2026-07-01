@@ -212,6 +212,7 @@ function SidebarBody({ onClose }: { onClose?: () => void }) {
                           )}
                         >
                           {readOnly && (
+                            // eslint-disable-next-line react-doctor/prefer-tag-over-role -- icon wrapper conveying read-only status; not a real image
                             <span role="img" aria-label="Read-only" title="Read-only">
                               <Lock className="h-3 w-3 text-muted-foreground" />
                             </span>

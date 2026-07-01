@@ -4,11 +4,9 @@ import type * as React from "react";
 import { cn } from "@/lib/cn";
 
 export const Dialog = BaseDialog.Root;
-export const DialogTrigger = BaseDialog.Trigger;
 export const DialogClose = BaseDialog.Close;
-export const DialogPortal = BaseDialog.Portal;
 
-export function DialogBackdrop({
+function DialogBackdrop({
   className,
   ...props
 }: React.ComponentProps<typeof BaseDialog.Backdrop>) {

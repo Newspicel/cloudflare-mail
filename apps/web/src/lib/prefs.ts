@@ -1,6 +1,5 @@
 import { parseUserPrefs, type UserPrefs } from "@cfmail/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo } from "react";
 import { authClient } from "./auth-client.ts";
 import { type MeUser, meQuery } from "./queries.ts";
 import { type DateTimeFmt, resolveDateTimeFmt } from "./time.ts";
@@ -14,8 +13,8 @@ type MeData = { user: MeUser | null };
  */
 export function useUserPrefs() {
   const qc = useQueryClient();
-  const me = useQuery(meQuery);
-  const prefs = parseUserPrefs(me.data?.user?.preferences);
+  const { data: meData } = useQuery(meQuery);
+  const prefs = parseUserPrefs(meData?.user?.preferences);
 
   const mutation = useMutation({
     mutationFn: async (next: UserPrefs) => {
@@ -42,5 +41,5 @@ export function useUserPrefs() {
 /** The current user's resolved date/time formatting prefs (see lib/time.ts). */
 export function useDateTimeFmt(): DateTimeFmt {
   const { dateFormat, timeFormat } = useUserPrefs().prefs;
-  return useMemo(() => resolveDateTimeFmt({ dateFormat, timeFormat }), [dateFormat, timeFormat]);
+  return resolveDateTimeFmt({ dateFormat, timeFormat });
 }

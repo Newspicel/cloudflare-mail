@@ -13,11 +13,11 @@ export const Route = createFileRoute("/login")({
 });
 
 function LoginPage() {
-  const bootstrap = useQuery(bootstrapQuery);
-  if (bootstrap.isLoading) {
+  const { data: bootstrap, isLoading } = useQuery(bootstrapQuery);
+  if (isLoading) {
     return <CardShell title="Loading…" />;
   }
-  if (bootstrap.data?.needsBootstrap) {
+  if (bootstrap?.needsBootstrap) {
     return <BootstrapForm />;
   }
   return <SignInForm />;

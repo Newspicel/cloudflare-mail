@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Folder as FolderIcon, FolderInput, Mail, MailOpen } from "lucide-react";
-import { type CSSProperties, useCallback, useMemo, useRef } from "react";
+import { type CSSProperties, useRef } from "react";
 import { api } from "@/lib/api.ts";
 import {
   type FolderRow,
@@ -50,15 +50,12 @@ export function FolderThreadList({
     cacheKey: `f:${folderId}`,
   });
   const vItems = virtualizer.getVirtualItems();
-  const remeasure = useCallback(
-    (i: number, el: HTMLLIElement) => virtualizer.resizeItem(i, el.offsetHeight),
-    [virtualizer],
-  );
+  const remeasure = (i: number, el: HTMLLIElement) => virtualizer.resizeItem(i, el.offsetHeight);
 
   const [from, to] = visibleBlock(virtualizer, threads.length);
-  const visibleIds = useMemo(() => threads.slice(from, to).map((t) => t.id), [threads, from, to]);
-  const labelsQ = useQuery(threadLabelsQuery(visibleIds));
-  const labelsByThread = labelsQ.data?.labels;
+  const visibleIds = threads.slice(from, to).map((t) => t.id);
+  const { data: labelsData } = useQuery(threadLabelsQuery(visibleIds));
+  const labelsByThread = labelsData?.labels;
   return (
     <TooltipProvider delay={400}>
       <div className="flex h-full flex-col bg-card">

@@ -29,6 +29,7 @@ export function usePullToRefresh(
   const [refreshing, setRefreshing] = useState(false);
   const refreshingRef = useRef(false);
 
+  // eslint-disable-next-line react-doctor/no-cascading-set-state -- the setState calls fire from discrete touch events, not synchronously within this effect
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || !enabled) return;
@@ -87,9 +88,10 @@ export function usePullToRefresh(
     };
 
     el.addEventListener("touchstart", onStart, { passive: true });
+    // eslint-disable-next-line react-doctor/client-passive-event-listeners -- onMove calls preventDefault to rubber-band the pull; passive would break it
     el.addEventListener("touchmove", onMove, { passive: false });
-    el.addEventListener("touchend", onEnd);
-    el.addEventListener("touchcancel", onEnd);
+    el.addEventListener("touchend", onEnd, { passive: true });
+    el.addEventListener("touchcancel", onEnd, { passive: true });
     return () => {
       el.removeEventListener("touchstart", onStart);
       el.removeEventListener("touchmove", onMove);

@@ -18,7 +18,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ApiError, api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
@@ -243,7 +243,7 @@ interface ComposePrefs {
   replyAllDefault?: boolean;
 }
 let composePrefs: ComposePrefs = {};
-export function setComposePrefs(p: ComposePrefs): void {
+function setComposePrefs(p: ComposePrefs): void {
   composePrefs = p;
 }
 
@@ -274,7 +274,7 @@ export function openCompose(partial: Partial<ComposeState> = {}): void {
   };
   for (const l of listeners) l(state);
 }
-export function closeCompose(): void {
+function closeCompose(): void {
   state = { open: false, replyToMessage: null, forwardMessage: null };
   for (const l of listeners) l(state);
 }
@@ -321,6 +321,12 @@ function isFileDrag(e: React.DragEvent): boolean {
   return Array.from(e.dataTransfer.types).includes("Files");
 }
 
+function onDragOver(e: React.DragEvent) {
+  if (!isFileDrag(e)) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "copy";
+}
+
 export function ComposeForm({
   state: s,
   variant = "dock",
@@ -343,6 +349,7 @@ export function ComposeForm({
   const fwd = s.forwardMessage;
   // The original message to quote, as a stable {messageId, kind} ref. Works for
   // a live reply/forward and for a reopened draft that persisted its quote.
+  // eslint-disable-next-line react-doctor/react-compiler-no-manual-memoization -- stable identity feeds `flush`'s deps (autosave), which exhaustive-deps requires
   const quoteRef = useMemo<{
     messageId: string;
     kind: "reply" | "forward";
@@ -356,7 +363,7 @@ export function ComposeForm({
   // Addresses that are "us" — excluded from reply-all recipients so we don't
   // reply to ourselves. The reply mailbox's own address plus the envelope
   // recipient the mail was delivered to.
-  const selfAddrs = useMemo(() => {
+  const selfAddrs = (() => {
     const set = new Set<string>();
     const mbAddr = (mailboxes?.mailboxes ?? [])
       .find((m) => m.id === rep?.mailboxId)
@@ -364,7 +371,7 @@ export function ComposeForm({
     if (mbAddr) set.add(mbAddr);
     if (rep?.deliveredTo) set.add(rep.deliveredTo.toLowerCase());
     return set;
-  }, [mailboxes, rep]);
+  })();
 
   const [mailboxId, setMailboxId] = useState(
     d?.mailboxId ?? rep?.mailboxId ?? fwd?.mailboxId ?? sendable[0]?.id ?? "",
@@ -385,10 +392,7 @@ export function ComposeForm({
       return dt;
     return null;
   });
-  const baseAddr = useCallback(
-    (id: string) => sendable.find((m) => m.id === id)?.address ?? "",
-    [sendable],
-  );
+  const baseAddr = (id: string) => sendable.find((m) => m.id === id)?.address ?? "";
   // Custom plus-aliases the user typed in compose, so they stay selectable.
   const [customAliases, setCustomAliases] = useState<{ address: string; mailboxId: string }[]>(
     () => {
@@ -401,7 +405,7 @@ export function ComposeForm({
   const [plusTag, setPlusTag] = useState("");
   // Selectable "From" addresses: each sendable mailbox, the plus-addressed
   // envelope recipient when replying to one, plus any custom alias the user added.
-  const fromOptions = useMemo(() => {
+  const fromOptions = (() => {
     const opts = sendable.map((m) => ({ address: m.address, mailboxId: m.id }));
     const dt = rep?.deliveredTo;
     const mb = sendable.find((m) => m.id === rep?.mailboxId);
@@ -415,10 +419,10 @@ export function ComposeForm({
     for (const c of customAliases)
       if (!opts.some((o) => o.address.toLowerCase() === c.address.toLowerCase())) opts.push(c);
     return opts;
-  }, [sendable, rep, customAliases]);
+  })();
   const currentFrom = fromAddress ?? baseAddr(mailboxId);
   // Apply the "+tag" typed in the picker as a sub-address of the chosen mailbox.
-  const applyPlusTag = useCallback(() => {
+  const applyPlusTag = () => {
     const base = baseAddr(mailboxId);
     const at = base.lastIndexOf("@");
     if (at <= 0) return;
@@ -433,7 +437,7 @@ export function ComposeForm({
     setFromAddress(tag ? addr : null);
     setPlusOpen(false);
     setPlusTag("");
-  }, [baseAddr, mailboxId, plusTag]);
+  };
   // PGP policy of the selected sending mailbox — drives the compose indicator.
   const pgpMode = sendable.find((m) => m.id === mailboxId)?.pgpMode ?? "off";
   const [to, setTo] = useState<RecipientsValue>(() => {
@@ -497,7 +501,7 @@ export function ComposeForm({
   // The original body, fetched for the quoted-message preview. The server
   // re-quotes from the raw `.eml` at send time (mail/quote.ts); this is only so
   // the composer can show what's being included.
-  const origBody = useQuery({
+  const { data: origBodyData } = useQuery({
     ...messageBodyQuery(quoteRef?.messageId ?? ""),
     enabled: Boolean(quoteRef),
   });
@@ -505,8 +509,9 @@ export function ComposeForm({
   // has a quoted body to sanitize) so it stays out of the first-paint chunk.
   const [quotedHtml, setQuotedHtml] = useState<string | null>(null);
   useEffect(() => {
-    const raw = origBody.data?.html;
+    const raw = origBodyData?.html;
     if (!raw) {
+      // react-doctor-disable-next-line no-adjust-state-on-prop-change -- quoted body is sanitized via a dynamic DOMPurify import; can't derive during render
       setQuotedHtml(null);
       return;
     }
@@ -517,7 +522,7 @@ export function ComposeForm({
     return () => {
       cancelled = true;
     };
-  }, [origBody.data?.html]);
+  }, [origBodyData?.html]);
   const [preview, setPreview] = useState(false);
   const [attachments, setAttachments] = useState<UploadedAttachment[]>(d?.attachments ?? []);
   const [uploading, setUploading] = useState(0);
@@ -568,6 +573,7 @@ export function ComposeForm({
     queued: null,
   });
 
+  // eslint-disable-next-line react-doctor/react-compiler-no-manual-memoization -- stable identity feeds `deleteDraft`/`flush` deps (autosave), which exhaustive-deps requires
   const invalidateDrafts = useCallback(() => {
     if (!mailboxId) return;
     qc.invalidateQueries({ queryKey: keys.drafts(mailboxId) });
@@ -575,6 +581,7 @@ export function ComposeForm({
     qc.invalidateQueries({ queryKey: keys.folderCounts(mailboxId) });
   }, [qc, mailboxId]);
 
+  // eslint-disable-next-line react-doctor/react-compiler-no-manual-memoization -- stable identity feeds `flush` deps (autosave), which exhaustive-deps requires
   const deleteDraft = useCallback(
     async (keepalive?: boolean) => {
       const id = draftIdRef.current;
@@ -586,6 +593,7 @@ export function ComposeForm({
     [invalidateDrafts],
   );
 
+  // eslint-disable-next-line react-doctor/react-compiler-no-manual-memoization -- stable identity feeds the pagehide-flush effect's exhaustive-deps
   const flush = useCallback(
     async (data: DraftFlush) => {
       const st = saveRef.current;
@@ -635,6 +643,7 @@ export function ComposeForm({
   );
 
   // The current form state as a draft snapshot + whether it's effectively blank.
+  // eslint-disable-next-line react-doctor/react-compiler-no-manual-memoization -- stable identity feeds the debounced-autosave effect's exhaustive-deps
   const currentSnapshot = useCallback((): {
     snap: DraftSnapshot;
     isEmpty: boolean;
@@ -664,6 +673,10 @@ export function ComposeForm({
     return { snap, isEmpty };
   }, [fromAddress, to, cc, bcc, subject, text, html, mode, attachments]);
 
+  // Latest-`flush` shim so the debounce effect below doesn't re-subscribe (and
+  // reset its timer) every time `flush`'s captured form state changes.
+  const onFlush = useEffectEvent((data: DraftFlush) => void flush(data));
+
   // Debounced autosave. Skips while the form is untouched (so merely opening a
   // reply/forward doesn't spawn a draft) and serializes writes via `flush`.
   useEffect(() => {
@@ -675,9 +688,9 @@ export function ComposeForm({
     }
     latestRef.current = { snap, isEmpty, key };
     if (key === savedKeyRef.current) return;
-    const handle = setTimeout(() => void flush({ snap, isEmpty, key }), 700);
+    const handle = setTimeout(() => onFlush({ snap, isEmpty, key }), 700);
     return () => clearTimeout(handle);
-  }, [currentSnapshot, flush]);
+  }, [currentSnapshot]);
 
   // Flush the last edit when the composer closes or the tab is torn down — the
   // debounce timer is cancelled on unmount, so without this the final <700ms of
@@ -700,32 +713,35 @@ export function ComposeForm({
   // Persist the current state and resolve the draft id — used by the pop-out so
   // the new window can rehydrate from the server-saved draft. Returns null only
   // when there is genuinely nothing to carry over.
-  const ensureDraftSaved = useCallback(async (): Promise<string | null> => {
+  const ensureDraftSaved = async (): Promise<string | null> => {
     const { snap, isEmpty } = currentSnapshot();
     if (isEmpty) return draftIdRef.current;
     const key = JSON.stringify(snap);
     savedKeyRef.current = key;
     await flush({ snap, isEmpty: false, key });
     return draftIdRef.current;
-  }, [currentSnapshot, flush]);
+  };
 
   // Pull in marked/DOMPurify as soon as a composer mounts so the markdown
   // preview and the sanitized send path have them ready by the time they fire.
   const [mdLibs, setMdLibs] = useState<MarkdownLibs | null>(markdownLibs);
+  // Preload marked/DOMPurify on mount so preview/send have them ready — a
+  // genuine mount-time side effect, not a substitute for an event handler.
   useEffect(() => {
+    // react-doctor-disable-next-line no-event-handler -- no triggering event; preloads a module on mount
     if (!mdLibs) void loadMarkdownLibs().then(setMdLibs);
   }, [mdLibs]);
 
-  const previewHtml = useMemo(() => {
+  const previewHtml = (() => {
     if (mode !== "markdown" || !text.trim() || !mdLibs) return "";
     const rendered = mdLibs.marked.parse(text, { async: false }) as string;
     return mdLibs.DOMPurify.sanitize(rendered, { USE_PROFILES: { html: true } });
-  }, [mode, text, mdLibs]);
+  })();
 
   // Resolve the editor state into the wire body: plain text → text only;
   // markdown → text source + rendered html; rich → sanitized html plus a derived
   // text alternative for non-HTML clients. Shared by immediate + scheduled send.
-  const buildBody = useCallback(async (): Promise<{
+  const buildBody = async (): Promise<{
     text: string | undefined;
     html: string | undefined;
   }> => {
@@ -743,10 +759,10 @@ export function ComposeForm({
       return { text, html: DOMPurify.sanitize(rendered, { USE_PROFILES: { html: true } }) };
     }
     return { text, html: undefined };
-  }, [mode, html, text]);
+  };
 
   // The full outbound payload — identical whether the send fires now or later.
-  const buildSendPayload = useCallback(async () => {
+  const buildSendPayload = async () => {
     const body = await buildBody();
     const ccList = collectRecipients(cc);
     const bccList = collectRecipients(bcc);
@@ -778,23 +794,7 @@ export function ComposeForm({
         : undefined,
       followUpDays: followUp ? followUpDays : undefined,
     };
-  }, [
-    buildBody,
-    cc,
-    bcc,
-    to,
-    mailboxId,
-    fromAddress,
-    subject,
-    inReplyTo,
-    references,
-    quoteRef,
-    attachments,
-    mode,
-    html,
-    followUp,
-    followUpDays,
-  ]);
+  };
 
   const send = useMutation({
     mutationFn: async () =>
@@ -822,6 +822,7 @@ export function ComposeForm({
   // Defer the send: persist the draft, then hand the server the resolved payload
   // + target time. The draft becomes the scheduled record (visible/cancelable in
   // Drafts) rather than being deleted.
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- onSuccess calls invalidateDrafts() (qc.invalidateQueries) already
   const schedule = useMutation({
     mutationFn: async (sendAt: number) => {
       const id = await ensureDraftSaved();
@@ -848,11 +849,11 @@ export function ComposeForm({
   // reach this server, so a reply would bounce. Only committed chips are checked
   // (not the in-progress input), and the query is keyed by the address set so
   // identical sets are served from cache rather than refetched on every keystroke.
-  const recipientAddrs = useMemo(() => {
+  const recipientAddrs = (() => {
     const all = [...to.items, ...cc.items, ...bcc.items].map((a) => a.address.trim().toLowerCase());
     return [...new Set(all)].filter((a) => a.includes("@"));
-  }, [to, cc, bcc]);
-  const blockedQ = useQuery({
+  })();
+  const { data: blockedData } = useQuery({
     queryKey: ["blocklist-check", recipientAddrs],
     queryFn: () =>
       api<{ blocked: string[] }>("/api/blocklist/check", {
@@ -862,7 +863,7 @@ export function ComposeForm({
     enabled: recipientAddrs.length > 0,
     staleTime: 30_000,
   });
-  const blockedRecipients = recipientAddrs.length ? (blockedQ.data?.blocked ?? []) : [];
+  const blockedRecipients = recipientAddrs.length ? (blockedData?.blocked ?? []) : [];
 
   // Close the dock, or close the OS window when running as a pop-out.
   function finish() {
@@ -1130,11 +1131,6 @@ export function ComposeForm({
     e.preventDefault();
     dragDepth.current += 1;
     setDragActive(true);
-  }
-  function onDragOver(e: React.DragEvent) {
-    if (!isFileDrag(e)) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "copy";
   }
   function onDragLeave(e: React.DragEvent) {
     if (!isFileDrag(e)) return;
@@ -1464,6 +1460,7 @@ export function ComposeForm({
             <FieldContent>
               <input
                 id="compose-subject"
+                aria-label="Subject"
                 value={subject}
                 onChange={(e) => setSubject(e.target.value)}
                 onKeyDown={(e) => {
@@ -1499,7 +1496,7 @@ export function ComposeForm({
         ) : mode === "markdown" && preview ? (
           <div
             // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized via DOMPurify
-            dangerouslySetInnerHTML={{ __html: previewHtml }}
+            dangerouslySetInnerHTML={{ __html: previewHtml }} // react-doctor-disable-line dangerous-html-sink -- previewHtml is DOMPurify.sanitize() output
             className="prose prose-sm max-w-none flex-1 overflow-y-auto py-2 dark:prose-invert"
           />
         ) : (
@@ -1518,35 +1515,37 @@ export function ComposeForm({
         )}
         {attachments.some((a) => !a.inline) && (
           <ul className="mt-2 flex flex-col gap-1 border-t pt-2">
-            {attachments
-              .filter((a) => !a.inline)
-              .map((a) => (
-                <li key={a.r2Key}>
-                  <Item variant="outline" size="sm">
-                    <ItemMedia>
-                      <Paperclip />
-                    </ItemMedia>
-                    <ItemContent className="flex-row items-center gap-2">
-                      <ItemTitle title={a.filename} className="min-w-0 flex-1">
-                        {a.filename}
-                      </ItemTitle>
-                      <Badge variant="outline" className="shrink-0 font-normal">
-                        {formatBytes(a.sizeBytes)}
-                      </Badge>
-                    </ItemContent>
-                    <ItemActions>
-                      <IconButton
-                        label={`Remove ${a.filename}`}
-                        icon={X}
-                        size="icon-sm"
-                        onClick={() =>
-                          setAttachments((prev) => prev.filter((x) => x.r2Key !== a.r2Key))
-                        }
-                      />
-                    </ItemActions>
-                  </Item>
-                </li>
-              ))}
+            {attachments.flatMap((a) =>
+              a.inline
+                ? []
+                : [
+                    <li key={a.r2Key}>
+                      <Item variant="outline" size="sm">
+                        <ItemMedia>
+                          <Paperclip />
+                        </ItemMedia>
+                        <ItemContent className="flex-row items-center gap-2">
+                          <ItemTitle title={a.filename} className="min-w-0 flex-1">
+                            {a.filename}
+                          </ItemTitle>
+                          <Badge variant="outline" className="shrink-0 font-normal">
+                            {formatBytes(a.sizeBytes)}
+                          </Badge>
+                        </ItemContent>
+                        <ItemActions>
+                          <IconButton
+                            label={`Remove ${a.filename}`}
+                            icon={X}
+                            size="icon-sm"
+                            onClick={() =>
+                              setAttachments((prev) => prev.filter((x) => x.r2Key !== a.r2Key))
+                            }
+                          />
+                        </ItemActions>
+                      </Item>
+                    </li>,
+                  ],
+            )}
           </ul>
         )}
         {quoteRef && (
@@ -1571,7 +1570,7 @@ export function ComposeForm({
                   <EmailFrame html={quotedHtml} />
                 ) : (
                   <pre className="whitespace-pre-wrap px-3 py-2 font-sans text-[12px] text-muted-foreground">
-                    {origBody.data?.text ?? rep?.snippet ?? fwd?.snippet ?? ""}
+                    {origBodyData?.text ?? rep?.snippet ?? fwd?.snippet ?? ""}
                   </pre>
                 )}
               </div>
@@ -1680,6 +1679,7 @@ export function ComposeForm({
             ref={fileInputRef}
             type="file"
             multiple
+            aria-label="Attach files"
             className="hidden"
             onChange={(e) => {
               void handleIncomingFiles(Array.from(e.target.files ?? []));
@@ -1803,7 +1803,7 @@ export function ComposeForm({
   if (isWindow) {
     return (
       // biome-ignore lint/a11y/noStaticElementInteractions: container-level ⌘/Ctrl+Enter send shortcut; inner fields stay the focus targets
-      <div
+      <div // react-doctor-disable-line no-static-element-interactions -- container-level keyboard shortcut wrapper; focus stays on inner fields
         onKeyDown={onContainerKeyDown}
         onPaste={onPaste}
         {...dragHandlers}

@@ -31,7 +31,7 @@ const DATE_SPECS: Record<DateFormat, DateSpec> = {
   "month-d-y": { order: "mdy", month: "long", sep: " ", year: "numeric" },
 };
 
-export const DEFAULT_DATE_FORMAT: DateFormat = "dmy-dot";
+const DEFAULT_DATE_FORMAT: DateFormat = "dmy-dot";
 
 export interface DateTimeFmt {
   spec: DateSpec;
@@ -87,11 +87,6 @@ export function formatClock(d: Date, fmt: DateTimeFmt): string {
     minute: "2-digit",
     hour12: fmt.hour12,
   });
-}
-
-/** Full date in the chosen layout. */
-export function formatDate(d: Date, fmt: DateTimeFmt): string {
-  return renderDate(d, fmt.spec, true);
 }
 
 /** Date + clock, e.g. a message header or print banner. */

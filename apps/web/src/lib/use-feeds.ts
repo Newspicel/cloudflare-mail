@@ -1,5 +1,4 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
 import {
   type DraftRow,
   draftsQuery,
@@ -34,7 +33,7 @@ const pickThreads = (p: { threads: ThreadRow[] }): ThreadRow[] => p.threads;
 const pickDrafts = (p: { drafts: DraftRow[] }): DraftRow[] => p.drafts;
 
 function useFeed<T, P>(q: InfiniteResult<P>, pick: (page: P) => T[]): Feed<T> {
-  const items = useMemo(() => q.data?.pages.flatMap(pick) ?? [], [q.data, pick]);
+  const items = q.data?.pages.flatMap(pick) ?? [];
   return {
     items,
     loading: q.isLoading,
@@ -47,6 +46,7 @@ function useFeed<T, P>(q: InfiniteResult<P>, pick: (page: P) => T[]): Feed<T> {
 }
 
 export function useThreadFeed(mailboxId: string, view: MailView, enabled = true): Feed<ThreadRow> {
+  // eslint-disable-next-line react-doctor/query-destructure-result -- whole result handed to useFeed, which reads several fields
   const q = useInfiniteQuery({
     ...threadsQuery(mailboxId, view),
     enabled: enabled && Boolean(mailboxId),
@@ -59,6 +59,7 @@ export function useFolderFeed(folderId: string): Feed<ThreadRow> {
 }
 
 export function useDraftFeed(mailboxId: string, enabled = true): Feed<DraftRow> {
+  // eslint-disable-next-line react-doctor/query-destructure-result -- whole result handed to useFeed, which reads several fields
   const q = useInfiniteQuery({ ...draftsQuery(mailboxId), enabled: enabled && Boolean(mailboxId) });
   return useFeed(q, pickDrafts);
 }

@@ -12,7 +12,9 @@ function isEditable(target: EventTarget | null): boolean {
 
 export function useKeyboardShortcuts(handler: Handler): void {
   const ref = useRef(handler);
-  ref.current = handler;
+  useEffect(() => {
+    ref.current = handler;
+  });
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {

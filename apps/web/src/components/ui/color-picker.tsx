@@ -60,7 +60,7 @@ interface Props {
 export function ColorPicker({ value, onChange }: Props) {
   // Keep hue/sat/val internally so dragging through black/white doesn't lose hue.
   const [hsv, setHsv] = useState<[number, number, number]>(() => hexToHsv(value) ?? [217, 0.27, 0.55]);
-  const [hex, setHex] = useState(value);
+  const [hex, setHex] = useState(() => value);
 
   // Re-sync internal state when the value changes from outside (e.g. preset click).
   if (value !== hex && /^#[0-9a-f]{6}$/i.test(value)) {
