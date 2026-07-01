@@ -23,17 +23,22 @@ export const SPAM_VERDICTS = ["clean", "suspicious", "spam"] as const;
 export type SpamVerdict = (typeof SPAM_VERDICTS)[number];
 
 // AI auto-category assigned to inbound mail (best-effort, Workers AI). A fixed
-// taxonomy kept small enough that a small model classifies it reliably; rendered
-// as a chip in the list. `other` is the fallback when nothing fits.
+// taxonomy; each tag is defined for the model in `mail/ai.ts` (CATEGORY_GUIDE)
+// and coloured as a chip in the list (thread-row.tsx). Keep the three in sync.
+// `other` is the fallback when nothing fits.
 export const AI_CATEGORIES = [
-  "newsletter",
-  "receipt",
-  "travel",
-  "finance",
-  "social",
   "personal",
-  "notification",
+  "newsletter",
   "promotion",
+  "shipping",
+  "receipt",
+  "finance",
+  "travel",
+  "social",
+  "security",
+  "update",
+  "notification",
+  "calendar",
   "other",
 ] as const;
 export type AiCategory = (typeof AI_CATEGORIES)[number];
