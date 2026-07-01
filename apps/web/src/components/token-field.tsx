@@ -5,6 +5,18 @@ import { cn } from "@/lib/cn.ts";
 const SPLIT = /[\s,;]+/;
 const defaultNormalize = (raw: string) => raw.trim() || null;
 
+// Merge the local input ref with an optional forwarded ref. Module-scope so the
+// ref callback isn't a component-local mutation the compiler must reason about.
+function mergeInputRef(
+  el: HTMLInputElement | null,
+  local: React.RefObject<HTMLInputElement | null>,
+  forwarded?: React.Ref<HTMLInputElement>,
+) {
+  local.current = el;
+  if (typeof forwarded === "function") forwarded(el);
+  else if (forwarded) forwarded.current = el;
+}
+
 export interface TokenFieldProps {
   value: string[];
   onChange: (next: string[]) => void;
@@ -35,9 +47,13 @@ export function TokenField({
   function add(raw: string) {
     const parts = raw.split(SPLIT);
     const next = [...value];
+    const seen = new Set(next);
     for (const part of parts) {
       const token = normalize(part);
-      if (token && !next.includes(token)) next.push(token);
+      if (token && !seen.has(token)) {
+        seen.add(token);
+        next.push(token);
+      }
     }
     if (next.length !== value.length) onChange(next);
   }
@@ -64,7 +80,7 @@ export function TokenField({
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: clicking the field focuses its input
-    <div
+    <div // react-doctor-disable-line no-static-element-interactions -- gutter click focuses the input; the field is not itself a control
       className={cn(
         "flex w-full flex-wrap items-center gap-1.5 rounded-md border bg-card px-2 py-1.5 text-[13px] shadow-sm outline-none transition-colors focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/35",
         disabled && "cursor-not-allowed opacity-50",
@@ -94,11 +110,7 @@ export function TokenField({
         </span>
       ))}
       <input
-        ref={(el) => {
-          localRef.current = el;
-          if (typeof inputRef === "function") inputRef(el);
-          else if (inputRef) inputRef.current = el;
-        }}
+        ref={(el) => mergeInputRef(el, localRef, inputRef)}
         disabled={disabled}
         placeholder={value.length === 0 ? placeholder : ""}
         aria-label={ariaLabel}

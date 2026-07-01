@@ -40,7 +40,7 @@ import {
   Users,
   Video,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { CodeBanner } from "@/components/code-banner.tsx";
 import { api } from "@/lib/api.ts";
@@ -92,6 +92,7 @@ export function MessageView({
   const qc = useQueryClient();
   const { confirmDelete } = useConfirmHelpers();
 
+  // eslint-disable-next-line react-doctor/react-compiler-no-manual-memoization -- stable identity required by the auto-mark-read effect's exhaustive-deps
   const invalidate = useCallback(
     () => invalidateThreadChange(qc, thread.mailboxId, thread.id),
     [qc, thread.mailboxId, thread.id],
@@ -118,6 +119,7 @@ export function MessageView({
   // Permanently delete a single message out of the thread. The server drops the
   // whole thread when it was the last message — navigate away in that case,
   // otherwise just remove the card from the open thread.
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- reconciles cache via onSettled invalidate + removeThreadsFromLists/removeMessageFromThread
   const delMsg = useMutation({
     mutationFn: (id: string) =>
       api<{ deleted: boolean; threadDeleted: boolean }>(`/api/messages/${id}`, {
@@ -336,6 +338,7 @@ export function MessageView({
       setCanUp(container.scrollTop > 8);
       setCanDown(container.scrollTop < container.scrollHeight - container.clientHeight - 8);
     };
+    // eslint-disable-next-line react-doctor/no-adjust-state-on-prop-change -- reads live scroll offsets from the DOM; not derivable during render
     update();
     const opts: AddEventListenerOptions = { passive: true };
     container.addEventListener("scroll", update, opts);
@@ -351,12 +354,14 @@ export function MessageView({
   // Individually-trashed messages are hidden from the active folders. The Trash
   // view shows the whole conversation when the thread itself is trashed, else
   // only its deleted messages; "All" shows everything.
-  const visibleMessages = useMemo(() => {
-    if (view === "trash")
-      return thread.trashed ? messages : messages.filter((m) => hasFlag(m.flags, Flag.TRASH));
-    if (view === "all") return messages;
-    return messages.filter((m) => !hasFlag(m.flags, Flag.TRASH));
-  }, [messages, view, thread.trashed]);
+  const visibleMessages =
+    view === "trash"
+      ? thread.trashed
+        ? messages
+        : messages.filter((m) => hasFlag(m.flags, Flag.TRASH))
+      : view === "all"
+        ? messages
+        : messages.filter((m) => !hasFlag(m.flags, Flag.TRASH));
 
   const ai = useThreadAi(thread, visibleMessages);
 
@@ -525,16 +530,15 @@ type ThreadAi = ReturnType<typeof useThreadAi>;
 function useThreadAi(thread: ThreadRow, messages: MessageRow[]) {
   const { data: mbData } = useQuery(mailboxesQuery);
   const aiOn = mbData?.mailboxes.find((m) => m.id === thread.mailboxId)?.aiFeatures ?? false;
-  const lastInbound = useMemo(
-    () => [...messages].toReversed().find((m) => m.direction === "in"),
-    [messages],
-  );
+  const lastInbound = [...messages].toReversed().find((m) => m.direction === "in");
 
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- AI summary is a read-only POST; its result is consumed via mutation state, not cached data
   const summarize = useMutation({
     mutationFn: () =>
       api<ThreadSummaryDto>(`/api/threads/${thread.id}/summary`, { method: "POST" }),
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Couldn't summarize"),
   });
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- AI smart-reply is a read-only POST; its result is consumed via mutation state, not cached data
   const smartReply = useMutation({
     mutationFn: () =>
       api<SmartReplyDto>(`/api/messages/${lastInbound!.id}/smart-reply`, { method: "POST" }),
@@ -545,7 +549,9 @@ function useThreadAi(thread: ThreadRow, messages: MessageRow[]) {
   const resetReply = smartReply.reset;
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset on thread switch
   useEffect(() => {
+    // eslint-disable-next-line react-doctor/no-pass-data-to-parent -- clears local mutation state on thread switch (view stays mounted across threads); no data flows to a parent
     reset();
+    // eslint-disable-next-line react-doctor/no-pass-data-to-parent -- clears local mutation state on thread switch (view stays mounted across threads); no data flows to a parent
     resetReply();
   }, [thread.id, reset, resetReply]);
 
@@ -800,6 +806,7 @@ function PgpBanner({ msg, readOnly }: { msg: MessageRow; readOnly: boolean }) {
 // is an https page we open in a new tab, everything else is handled server-side.
 function UnsubscribeBanner({ msg, readOnly }: { msg: MessageRow; readOnly: boolean }) {
   const [done, setDone] = useState(false);
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- unsubscribe is a best-effort action; it changes no cached mail data (banner hidden via local `done` state)
   const unsub = useMutation({
     mutationFn: () =>
       api<UnsubscribeResultDto>(`/api/messages/${msg.id}/unsubscribe`, { method: "POST" }),
@@ -1200,12 +1207,9 @@ function MessageCard({
 }) {
   // The body isn't in the thread payload (listing only carries the snippet);
   // fetch the full parsed body lazily when the card mounts.
-  const body = useQuery(messageBodyQuery(msg.id));
+  const { data: bodyData, isPending: bodyPending } = useQuery(messageBodyQuery(msg.id));
   const fmt = useDateTimeFmt();
-  const bodyHtml = useMemo(() => {
-    const html = body.data?.html;
-    return html ? sanitizeEmailHtml(html) : null;
-  }, [body.data?.html]);
+  const bodyHtml = bodyData?.html ? sanitizeEmailHtml(bodyData.html) : null;
   const starred = hasFlag(msg.flags, Flag.STARRED);
   const when = new Date(msg.sentAt ?? msg.receivedAt ?? msg.createdAt);
 
@@ -1264,7 +1268,7 @@ function MessageCard({
             )}
             <MessageMenu
               msg={msg}
-              body={body.data}
+              body={bodyData}
               onTrash={onTrash}
               onRestore={onRestore}
               onDelete={onDelete}
@@ -1277,14 +1281,14 @@ function MessageCard({
       <SpamBanner msg={msg} />
       <CodeBanner
         subject={msg.subject}
-        text={body.data?.text}
-        html={body.data?.html}
+        text={bodyData?.text}
+        html={bodyData?.html}
         direction={msg.direction}
       />
       <PgpBanner msg={msg} readOnly={readOnly} />
       <UnsubscribeBanner msg={msg} readOnly={readOnly} />
-      {body.data?.calendar && <CalendarBanner event={body.data.calendar} />}
-      {body.isPending ? (
+      {bodyData?.calendar && <CalendarBanner event={bodyData.calendar} />}
+      {bodyPending ? (
         // Hold the space with a skeleton while the body loads. Rendering the
         // snippet here flashed a plain-text preview that then got replaced by the
         // HTML frame — the "text first, then HTML" lag.
@@ -1300,13 +1304,13 @@ function MessageCard({
       ) : (
         // Plain-text body once loaded (or the snippet if parsing yields neither).
         <pre className="whitespace-pre-wrap px-4 py-3 font-sans text-[13px]">
-          {linkifyText(body.data?.text ?? msg.snippet)}
+          {linkifyText(bodyData?.text ?? msg.snippet)}
         </pre>
       )}
-      {body.data?.attachments && body.data.attachments.length > 0 && (
+      {bodyData?.attachments && bodyData.attachments.length > 0 && (
         <MessageAttachments
           messageId={msg.id}
-          attachments={body.data.attachments}
+          attachments={bodyData.attachments}
           hasHtml={Boolean(bodyHtml)}
         />
       )}

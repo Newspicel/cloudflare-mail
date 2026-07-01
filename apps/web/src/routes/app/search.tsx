@@ -84,10 +84,10 @@ function str(v: unknown): string | undefined {
 // `mailboxId` is a comma-separated list of ids ("" / "all" = every readable mailbox).
 function parseMailboxIds(v: string | undefined): string[] {
   if (!v || v === ALL_MAILBOXES) return [];
-  return v
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
+  return v.split(",").flatMap((s) => {
+    const t = s.trim();
+    return t ? [t] : [];
+  });
 }
 
 // Normalize raw URL params into a typed, default-stripped filter object.
@@ -118,13 +118,16 @@ function clean(s: Record<string, unknown>): SearchParams {
 function SearchPage() {
   const search = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
-  const mailboxes = useQuery(mailboxesQuery);
+  const { data: mailboxesData } = useQuery(mailboxesQuery);
 
   // Inputs are driven by local state for snappiness; committed to the URL on a
   // debounce. `lastWritten` lets us tell our own writes from external nav (back
   // button) so we can resync without a feedback loop.
+  // eslint-disable-next-line react-doctor/no-event-handler -- editable draft mirrors URL filters for snappy typing; committed to the URL on a debounce.
   const [form, setForm] = useState<SearchParams>(search);
-  const lastWritten = useRef(JSON.stringify(search));
+  const lastWritten = useRef<string | undefined>(undefined);
+  if (lastWritten.current === undefined) lastWritten.current = JSON.stringify(search);
+  // eslint-disable-next-line react-doctor/no-event-handler -- paging window; reset alongside form on filter changes.
   const [limit, setLimit] = useState(PAGE_SIZE);
   const queryRef = useRef<HTMLInputElement>(null);
 
@@ -132,10 +135,13 @@ function SearchPage() {
     queryRef.current?.focus();
   }, []);
 
+  // Resync the draft on external nav (back/forward) — but not on our own URL
+  // writes, which lastWritten dedupes. Intentional prop→state sync.
   useEffect(() => {
     const key = JSON.stringify(search);
     if (key !== lastWritten.current) {
       lastWritten.current = key;
+      // eslint-disable-next-line react-doctor/no-derived-state -- external URL change must override the local draft.
       setForm(search);
     }
   }, [search]);
@@ -154,6 +160,7 @@ function SearchPage() {
   // Query off the debounced URL `search` (not the live `form`) so requests fire
   // after the 300ms settle, not on every keystroke.
   const filters: SearchFilterInput = { ...search, limit };
+  // eslint-disable-next-line react-doctor/query-destructure-result -- passed whole to <Results> which needs the full UseQueryResult.
   const query = useQuery(searchQuery(filters));
   const results = query.data?.results ?? [];
 
@@ -167,15 +174,15 @@ function SearchPage() {
     });
   }
 
-  const activeChips = buildChips(form, mailboxes.data?.mailboxes);
+  const activeChips = buildChips(form, mailboxesData?.mailboxes);
   const filterCount = activeChips.length;
 
-  const mailboxList = mailboxes.data?.mailboxes ?? [];
+  const mailboxList = mailboxesData?.mailboxes ?? [];
   const selectedMailboxIds = parseMailboxIds(form.mailboxId);
 
   function setMailboxIds(ids: string[]) {
     // Keep the URL value in the same order the mailboxes are listed.
-    const ordered = mailboxList.filter((m) => ids.includes(m.id)).map((m) => m.id);
+    const ordered = mailboxList.flatMap((m) => (ids.includes(m.id) ? [m.id] : []));
     set("mailboxId", ordered.length ? ordered.join(",") : undefined);
   }
 
@@ -680,8 +687,9 @@ function buildChips(form: SearchParams, mailboxes?: { id: string; address: strin
   if (form.folder) chips.push({ key: "folder", label: `folder: ${form.folder}` });
   if (form.after) chips.push({ key: "after", label: `after: ${form.after}` });
   if (form.before) chips.push({ key: "before", label: `before: ${form.before}` });
+  const addrById = new Map((mailboxes ?? []).map((m) => [m.id, m.address]));
   for (const id of parseMailboxIds(form.mailboxId)) {
-    const addr = mailboxes?.find((m) => m.id === id)?.address ?? "mailbox";
+    const addr = addrById.get(id) ?? "mailbox";
     chips.push({ key: "mailboxId", label: addr, mailboxId: id });
   }
   return chips;

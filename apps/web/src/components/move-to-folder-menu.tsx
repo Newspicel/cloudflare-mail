@@ -60,8 +60,8 @@ export function MoveToFolderMenu({
 
 function MovePopover({ threadIds, mailboxId, currentFolderId, onMoved }: Props) {
   const qc = useQueryClient();
-  const foldersQ = useQuery(foldersQuery);
-  const folders = foldersQ.data?.folders ?? [];
+  const { data: foldersData } = useQuery(foldersQuery);
+  const folders = foldersData?.folders ?? [];
   const file = useFileThread();
   const unfile = useUnfileThread();
 

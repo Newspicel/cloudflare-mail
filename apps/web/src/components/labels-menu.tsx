@@ -31,9 +31,10 @@ export function LabelsMenu({
   tooltip?: string;
 }) {
   const qc = useQueryClient();
-  const appliedQ = useQuery(messageLabelsQuery([messageId]));
-  const applied = new Set((appliedQ.data?.labels[messageId] ?? []).map((l) => l.id));
+  const { data: appliedData } = useQuery(messageLabelsQuery([messageId]));
+  const applied = new Set((appliedData?.labels[messageId] ?? []).map((l) => l.id));
 
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- onSuccess refreshes label caches via invalidateLabels()
   const toggle = useMutation({
     mutationFn: (input: { labelId: string; on: boolean }) => {
       const path = `/api/labels/${input.labelId}/messages/${messageId}`;
@@ -65,17 +66,18 @@ export function BulkLabelsMenu({
   size?: "icon" | "icon-sm";
 }) {
   const qc = useQueryClient();
-  const appliedQ = useQuery(threadLabelsQuery(threadIds));
-  const byThread = appliedQ.data?.labels ?? {};
+  const { data: appliedData } = useQuery(threadLabelsQuery(threadIds));
+  const byThread = appliedData?.labels ?? {};
 
   // A label is fully "applied" only when it rides on every selected thread;
   // present on some-but-not-all shows an indeterminate dash.
   const counts = new Map<string, number>();
   for (const tid of threadIds)
     for (const l of byThread[tid] ?? []) counts.set(l.id, (counts.get(l.id) ?? 0) + 1);
-  const applied = new Set([...counts].filter(([, n]) => n === threadIds.length).map(([id]) => id));
-  const partial = new Set([...counts].filter(([, n]) => n < threadIds.length).map(([id]) => id));
+  const applied = new Set([...counts].flatMap(([id, n]) => (n === threadIds.length ? [id] : [])));
+  const partial = new Set([...counts].flatMap(([id, n]) => (n < threadIds.length ? [id] : [])));
 
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- onSuccess refreshes label caches via invalidateLabels()
   const toggle = useMutation({
     mutationFn: (input: { labelId: string; on: boolean }) =>
       Promise.all(
@@ -135,7 +137,7 @@ function LabelsMenuShell({ size = "icon", tooltip, ...rest }: ShellProps) {
 function LabelsPopover({ mailboxId, applied, partial, busy, onToggle }: ShellProps) {
   const qc = useQueryClient();
   const confirm = useConfirm();
-  const labelsQ = useQuery(labelsQuery(mailboxId));
+  const { data: labelsData } = useQuery(labelsQuery(mailboxId));
 
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
@@ -143,6 +145,7 @@ function LabelsPopover({ mailboxId, applied, partial, busy, onToggle }: ShellPro
 
   const invalidate = () => invalidateLabels(qc, mailboxId);
 
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- onSuccess refreshes label caches via invalidate()
   const create = useMutation({
     mutationFn: () =>
       api<{ id: string }>("/api/labels", {
@@ -159,6 +162,7 @@ function LabelsPopover({ mailboxId, applied, partial, busy, onToggle }: ShellPro
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- onSuccess refreshes label caches via invalidate()
   const remove = useMutation({
     mutationFn: (labelId: string) => api(`/api/labels/${labelId}`, { method: "DELETE" }),
     onSuccess: invalidate,
@@ -219,7 +223,7 @@ function LabelsPopover({ mailboxId, applied, partial, busy, onToggle }: ShellPro
       )}
 
       <ul className="max-h-64 overflow-y-auto">
-        {(labelsQ.data?.labels ?? []).map((l) => {
+        {(labelsData?.labels ?? []).map((l) => {
           const on = applied.has(l.id);
           const some = partial?.has(l.id);
           return (
@@ -253,7 +257,7 @@ function LabelsPopover({ mailboxId, applied, partial, busy, onToggle }: ShellPro
             </li>
           );
         })}
-        {labelsQ.data && labelsQ.data.labels.length === 0 && !creating && (
+        {labelsData && labelsData.labels.length === 0 && !creating && (
           <li className="px-2 py-3 text-center text-[11px] text-muted-foreground">
             No labels yet.
           </li>
@@ -264,8 +268,8 @@ function LabelsPopover({ mailboxId, applied, partial, busy, onToggle }: ShellPro
 }
 
 export function LabelChips({ messageId, className }: { messageId: string; className?: string }) {
-  const q = useQuery(messageLabelsQuery([messageId]));
-  const labels = q.data?.labels[messageId] ?? [];
+  const { data } = useQuery(messageLabelsQuery([messageId]));
+  const labels = data?.labels[messageId] ?? [];
   if (labels.length === 0) return null;
   return (
     <div className={cn("flex flex-wrap gap-1", className)}>

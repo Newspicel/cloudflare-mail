@@ -81,8 +81,8 @@ export function LabelsSubmenu({
   applied: Set<string>;
 }) {
   const qc = useQueryClient();
-  const labelsQ = useQuery(labelsQuery(mailboxId));
-  const labels = labelsQ.data?.labels ?? [];
+  const { data: labelsData } = useQuery(labelsQuery(mailboxId));
+  const labels = labelsData?.labels ?? [];
 
   const toggle = useMutation({
     mutationFn: (input: { labelId: string; on: boolean }) => {
@@ -130,8 +130,8 @@ export function FolderSubmenu({
   threadId: string;
   currentFolderId?: string;
 }) {
-  const foldersQ = useQuery(foldersQuery);
-  const folders = foldersQ.data?.folders ?? [];
+  const { data: foldersData } = useQuery(foldersQuery);
+  const folders = foldersData?.folders ?? [];
   const file = useFileThread();
   const unfile = useUnfileThread();
   const others = folders.filter((f) => f.id !== currentFolderId);

@@ -13,8 +13,8 @@ export const Route = createFileRoute("/app/folder/$folderId/")({
 function FolderIndex() {
   const { folderId } = Route.useParams();
   const feed = useFolderFeed(folderId);
-  const folders = useQuery(foldersQuery);
-  const folder = folders.data?.folders.find((f) => f.id === folderId);
+  const { data: foldersData } = useQuery(foldersQuery);
+  const folder = foldersData?.folders.find((f) => f.id === folderId);
 
   return (
     <div className="flex h-full flex-col">

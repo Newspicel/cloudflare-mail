@@ -77,7 +77,7 @@ const PGP_MODES: { value: PgpMode; label: string; hint: string }[] = [
   },
 ];
 
-export const SPAM_LEVELS: { value: SpamLevel; label: string; hint: string }[] = [
+const SPAM_LEVELS: { value: SpamLevel; label: string; hint: string }[] = [
   { value: "off", label: "Off", hint: "No spam filtering." },
   { value: "auth", label: "Authentication only", hint: "Flag mail that fails SPF/DKIM/DMARC." },
   {
@@ -105,35 +105,68 @@ export function MailboxSettingsForm({
   type: MailboxSettings["type"];
   admin?: boolean;
 }) {
-  const qc = useQueryClient();
   const base = admin
     ? `/api/admin/mailboxes/${mailboxId}/settings`
     : `/api/mailboxes/${mailboxId}/settings`;
   const queryKey = [admin ? "admin-mailbox-settings" : "mailbox-settings", mailboxId];
-  const settingsQ = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey,
     queryFn: () => api<MailboxSettings>(base),
   });
 
-  const [displayName, setDisplayName] = useState("");
-  const [replyTo, setReplyTo] = useState("");
-  const [signature, setSignature] = useState("");
-  const [spamFilter, setSpamFilter] = useState<SpamLevel>("standard");
-  const [aiCap, setAiCap] = useState("");
-  const [aiFeatures, setAiFeatures] = useState(false);
-  const [aiFeatureCap, setAiFeatureCap] = useState("");
+  return (
+    <section className={cardClass}>
+      <CardHeader
+        title={address}
+        action={
+          <Badge variant="outline" className="uppercase tracking-wider">
+            {type}
+          </Badge>
+        }
+      />
+      <MailboxSettingsFields
+        key={data ? "ready" : "loading"}
+        settings={data}
+        loading={isLoading}
+        base={base}
+        queryKey={queryKey}
+        admin={admin}
+        type={type}
+      />
+      {!admin && type !== "service" && type !== "temp" && (
+        <MailboxPgpCard mailboxId={mailboxId} settingsKey={queryKey} />
+      )}
+    </section>
+  );
+}
 
-  useEffect(() => {
-    if (settingsQ.data) {
-      setDisplayName(settingsQ.data.displayName ?? "");
-      setReplyTo(settingsQ.data.replyTo ?? "");
-      setSignature(settingsQ.data.signature ?? "");
-      setSpamFilter(settingsQ.data.spamFilter ?? "standard");
-      setAiCap(settingsQ.data.spamAiTokenCap ? String(settingsQ.data.spamAiTokenCap) : "");
-      setAiFeatures(settingsQ.data.aiFeatures ?? false);
-      setAiFeatureCap(settingsQ.data.aiTokenCap ? String(settingsQ.data.aiTokenCap) : "");
-    }
-  }, [settingsQ.data]);
+function MailboxSettingsFields({
+  settings,
+  loading,
+  base,
+  queryKey,
+  admin,
+  type,
+}: {
+  settings: MailboxSettings | undefined;
+  loading: boolean;
+  base: string;
+  queryKey: unknown[];
+  admin: boolean;
+  type: MailboxSettings["type"];
+}) {
+  const qc = useQueryClient();
+  const [displayName, setDisplayName] = useState(() => settings?.displayName ?? "");
+  const [replyTo, setReplyTo] = useState(() => settings?.replyTo ?? "");
+  const [signature, setSignature] = useState(() => settings?.signature ?? "");
+  const [spamFilter, setSpamFilter] = useState<SpamLevel>(() => settings?.spamFilter ?? "standard");
+  const [aiCap, setAiCap] = useState(() =>
+    settings?.spamAiTokenCap ? String(settings.spamAiTokenCap) : "",
+  );
+  const [aiFeatures, setAiFeatures] = useState(() => settings?.aiFeatures ?? false);
+  const [aiFeatureCap, setAiFeatureCap] = useState(() =>
+    settings?.aiTokenCap ? String(settings.aiTokenCap) : "",
+  );
 
   const save = useMutation({
     mutationFn: () =>
@@ -164,159 +197,142 @@ export function MailboxSettingsForm({
   const spamLabel = SPAM_LEVELS.find((l) => l.value === spamFilter);
 
   return (
-    <section className={cardClass}>
-      <CardHeader
-        title={address}
-        action={
-          <Badge variant="outline" className="uppercase tracking-wider">
-            {type}
-          </Badge>
-        }
-      />
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          save.mutate();
-        }}
-      >
-        <Region label="Identity">
-          <div className="space-y-4">
-            <Field label="Display name">
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        save.mutate();
+      }}
+    >
+      <Region label="Identity">
+        <div className="space-y-4">
+          <Field label="Display name">
+            <Input
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder="e.g. Support"
+              maxLength={200}
+            />
+          </Field>
+          <Field label="Reply-to address">
+            <Input
+              type="email"
+              value={replyTo}
+              onChange={(e) => setReplyTo(e.target.value)}
+              placeholder="replies@example.com"
+              maxLength={320}
+            />
+          </Field>
+          <Field label="Signature" hint="Appended to every outgoing message.">
+            <Textarea
+              value={signature}
+              onChange={(e) => setSignature(e.target.value)}
+              rows={4}
+              placeholder="Your name, role, links…"
+              className="min-h-[6rem] resize-y"
+              maxLength={5000}
+            />
+          </Field>
+          {type !== "service" && admin && (
+            <Field label="Spam filter" hint={spamLabel?.hint}>
+              <Select
+                items={SPAM_LEVELS}
+                value={spamFilter}
+                onValueChange={(v) => setSpamFilter(v as SpamLevel)}
+              >
+                <SelectTrigger aria-label="Spam filter">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SPAM_LEVELS.map((l) => (
+                    <SelectItem key={l.value} value={l.value}>
+                      {l.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          )}
+          {type !== "service" && !admin && (
+            <Field label="Spam filter" hint={`Set by your administrator. ${spamLabel?.hint}`}>
+              <div className="rounded-md border bg-muted/40 px-2.5 py-1.5 text-[13px] text-muted-foreground">
+                {spamLabel?.label ?? spamFilter}
+              </div>
+            </Field>
+          )}
+          {admin && spamFilter === "ai" && type !== "service" && (
+            <Field
+              label="AI monthly token budget"
+              hint={
+                settings?.spamUsage
+                  ? `Used ${settings.spamUsage.tokens.toLocaleString()} tokens across ${settings.spamUsage.calls} checks this month (${settings.spamUsage.period}). AI falls back to Standard when the budget is reached.`
+                  : "Leave empty for unlimited. AI runs only on uncertain mail to keep usage low."
+              }
+            >
               <Input
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                placeholder="e.g. Support"
-                maxLength={200}
+                type="number"
+                min={0}
+                value={aiCap}
+                onChange={(e) => setAiCap(e.target.value)}
+                placeholder="Unlimited"
               />
             </Field>
-            <Field label="Reply-to address">
+          )}
+          {type !== "service" && admin && (
+            <Field
+              label="AI features"
+              hint="Summarise & categorise inbound mail in the list, plus smart replies and thread summaries. Uses Workers AI."
+            >
+              <Select
+                items={[
+                  { value: "off", label: "Off" },
+                  { value: "on", label: "On" },
+                ]}
+                value={aiFeatures ? "on" : "off"}
+                onValueChange={(v) => setAiFeatures(v === "on")}
+              >
+                <SelectTrigger aria-label="AI features">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="off">Off</SelectItem>
+                  <SelectItem value="on">On</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+          )}
+          {type !== "service" && !admin && (
+            <Field label="AI features" hint="Set by your administrator.">
+              <div className="rounded-md border bg-muted/40 px-2.5 py-1.5 text-[13px] text-muted-foreground">
+                {settings?.aiFeatures ? "On" : "Off"}
+              </div>
+            </Field>
+          )}
+          {admin && aiFeatures && type !== "service" && (
+            <Field
+              label="AI monthly token budget"
+              hint={
+                settings?.aiUsage
+                  ? `Used ${settings.aiUsage.tokens.toLocaleString()} tokens across ${settings.aiUsage.calls} calls this month (${settings.aiUsage.period}). Features pause when the budget is reached; mail still delivers.`
+                  : "Leave empty for unlimited. Summaries run once per inbound message; replies and thread summaries only when requested."
+              }
+            >
               <Input
-                type="email"
-                value={replyTo}
-                onChange={(e) => setReplyTo(e.target.value)}
-                placeholder="replies@example.com"
-                maxLength={320}
+                type="number"
+                min={0}
+                value={aiFeatureCap}
+                onChange={(e) => setAiFeatureCap(e.target.value)}
+                placeholder="Unlimited"
               />
             </Field>
-            <Field label="Signature" hint="Appended to every outgoing message.">
-              <Textarea
-                value={signature}
-                onChange={(e) => setSignature(e.target.value)}
-                rows={4}
-                placeholder="Your name, role, links…"
-                className="min-h-[6rem] resize-y"
-                maxLength={5000}
-              />
-            </Field>
-            {type !== "service" && admin && (
-              <Field label="Spam filter" hint={spamLabel?.hint}>
-                <Select
-                  items={SPAM_LEVELS}
-                  value={spamFilter}
-                  onValueChange={(v) => setSpamFilter(v as SpamLevel)}
-                >
-                  <SelectTrigger aria-label="Spam filter">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {SPAM_LEVELS.map((l) => (
-                      <SelectItem key={l.value} value={l.value}>
-                        {l.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-            )}
-            {type !== "service" && !admin && (
-              <Field label="Spam filter" hint={`Set by your administrator. ${spamLabel?.hint}`}>
-                <div className="rounded-md border bg-muted/40 px-2.5 py-1.5 text-[13px] text-muted-foreground">
-                  {spamLabel?.label ?? spamFilter}
-                </div>
-              </Field>
-            )}
-            {admin && spamFilter === "ai" && type !== "service" && (
-              <Field
-                label="AI monthly token budget"
-                hint={
-                  settingsQ.data?.spamUsage
-                    ? `Used ${settingsQ.data.spamUsage.tokens.toLocaleString()} tokens across ${settingsQ.data.spamUsage.calls} checks this month (${settingsQ.data.spamUsage.period}). AI falls back to Standard when the budget is reached.`
-                    : "Leave empty for unlimited. AI runs only on uncertain mail to keep usage low."
-                }
-              >
-                <Input
-                  type="number"
-                  min={0}
-                  value={aiCap}
-                  onChange={(e) => setAiCap(e.target.value)}
-                  placeholder="Unlimited"
-                />
-              </Field>
-            )}
-            {type !== "service" && admin && (
-              <Field
-                label="AI features"
-                hint="Summarise & categorise inbound mail in the list, plus smart replies and thread summaries. Uses Workers AI."
-              >
-                <Select
-                  items={[
-                    { value: "off", label: "Off" },
-                    { value: "on", label: "On" },
-                  ]}
-                  value={aiFeatures ? "on" : "off"}
-                  onValueChange={(v) => setAiFeatures(v === "on")}
-                >
-                  <SelectTrigger aria-label="AI features">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="off">Off</SelectItem>
-                    <SelectItem value="on">On</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-            )}
-            {type !== "service" && !admin && (
-              <Field label="AI features" hint="Set by your administrator.">
-                <div className="rounded-md border bg-muted/40 px-2.5 py-1.5 text-[13px] text-muted-foreground">
-                  {settingsQ.data?.aiFeatures ? "On" : "Off"}
-                </div>
-              </Field>
-            )}
-            {admin && aiFeatures && type !== "service" && (
-              <Field
-                label="AI monthly token budget"
-                hint={
-                  settingsQ.data?.aiUsage
-                    ? `Used ${settingsQ.data.aiUsage.tokens.toLocaleString()} tokens across ${settingsQ.data.aiUsage.calls} calls this month (${settingsQ.data.aiUsage.period}). Features pause when the budget is reached; mail still delivers.`
-                    : "Leave empty for unlimited. Summaries run once per inbound message; replies and thread summaries only when requested."
-                }
-              >
-                <Input
-                  type="number"
-                  min={0}
-                  value={aiFeatureCap}
-                  onChange={(e) => setAiFeatureCap(e.target.value)}
-                  placeholder="Unlimited"
-                />
-              </Field>
-            )}
-            <div className="flex justify-end pt-1">
-              <Button
-                type="submit"
-                variant="primary"
-                disabled={save.isPending || settingsQ.isLoading}
-              >
-                {save.isPending ? "Saving…" : "Save changes"}
-              </Button>
-            </div>
+          )}
+          <div className="flex justify-end pt-1">
+            <Button type="submit" variant="primary" disabled={save.isPending || loading}>
+              {save.isPending ? "Saving…" : "Save changes"}
+            </Button>
           </div>
-        </Region>
-      </form>
-      {!admin && type !== "service" && type !== "temp" && (
-        <MailboxPgpCard mailboxId={mailboxId} settingsKey={queryKey} />
-      )}
-    </section>
+        </div>
+      </Region>
+    </form>
   );
 }
 
@@ -330,12 +346,12 @@ function MailboxPgpCard({ mailboxId, settingsKey }: { mailboxId: string; setting
   const qc = useQueryClient();
   const { confirm, confirmDelete } = useConfirmHelpers();
   const base = `/api/mailboxes/${mailboxId}`;
-  const settingsQ = useQuery({
+  const { data: s, isLoading: settingsLoading } = useQuery({
     queryKey: settingsKey,
     queryFn: () => api<MailboxSettings>(`${base}/settings`),
   });
   const contactsKey = ["mailbox-contacts", mailboxId];
-  const contactsQ = useQuery({
+  const { data: contactsData } = useQuery({
     queryKey: contactsKey,
     queryFn: () => api<{ keys: ContactKey[] }>(`${base}/contacts`),
   });
@@ -346,7 +362,6 @@ function MailboxPgpCard({ mailboxId, settingsKey }: { mailboxId: string; setting
   const [contactEmail, setContactEmail] = useState("");
   const [contactKey, setContactKey] = useState("");
 
-  const s = settingsQ.data;
   const configured = !!s?.pgpConfigured;
 
   const refreshSettings = () => {
@@ -354,6 +369,7 @@ function MailboxPgpCard({ mailboxId, settingsKey }: { mailboxId: string; setting
     qc.invalidateQueries({ queryKey: keys.mailboxes() });
   };
 
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- invalidates via refreshSettings()
   const setMode = useMutation({
     mutationFn: (mode: PgpMode) =>
       api(`${base}/settings`, { method: "PATCH", body: JSON.stringify({ pgpMode: mode }) }),
@@ -361,6 +377,7 @@ function MailboxPgpCard({ mailboxId, settingsKey }: { mailboxId: string; setting
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- invalidates via refreshSettings()
   const generate = useMutation({
     mutationFn: () => api<{ fingerprint: string }>(`${base}/pgp/generate`, { method: "POST" }),
     onSuccess: (r) => {
@@ -370,6 +387,7 @@ function MailboxPgpCard({ mailboxId, settingsKey }: { mailboxId: string; setting
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Generate failed"),
   });
 
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- invalidates via refreshSettings()
   const doImport = useMutation({
     mutationFn: () =>
       api<{ fingerprint: string }>(`${base}/pgp/import`, {
@@ -386,6 +404,7 @@ function MailboxPgpCard({ mailboxId, settingsKey }: { mailboxId: string; setting
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Import failed"),
   });
 
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- invalidates via refreshSettings()
   const removeKey = useMutation({
     mutationFn: () => api(`${base}/pgp`, { method: "DELETE" }),
     onSuccess: () => {
@@ -423,6 +442,7 @@ function MailboxPgpCard({ mailboxId, settingsKey }: { mailboxId: string; setting
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- invalidates via refreshSettings()
   const setAutoFetch = useMutation({
     mutationFn: (pgpAutoFetch: boolean) =>
       api(`${base}/settings`, { method: "PATCH", body: JSON.stringify({ pgpAutoFetch }) }),
@@ -430,7 +450,7 @@ function MailboxPgpCard({ mailboxId, settingsKey }: { mailboxId: string; setting
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
-  const contacts = contactsQ.data?.keys ?? [];
+  const contacts = contactsData?.keys ?? [];
 
   return (
     <Region
@@ -449,7 +469,7 @@ function MailboxPgpCard({ mailboxId, settingsKey }: { mailboxId: string; setting
           <Select
             items={PGP_MODES}
             value={s?.pgpMode ?? "off"}
-            disabled={!configured || setMode.isPending || settingsQ.isLoading}
+            disabled={!configured || setMode.isPending || settingsLoading}
             onValueChange={(v) => setMode.mutate(v as PgpMode)}
           >
             <SelectTrigger aria-label="PGP mode">
@@ -557,7 +577,7 @@ function MailboxPgpCard({ mailboxId, settingsKey }: { mailboxId: string; setting
           </div>
           <Switch
             checked={s?.pgpAutoFetch ?? true}
-            disabled={setAutoFetch.isPending || settingsQ.isLoading}
+            disabled={setAutoFetch.isPending || settingsLoading}
             onCheckedChange={(v) => setAutoFetch.mutate(v)}
             aria-label="Auto-discover keys via WKD"
           />
@@ -669,9 +689,9 @@ export function MailboxImportSection({ mailboxes }: { mailboxes: ImportTarget[] 
   const [running, setRunning] = useState(false);
 
   // Keep the selection valid if the mailbox list changes underneath us.
-  useEffect(() => {
-    if (!mailboxes.some((m) => m.id === mailboxId)) setMailboxId(mailboxes[0]?.id ?? "");
-  }, [mailboxes, mailboxId]);
+  const selectedId = mailboxes.some((m) => m.id === mailboxId)
+    ? mailboxId
+    : (mailboxes[0]?.id ?? "");
 
   // `webkitdirectory` has no JSX typing; set it on the DOM node directly. With it
   // the picker selects a whole folder, and the browser reads each message lazily
@@ -681,11 +701,11 @@ export function MailboxImportSection({ mailboxes }: { mailboxes: ImportTarget[] 
   }, []);
 
   async function start() {
-    if (!files.length || running || !mailboxId) return;
+    if (!files.length || running || !selectedId) return;
     setRunning(true);
     setProgress(null);
     try {
-      const result = await runImport(mailboxId, files, setProgress);
+      const result = await runImport(selectedId, files, setProgress);
       const imported = result.done - result.duplicate - result.skipped - result.failed;
       const extra = [
         result.duplicate ? `${result.duplicate} duplicate` : "",
@@ -703,7 +723,7 @@ export function MailboxImportSection({ mailboxes }: { mailboxes: ImportTarget[] 
           `Imported ${imported} message${imported === 1 ? "" : "s"}${extra ? ` (${extra})` : ""}`,
         );
       }
-      qc.invalidateQueries({ queryKey: keys.threadsRoot(mailboxId) });
+      qc.invalidateQueries({ queryKey: keys.threadsRoot(selectedId) });
       qc.invalidateQueries({ queryKey: keys.mailboxes() });
       qc.invalidateQueries({ queryKey: keys.folders() });
       // Keep the selection on failures so the user can re-run to retry just the
@@ -727,7 +747,11 @@ export function MailboxImportSection({ mailboxes }: { mailboxes: ImportTarget[] 
       title="Import mail"
       description="Upload exported messages — .eml, .mbox, or a .zip. For a large export (e.g. Proton Mail), select its folder instead of zipping it."
       footer={
-        <Button variant="primary" disabled={!files.length || running || !mailboxId} onClick={start}>
+        <Button
+          variant="primary"
+          disabled={!files.length || running || !selectedId}
+          onClick={start}
+        >
           {running
             ? "Importing…"
             : files.length
@@ -743,7 +767,7 @@ export function MailboxImportSection({ mailboxes }: { mailboxes: ImportTarget[] 
             value: m.id,
             label: m.displayName ? `${m.displayName} (${m.address})` : m.address,
           }))}
-          value={mailboxId}
+          value={selectedId}
           disabled={running}
           onValueChange={(v) => setMailboxId(v as string)}
         >
@@ -762,6 +786,7 @@ export function MailboxImportSection({ mailboxes }: { mailboxes: ImportTarget[] 
       <input
         ref={inputRef}
         type="file"
+        aria-label="Choose files to import"
         accept=".eml,.mbox,.zip,.json,message/rfc822"
         multiple
         disabled={running}
@@ -787,6 +812,7 @@ export function MailboxImportSection({ mailboxes }: { mailboxes: ImportTarget[] 
         <input
           ref={folderRef}
           type="file"
+          aria-label="Choose a folder to import"
           hidden
           disabled={running}
           onChange={(e) => {

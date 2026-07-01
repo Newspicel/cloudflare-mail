@@ -115,11 +115,11 @@ interface ServiceMailbox {
 }
 
 function AdminPage() {
-  const me = useQuery(meQuery);
-  const isAdmin = me.data?.user?.role === "admin";
+  const { data: meData, isLoading } = useQuery(meQuery);
+  const isAdmin = meData?.user?.role === "admin";
   const [tab, setTab] = useState<Tab>(isAdmin ? "domains" : "mailboxes");
 
-  if (me.isLoading) {
+  if (isLoading) {
     return <div className="p-8 text-[13px] text-muted-foreground">Loading…</div>;
   }
 
@@ -296,11 +296,11 @@ const KIND_CHECKBOXES: { label: string; bit: number; type: MailboxSummary["type"
 
 function DomainsSection() {
   const qc = useQueryClient();
-  const domainsQ = useQuery({
+  const { data: domainsData } = useQuery({
     queryKey: ["domains"],
     queryFn: () => api<{ domains: Domain[] }>("/api/domains"),
   });
-  const settingsQ = useQuery({
+  const { data: settingsData } = useQuery({
     queryKey: ["domains-settings"],
     queryFn: () => api<{ authFromAddress: string | null }>("/api/domains/settings"),
   });
@@ -344,7 +344,7 @@ function DomainsSection() {
       >
         <div className="flex gap-2">
           <Input
-            value={fromAddr || settingsQ.data?.authFromAddress || ""}
+            value={fromAddr || settingsData?.authFromAddress || ""}
             onChange={(e) => setFromAddr(e.target.value)}
             placeholder="noreply@example.com"
             className="flex-1"
@@ -370,10 +370,10 @@ function DomainsSection() {
               </tr>
             </thead>
             <tbody className="divide-y">
-              {(domainsQ.data?.domains ?? []).map((d) => (
+              {(domainsData?.domains ?? []).map((d) => (
                 <DomainRow key={d.id} domain={d} />
               ))}
-              {domainsQ.data?.domains.length === 0 && (
+              {domainsData?.domains.length === 0 && (
                 <tr>
                   <td
                     colSpan={4}
@@ -537,14 +537,15 @@ function DnsBadge({ label, ok, checked }: { label: string; ok: boolean; checked:
 
 function UsersSection() {
   const qc = useQueryClient();
-  const usersQ = useQuery({
+  const { data: usersData } = useQuery({
     queryKey: ["admin-users"],
     queryFn: () => api<{ users: AdminUser[] }>("/api/users"),
   });
-  const invitesQ = useQuery({
+  const { data: invitesData } = useQuery({
     queryKey: ["admin-invites"],
     queryFn: () => api<{ invites: UserInviteRow[] }>("/api/users/invites"),
   });
+  const pendingInvites = (invitesData?.invites ?? []).filter((i) => !i.usedAt);
 
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"admin" | "user">("user");
@@ -591,10 +592,10 @@ function UsersSection() {
     <div className="space-y-5">
       <Section title="Users" description="Everyone with access to this deployment.">
         <ul className="divide-y rounded-md border">
-          {(usersQ.data?.users ?? []).map((u) => (
+          {(usersData?.users ?? []).map((u) => (
             <UserRow key={u.id} user={u} />
           ))}
-          {usersQ.data?.users.length === 0 && (
+          {usersData?.users.length === 0 && (
             <li className="px-3 py-6 text-center text-[12px] text-muted-foreground">
               No users yet.
             </li>
@@ -628,13 +629,11 @@ function UsersSection() {
             Send invite
           </PrimaryBtn>
         </div>
-        {(invitesQ.data?.invites ?? []).filter((i) => !i.usedAt).length > 0 && (
+        {pendingInvites.length > 0 && (
           <ul className="mt-4 divide-y rounded-md border">
-            {(invitesQ.data?.invites ?? [])
-              .filter((i) => !i.usedAt)
-              .map((inv) => (
-                <InviteRow key={inv.id} invite={inv} />
-              ))}
+            {pendingInvites.map((inv) => (
+              <InviteRow key={inv.id} invite={inv} />
+            ))}
           </ul>
         )}
       </Section>
@@ -690,8 +689,8 @@ function UsersSection() {
 function UserRow({ user }: { user: AdminUser }) {
   const qc = useQueryClient();
   const confirm = useConfirm();
-  const me = useQuery(meQuery);
-  const isMe = me.data?.user?.id === user.id;
+  const { data: meData } = useQuery(meQuery);
+  const isMe = meData?.user?.id === user.id;
   const [open, setOpen] = useState(false);
 
   const setRole = useMutation({
@@ -801,11 +800,11 @@ function InviteRow({ invite }: { invite: UserInviteRow }) {
 
 function DomainGrantsPanel({ userId }: { userId: string }) {
   const qc = useQueryClient();
-  const domainsQ = useQuery({
+  const { data: domainsData } = useQuery({
     queryKey: ["domains"],
     queryFn: () => api<{ domains: Domain[] }>("/api/domains"),
   });
-  const grantsQ = useQuery({
+  const { data: grantsData } = useQuery({
     queryKey: ["user-grants", userId],
     queryFn: () => api<{ grants: DomainGrantRow[] }>(`/api/users/${userId}/domain-grants`),
   });
@@ -821,7 +820,7 @@ function DomainGrantsPanel({ userId }: { userId: string }) {
   });
 
   const grantByDomain = new Map(
-    (grantsQ.data?.grants ?? []).map((g) => [g.domainId, g.allowedKinds]),
+    (grantsData?.grants ?? []).map((g) => [g.domainId, g.allowedKinds]),
   );
 
   return (
@@ -830,7 +829,7 @@ function DomainGrantsPanel({ userId }: { userId: string }) {
         Per-domain mailbox-kind grants
       </div>
       <ul className="divide-y rounded-md border bg-card">
-        {(domainsQ.data?.domains ?? []).map((d) => {
+        {(domainsData?.domains ?? []).map((d) => {
           const kinds = grantByDomain.get(d.id) ?? 0;
           return (
             <li
@@ -852,7 +851,7 @@ function DomainGrantsPanel({ userId }: { userId: string }) {
             </li>
           );
         })}
-        {domainsQ.data?.domains.length === 0 && (
+        {domainsData?.domains.length === 0 && (
           <li className="px-3 py-3 text-center text-[11px] text-muted-foreground">
             No domains configured.
           </li>
@@ -863,20 +862,18 @@ function DomainGrantsPanel({ userId }: { userId: string }) {
 }
 
 function renderKinds(kinds: number): string {
-  return KIND_CHECKBOXES.filter((k) => (kinds & k.bit) === k.bit)
-    .map((k) => k.label)
-    .join(", ");
+  return KIND_CHECKBOXES.flatMap((k) => ((kinds & k.bit) === k.bit ? [k.label] : [])).join(", ");
 }
 
 // ─── Service mailboxes ────────────────────────────────────────────────────────
 
 function ServiceSection() {
   const qc = useQueryClient();
-  const servicesQ = useQuery({
+  const { data: servicesData } = useQuery({
     queryKey: ["admin-service"],
     queryFn: () => api<{ services: ServiceMailbox[] }>("/api/admin/service"),
   });
-  const domainsQ = useQuery({
+  const { data: domainsData } = useQuery({
     queryKey: ["domains"],
     queryFn: () => api<{ domains: Domain[] }>("/api/domains"),
   });
@@ -884,12 +881,12 @@ function ServiceSection() {
   // The plaintext key is returned once on create/rotate — surface it in a modal.
   const [revealed, setRevealed] = useState<{ address: string; key: string } | null>(null);
 
-  const eligibleDomains = (domainsQ.data?.domains ?? []).filter(
+  const eligibleDomains = (domainsData?.domains ?? []).filter(
     (d) => (d.allowedKinds & MailboxKind.SERVICE) === MailboxKind.SERVICE,
   );
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["admin-service"] });
-  const services = servicesQ.data?.services ?? [];
+  const services = servicesData?.services ?? [];
 
   return (
     <Section
@@ -945,6 +942,7 @@ function ServiceCreateForm({
   const [domainId, setDomainId] = useState("");
   const [mode, setMode] = useState<"duplex" | "send">("duplex");
 
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- invalidation runs in onCreated
   const create = useMutation({
     mutationFn: () =>
       api<{ id: string; key: string }>("/api/admin/service", {
@@ -1009,6 +1007,7 @@ function ServiceRow({
 }) {
   const confirm = useConfirm();
 
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- invalidation runs in injected invalidate
   const rotate = useMutation({
     mutationFn: () => api<{ key: string }>(`/api/admin/service/${s.id}/rotate`, { method: "POST" }),
     onSuccess: (res) => {
@@ -1018,6 +1017,7 @@ function ServiceRow({
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- invalidation runs in injected invalidate
   const setMode = useMutation({
     mutationFn: (mode: "duplex" | "send") =>
       api(`/api/admin/service/${s.id}`, { method: "PATCH", body: JSON.stringify({ mode }) }),
@@ -1025,6 +1025,7 @@ function ServiceRow({
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- invalidation runs in injected invalidate
   const remove = useMutation({
     mutationFn: () => api(`/api/admin/service/${s.id}`, { method: "DELETE" }),
     onSuccess: () => {
@@ -1158,41 +1159,41 @@ type Entry =
 const kindOf = (e: Entry) => (e.kind === "redirect" ? "redirect" : e.mb.type);
 
 function MailboxesSection() {
-  const me = useQuery(meQuery);
-  const isAdmin = me.data?.user?.role === "admin";
-  return isAdmin ? <AdminMailboxes meId={me.data?.user?.id ?? ""} /> : <OwnMailboxes />;
+  const { data: meData } = useQuery(meQuery);
+  const isAdmin = meData?.user?.role === "admin";
+  return isAdmin ? <AdminMailboxes meId={meData?.user?.id ?? ""} /> : <OwnMailboxes />;
 }
 
 // Non-admin: only the mailboxes the user owns or was granted access to.
 function OwnMailboxes() {
   const qc = useQueryClient();
-  const me = useQuery(meQuery);
-  const domainsQ = useQuery({
+  const { data: meData } = useQuery(meQuery);
+  const { data: domainsData } = useQuery({
     queryKey: ["domains"],
     queryFn: () => api<{ domains: Domain[] }>("/api/domains"),
   });
-  const mailboxesQ = useQuery(mailboxesQuery);
-  const grantsQ = useQuery({
-    queryKey: ["user-grants", me.data?.user?.id],
+  const { data: mailboxesData } = useQuery(mailboxesQuery);
+  const { data: grantsData } = useQuery({
+    queryKey: ["user-grants", meData?.user?.id],
     queryFn: () =>
-      api<{ grants: DomainGrantRow[] }>(`/api/users/${me.data?.user?.id}/domain-grants`),
-    enabled: Boolean(me.data?.user?.id),
+      api<{ grants: DomainGrantRow[] }>(`/api/users/${meData?.user?.id}/domain-grants`),
+    enabled: Boolean(meData?.user?.id),
   });
 
   const grantByDomain = new Map(
-    (grantsQ.data?.grants ?? []).map((g) => [g.domainId, g.allowedKinds]),
+    (grantsData?.grants ?? []).map((g) => [g.domainId, g.allowedKinds]),
   );
-  const eligibleDomains = (domainsQ.data?.domains ?? []).filter(
+  const eligibleDomains = (domainsData?.domains ?? []).filter(
     (d) => (d.allowedKinds & (grantByDomain.get(d.id) ?? 0)) !== 0,
   );
 
   return (
     <Section title="Mailboxes" description="Mailboxes you own or have been granted access to.">
       <ul className="divide-y rounded-md border">
-        {(mailboxesQ.data?.mailboxes ?? []).map((m) => (
+        {(mailboxesData?.mailboxes ?? []).map((m) => (
           <MailboxRow key={m.id} mailbox={m} />
         ))}
-        {mailboxesQ.data?.mailboxes.length === 0 && (
+        {mailboxesData?.mailboxes.length === 0 && (
           <li className="px-3 py-8 text-center text-[12px] text-muted-foreground">
             No mailboxes yet.
           </li>
@@ -1219,25 +1220,25 @@ function OwnMailboxes() {
 // that toggles between the two.
 function AdminMailboxes({ meId }: { meId: string }) {
   const qc = useQueryClient();
-  const domainsQ = useQuery({
+  const { data: domainsData } = useQuery({
     queryKey: ["domains"],
     queryFn: () => api<{ domains: Domain[] }>("/api/domains"),
   });
-  const usersQ = useQuery({
+  const { data: usersData } = useQuery({
     queryKey: ["admin-users"],
     queryFn: () => api<{ users: AdminUser[] }>("/api/users"),
   });
-  const mailboxesQ = useQuery({
+  const { data: mailboxesData } = useQuery({
     queryKey: ["admin-mailboxes"],
     queryFn: () => api<{ mailboxes: AdminMailbox[] }>("/api/admin/mailboxes"),
   });
-  const redirectsQ = useQuery({
+  const { data: redirectsData } = useQuery({
     queryKey: ["admin-redirects"],
     queryFn: () => api<{ redirects: RedirectRow[] }>("/api/admin/redirects"),
   });
   // Owned mailboxes carry permission bits; used to enable group member management.
-  const ownQ = useQuery(mailboxesQuery);
-  const ownById = new Map((ownQ.data?.mailboxes ?? []).map((m) => [m.id, m]));
+  const { data: ownData } = useQuery(mailboxesQuery);
+  const ownById = new Map((ownData?.mailboxes ?? []).map((m) => [m.id, m]));
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["admin-mailboxes"] });
@@ -1245,8 +1246,8 @@ function AdminMailboxes({ meId }: { meId: string }) {
     qc.invalidateQueries({ queryKey: ["mailboxes"] });
   };
 
-  const mailboxes = mailboxesQ.data?.mailboxes ?? [];
-  const redirects = redirectsQ.data?.redirects ?? [];
+  const mailboxes = mailboxesData?.mailboxes ?? [];
+  const redirects = redirectsData?.redirects ?? [];
 
   const [query, setQuery] = useState("");
   const [kindFilter, setKindFilter] = useState<
@@ -1262,8 +1263,8 @@ function AdminMailboxes({ meId }: { meId: string }) {
 
   const q = query.trim().toLowerCase();
   const entries = allEntries
-    .filter((e) => kindFilter === "all" || kindOf(e) === kindFilter)
     .filter((e) => {
+      if (kindFilter !== "all" && kindOf(e) !== kindFilter) return false;
       if (!q) return true;
       if (e.kind === "redirect")
         return e.address.toLowerCase().includes(q) || e.rd.targetAddress.toLowerCase().includes(q);
@@ -1280,7 +1281,7 @@ function AdminMailboxes({ meId }: { meId: string }) {
       return a.address.localeCompare(b.address);
     });
 
-  const eligibleDomains = (domainsQ.data?.domains ?? []).filter((d) => d.allowedKinds !== 0);
+  const eligibleDomains = (domainsData?.domains ?? []).filter((d) => d.allowedKinds !== 0);
 
   return (
     <Section
@@ -1338,7 +1339,7 @@ function AdminMailboxes({ meId }: { meId: string }) {
             <AdminMailboxRow
               key={`m:${e.mb.id}`}
               mailbox={e.mb}
-              users={usersQ.data?.users ?? []}
+              users={usersData?.users ?? []}
               allMailboxes={mailboxes}
               manageable={(() => {
                 const own = ownById.get(e.mb.id);
@@ -1371,8 +1372,8 @@ function AdminMailboxes({ meId }: { meId: string }) {
           <AdminCreateForm
             meId={meId}
             eligibleDomains={eligibleDomains}
-            allDomains={domainsQ.data?.domains ?? []}
-            users={usersQ.data?.users ?? []}
+            allDomains={domainsData?.domains ?? []}
+            users={usersData?.users ?? []}
             mailboxes={mailboxes}
             onCreated={invalidate}
           />
@@ -1400,6 +1401,7 @@ function CreateMailboxForm({
   const kinds = dom ? allowedKindsFor(dom) : 0;
   const typeOptions = KIND_CHECKBOXES.filter((k) => (kinds & k.bit) === k.bit);
 
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- invalidation runs in onCreated
   const create = useMutation({
     mutationFn: () =>
       api<{ id: string }>("/api/mailboxes", {
@@ -1489,6 +1491,7 @@ function AdminCreateForm({
   const typeOptions = KIND_CHECKBOXES.filter((k) => dom && (dom.allowedKinds & k.bit) === k.bit);
   const redirectTargets = mailboxes.filter((m) => m.type !== "temp" && m.type !== "service");
 
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- invalidation runs in onCreated
   const createMailbox = useMutation({
     mutationFn: () =>
       api<{ id: string }>("/api/admin/mailboxes", {
@@ -1503,6 +1506,7 @@ function AdminCreateForm({
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- invalidation runs in onCreated
   const createRedirect = useMutation({
     mutationFn: () =>
       api("/api/admin/redirects", {
@@ -1639,9 +1643,10 @@ function RedirectRow({
   invalidate: () => void;
 }) {
   const [migrateOpen, setMigrateOpen] = useState(false);
-  const [target, setTarget] = useState(rd.targetMailboxId);
+  const [target, setTarget] = useState(() => rd.targetMailboxId);
   const { confirmDelete } = useConfirmHelpers();
 
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- invalidation runs in injected invalidate
   const migrate = useMutation({
     mutationFn: () =>
       api(`/api/admin/redirects/${rd.id}`, {
@@ -1656,6 +1661,7 @@ function RedirectRow({
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- invalidation runs in injected invalidate
   const remove = useMutation({
     mutationFn: () => api(`/api/admin/redirects/${rd.id}`, { method: "DELETE" }),
     onSuccess: () => {
@@ -1746,8 +1752,8 @@ function AdminMailboxRow({
   const [emptyOpen, setEmptyOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [newOwner, setNewOwner] = useState(m.ownerUserId);
-  const [newType, setNewType] = useState(m.type);
+  const [newOwner, setNewOwner] = useState(() => m.ownerUserId);
+  const [newType, setNewType] = useState(() => m.type);
   const [redirectTo, setRedirectTo] = useState("");
 
   // Only personal⇄group are interchangeable; temp/service have no type toggle.
@@ -1755,6 +1761,7 @@ function AdminMailboxRow({
   const ownerChanged = newOwner !== m.ownerUserId;
   const typeChanged = canRetype && newType !== m.type;
 
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- invalidation runs in injected invalidate
   const migrate = useMutation({
     mutationFn: () =>
       api(`/api/admin/mailboxes/${m.id}`, {
@@ -1778,6 +1785,7 @@ function AdminMailboxRow({
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- invalidation runs in injected invalidate
   const remove = useMutation({
     mutationFn: () =>
       api(`/api/admin/mailboxes/${m.id}`, {
@@ -1792,6 +1800,7 @@ function AdminMailboxRow({
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- invalidation runs in injected invalidate
   const empty = useMutation({
     mutationFn: () => api(`/api/admin/mailboxes/${m.id}/empty`, { method: "POST" }),
     onSuccess: () => {
@@ -2023,16 +2032,16 @@ interface Invite {
 function MembersPanel({ mailboxId }: { mailboxId: string }) {
   const qc = useQueryClient();
   const { confirm } = useConfirmHelpers();
-  const membersQ = useQuery({
+  const { data: membersData } = useQuery({
     queryKey: ["mailbox-members", mailboxId],
     queryFn: () => api<{ members: Member[] }>(`/api/mailboxes/${mailboxId}/members`),
   });
-  const invitesQ = useQuery({
+  const { data: invitesData } = useQuery({
     queryKey: ["mailbox-invites", mailboxId],
     queryFn: () => api<{ invites: Invite[] }>(`/api/mailboxes/${mailboxId}/invites`),
   });
 
-  const directoryQ = useQuery({
+  const { data: directoryData, isLoading: directoryLoading } = useQuery({
     queryKey: ["user-directory"],
     queryFn: () => api<{ users: DirectoryUser[] }>("/api/users/directory"),
   });
@@ -2047,9 +2056,10 @@ function MembersPanel({ mailboxId }: { mailboxId: string }) {
     qc.invalidateQueries({ queryKey: ["mailbox-invites", mailboxId] });
   };
 
-  const memberIds = new Set((membersQ.data?.members ?? []).map((m) => m.userId));
-  const candidates = (directoryQ.data?.users ?? []).filter((u) => !memberIds.has(u.id));
+  const memberIds = new Set((membersData?.members ?? []).map((m) => m.userId));
+  const candidates = (directoryData?.users ?? []).filter((u) => !memberIds.has(u.id));
 
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- invalidation runs in local invalidate
   const addMember = useMutation({
     mutationFn: () =>
       api<{ ok: boolean }>(`/api/mailboxes/${mailboxId}/members`, {
@@ -2067,6 +2077,7 @@ function MembersPanel({ mailboxId }: { mailboxId: string }) {
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- invalidation runs in local invalidate
   const removeInvite = useMutation({
     mutationFn: (inviteId: string) =>
       api(`/api/mailboxes/${mailboxId}/invites/${inviteId}`, { method: "DELETE" }),
@@ -2074,6 +2085,7 @@ function MembersPanel({ mailboxId }: { mailboxId: string }) {
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- invalidation runs in local invalidate
   const updatePerms = useMutation({
     mutationFn: ({ userId, perms }: { userId: string; perms: number }) =>
       api(`/api/mailboxes/${mailboxId}/members`, {
@@ -2090,6 +2102,7 @@ function MembersPanel({ mailboxId }: { mailboxId: string }) {
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- invalidation runs in local invalidate
   const removeMember = useMutation({
     mutationFn: (userId: string) =>
       api(`/api/mailboxes/${mailboxId}/members/${userId}`, { method: "DELETE" }),
@@ -2108,7 +2121,7 @@ function MembersPanel({ mailboxId }: { mailboxId: string }) {
         Members
       </div>
       <ul className="mb-3 divide-y rounded-md border bg-card">
-        {(membersQ.data?.members ?? []).map((member) => (
+        {(membersData?.members ?? []).map((member) => (
           <li
             key={member.userId}
             className="flex items-center justify-between gap-3 px-3 py-2 text-[13px]"
@@ -2154,13 +2167,13 @@ function MembersPanel({ mailboxId }: { mailboxId: string }) {
             </div>
           </li>
         ))}
-        {membersQ.data?.members.length === 0 &&
-          (!invitesQ.data || invitesQ.data.invites.length === 0) && (
+        {membersData?.members.length === 0 &&
+          (!invitesData || invitesData.invites.length === 0) && (
             <li className="px-3 py-4 text-center text-[11px] text-muted-foreground">
               No members yet.
             </li>
           )}
-        {(invitesQ.data?.invites ?? []).map((inv) => (
+        {(invitesData?.invites ?? []).map((inv) => (
           <li
             key={inv.id}
             className="flex items-center justify-between gap-3 px-3 py-2 text-[13px]"
@@ -2198,7 +2211,7 @@ function MembersPanel({ mailboxId }: { mailboxId: string }) {
           value={selectedUserId}
           onValueChange={setSelectedUserId}
           className="min-w-[200px] flex-1"
-          disabled={directoryQ.isLoading}
+          disabled={directoryLoading}
           ariaLabel="User"
           placeholder={candidates.length === 0 ? "No users available" : "Select a user…"}
           options={candidates.map((u) => ({
@@ -2285,11 +2298,11 @@ function BlockingSection() {
 
 function BlockRequestsPanel() {
   const qc = useQueryClient();
-  const reqs = useQuery({
+  const { data: reqsData } = useQuery({
     queryKey: ["admin-block-requests"],
     queryFn: () => api<{ requests: BlockReq[] }>("/api/admin/block/requests"),
   });
-  const all = reqs.data?.requests ?? [];
+  const all = reqsData?.requests ?? [];
   const pending = all.filter((r) => r.status === "pending");
   const reviewed = all.filter((r) => r.status !== "pending");
 
@@ -2395,7 +2408,7 @@ function BlockRequestRow({
 
 function BlocklistPanel() {
   const qc = useQueryClient();
-  const entries = useQuery({
+  const { data: entriesData } = useQuery({
     queryKey: ["admin-blocklist"],
     queryFn: () => api<{ entries: BlockEntry[] }>("/api/admin/block/entries"),
   });
@@ -2457,11 +2470,11 @@ function BlocklistPanel() {
         </PrimaryBtn>
       </form>
 
-      {(entries.data?.entries.length ?? 0) === 0 ? (
+      {(entriesData?.entries.length ?? 0) === 0 ? (
         <p className="text-[12px] text-muted-foreground">Nothing blocked.</p>
       ) : (
         <ul className="divide-y rounded-md border">
-          {(entries.data?.entries ?? []).map((entry) => (
+          {(entriesData?.entries ?? []).map((entry) => (
             <BlockEntryRow key={entry.id} entry={entry} />
           ))}
         </ul>
@@ -2522,13 +2535,13 @@ function normalizeDomain(raw: string): string | null {
 
 function ProtectedDomainsPanel() {
   const qc = useQueryClient();
-  const q = useQuery({
+  const { data: protectedData } = useQuery({
     queryKey: ["admin-protected-domains"],
     queryFn: () => api<{ domains: string[] }>("/api/admin/block/protected-domains"),
   });
   // null = untouched (mirrors the server value); an array once edited locally.
   const [draft, setDraft] = useState<string[] | null>(null);
-  const current = q.data?.domains ?? [];
+  const current = protectedData?.domains ?? [];
   const domains = draft ?? current;
   const dirty = draft !== null;
 

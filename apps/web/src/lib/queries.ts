@@ -149,7 +149,7 @@ export type SearchFilterInput = Partial<SearchFilters>;
 
 // Serialize a filter set into a stable query string (omitting defaults), shared
 // by the cache key and the request URL so identical filters hit the cache.
-export function buildSearchParams(f: SearchFilterInput): string {
+function buildSearchParams(f: SearchFilterInput): string {
   const p = new URLSearchParams();
   if (f.q?.trim()) p.set("q", f.q.trim());
   if (f.searchIn && f.searchIn !== "all") p.set("searchIn", f.searchIn);

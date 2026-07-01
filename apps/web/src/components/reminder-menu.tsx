@@ -99,6 +99,7 @@ export function ReminderMenu({ threadId, mailboxId, messageId }: Props) {
             <Clock className="size-3.5 text-muted-foreground" />
             <input
               type="time"
+              aria-label="Reminder time"
               value={customTime}
               onChange={(e) => setCustomTime(e.target.value)}
               className="flex-1 rounded-md border bg-card px-2 py-1 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-ring/40"

@@ -11,6 +11,7 @@ export function ButtonGroup({
 }: React.HTMLAttributes<HTMLDivElement> & { orientation?: "horizontal" | "vertical" }) {
   return (
     <div
+      // eslint-disable-next-line react-doctor/prefer-tag-over-role -- role="group" is the correct ARIA grouping for adjacent controls; <address> is for contact info and is semantically wrong here
       role="group"
       data-orientation={orientation}
       className={cn(

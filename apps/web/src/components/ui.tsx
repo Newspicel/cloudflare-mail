@@ -2,8 +2,6 @@ import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/cn.ts";
 import { Skeleton } from "./ui/skeleton.tsx";
 
-export { Skeleton };
-
 export function EmptyState({
   icon: Icon,
   title,
@@ -41,6 +39,7 @@ export function UnreadBadge({ count, className }: { count: number; className?: s
   if (count <= 0) return null;
   return (
     <span
+      // eslint-disable-next-line react-doctor/prefer-tag-over-role -- text pill; role="img"+aria-label makes SR announce "N unread" instead of the raw number; an <img> tag can't hold the text child
       role="img"
       aria-label={`${count} unread`}
       className={cn(

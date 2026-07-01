@@ -11,7 +11,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { type CSSProperties, useCallback, useMemo, useRef, useState } from "react";
+import { type CSSProperties, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
@@ -75,10 +75,7 @@ export function ThreadList({
   const selecting = selected.size > 0;
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const onRefresh = useCallback(
-    () => queryClient.invalidateQueries({ queryKey: keys.threadsRoot(mailboxId) }),
-    [queryClient, mailboxId],
-  );
+  const onRefresh = () => queryClient.invalidateQueries({ queryKey: keys.threadsRoot(mailboxId) });
   const ready = !loading && threads.length > 0;
   const pull = usePullToRefresh(scrollRef, onRefresh, ready);
   const virtualizer = useListVirtualizer(scrollRef, threads.length, {
@@ -86,17 +83,14 @@ export function ThreadList({
     cacheKey: `m:${mailboxId}:${view}`,
   });
   const vItems = virtualizer.getVirtualItems();
-  const remeasure = useCallback(
-    (i: number, el: HTMLLIElement) => virtualizer.resizeItem(i, el.offsetHeight),
-    [virtualizer],
-  );
+  const remeasure = (i: number, el: HTMLLIElement) => virtualizer.resizeItem(i, el.offsetHeight);
 
   // Labels only for the on-screen block — bounds the request and keeps its key
   // stable while scrolling within the block.
   const [from, to] = visibleBlock(virtualizer, threads.length);
-  const visibleIds = useMemo(() => threads.slice(from, to).map((t) => t.id), [threads, from, to]);
-  const labelsQ = useQuery(threadLabelsQuery(visibleIds));
-  const labelsByThread = labelsQ.data?.labels;
+  const visibleIds = threads.slice(from, to).map((t) => t.id);
+  const { data: labelsData } = useQuery(threadLabelsQuery(visibleIds));
+  const labelsByThread = labelsData?.labels;
 
   const bulk = useThreadListMutation<{ trashed?: boolean; spam?: boolean }>({
     mailboxId,
@@ -134,7 +128,7 @@ export function ThreadList({
     // Only whole-thread-trashed threads can be bulk-purged. Threads surfaced in
     // Trash solely for an individually-deleted message are skipped — deleting the
     // whole thread would take its live messages with it; purge those from inside.
-    const wholeTrashed = new Set(threads.filter((t) => t.trashed).map((t) => t.id));
+    const wholeTrashed = new Set(threads.flatMap((t) => (t.trashed ? [t.id] : [])));
     const ids = [...selected].filter((id) => wholeTrashed.has(id));
     if (ids.length === 0) {
       toast.message("Open the conversation to delete its message permanently.");

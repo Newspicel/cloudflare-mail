@@ -28,7 +28,11 @@ function AcceptInvitePage() {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const inviteQ = useQuery({
+  const {
+    data: invite,
+    isLoading: inviteLoading,
+    error: inviteError,
+  } = useQuery({
     queryKey: ["invite", token],
     queryFn: () => api<InviteInfo>(`/api/users/invites/by-token/${encodeURIComponent(token!)}`),
     enabled: Boolean(token),
@@ -44,8 +48,8 @@ function AcceptInvitePage() {
         method: "POST",
         body: JSON.stringify({ token, name, password }),
       });
-      if (inviteQ.data?.email) {
-        const res = await authClient.signIn.email({ email: inviteQ.data.email, password });
+      if (invite?.email) {
+        const res = await authClient.signIn.email({ email: invite.email, password });
         if (res.error) throw new Error(res.error.message ?? "sign-in failed");
       }
       nav({ to: "/app" });
@@ -72,8 +76,8 @@ function AcceptInvitePage() {
     );
   }
 
-  if (inviteQ.isLoading) return <CardShell title="Loading…" />;
-  if (inviteQ.error) {
+  if (inviteLoading) return <CardShell title="Loading…" />;
+  if (inviteError) {
     return (
       <CardShell title="Invite not found">
         <p className="mb-4 text-sm text-muted-foreground">
@@ -82,7 +86,7 @@ function AcceptInvitePage() {
       </CardShell>
     );
   }
-  if (inviteQ.data?.used) {
+  if (invite?.used) {
     return (
       <CardShell title="Already used">
         <p className="mb-4 text-sm text-muted-foreground">
@@ -97,7 +101,7 @@ function AcceptInvitePage() {
       </CardShell>
     );
   }
-  if (inviteQ.data?.expired) {
+  if (invite?.expired) {
     return (
       <CardShell title="Expired">
         <p className="mb-4 text-sm text-muted-foreground">
@@ -110,7 +114,7 @@ function AcceptInvitePage() {
   return (
     <CardShell title="Accept invitation">
       <p className="mb-4 text-sm text-muted-foreground">
-        Setting up an account for <strong>{inviteQ.data?.email}</strong>.
+        Setting up an account for <strong>{invite?.email}</strong>.
       </p>
       <form onSubmit={submit}>
         <Field label="Name" value={name} onChange={setName} required />

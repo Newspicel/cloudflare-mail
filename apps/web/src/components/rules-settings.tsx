@@ -136,6 +136,7 @@ function RulesList({
 
   const invalidate = (id: string) => qc.invalidateQueries({ queryKey: keys.rules(id) });
 
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- onSuccess refreshes the rules cache via invalidate()
   const update = useMutation({
     mutationFn: ({ id, ...body }: { id: string } & Record<string, unknown>) =>
       api(`/api/rules/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
@@ -143,12 +144,14 @@ function RulesList({
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- onSuccess refreshes the rules cache via invalidate()
   const remove = useMutation({
     mutationFn: (id: string) => api(`/api/rules/${id}`, { method: "DELETE" }),
     onSuccess: () => invalidate(mailboxId),
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- onSuccess refreshes the target mailbox's rules cache via invalidate()
   const clone = useMutation({
     mutationFn: ({ id, targetId }: { id: string; targetId: string }) =>
       api<{ id: string; strippedLabels: string[] }>(`/api/rules/${id}/clone`, {
@@ -272,16 +275,18 @@ function RulesList({
                       {mailboxes.filter((m) => m.id !== mailboxId).length > 0 && (
                         <DropdownMenuSeparator />
                       )}
-                      {mailboxes
-                        .filter((m) => m.id !== mailboxId)
-                        .map((m) => (
-                          <DropdownMenuItem
-                            key={m.id}
-                            onClick={() => clone.mutate({ id: r.id, targetId: m.id })}
-                          >
-                            {m.displayName ?? m.address}
-                          </DropdownMenuItem>
-                        ))}
+                      {mailboxes.flatMap((m) =>
+                        m.id !== mailboxId
+                          ? [
+                              <DropdownMenuItem
+                                key={m.id}
+                                onClick={() => clone.mutate({ id: r.id, targetId: m.id })}
+                              >
+                                {m.displayName ?? m.address}
+                              </DropdownMenuItem>,
+                            ]
+                          : [],
+                      )}
                     </DropdownMenuContent>
                   </DropdownMenu>
                   <Button
@@ -349,10 +354,10 @@ function RuleEditor({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const labelsQ = useQuery(labelsQuery(mailboxId));
-  const foldersQ = useQuery(foldersQuery);
-  const labels = labelsQ.data?.labels ?? [];
-  const folders = foldersQ.data?.folders ?? [];
+  const { data: labelsData } = useQuery(labelsQuery(mailboxId));
+  const { data: foldersData } = useQuery(foldersQuery);
+  const labels = labelsData?.labels ?? [];
+  const folders = foldersData?.folders ?? [];
 
   const [name, setName] = useState(rule?.name ?? "");
   const [mode, setMode] = useState<RuleConditionMode>(rule?.conditionMode ?? "all");
@@ -389,6 +394,7 @@ function RuleEditor({
         (a.type !== "autoReply" || (a.body ?? "").trim().length > 0),
     );
 
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- onSaved() (from RulesList) invalidates the rules cache on success
   const save = useMutation({
     mutationFn: () => {
       const body = {

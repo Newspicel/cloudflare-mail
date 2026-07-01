@@ -1,7 +1,7 @@
 import { Flag, hasFlag } from "@cfmail/shared/flags";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
-import { useCallback, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api.ts";
 import { invalidateThreadChange } from "@/lib/invalidate.ts";
@@ -22,6 +22,7 @@ export function AppShortcuts() {
 
   const feed = useThreadFeed(mailboxId ?? "", view);
 
+  // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- onSuccess refreshes via invalidateThreadChange
   const setThreadState = useMutation({
     mutationFn: (input: { id: string; patch: { trashed?: boolean; spam?: boolean } }) =>
       api(`/api/threads/${input.id}`, { method: "PATCH", body: JSON.stringify(input.patch) }),
@@ -31,57 +32,52 @@ export function AppShortcuts() {
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
-  const moveThread = useCallback(
-    (patch: { trashed?: boolean; spam?: boolean }, label: string, undo: typeof patch) => {
-      if (!threadId) return;
-      const id = threadId;
-      setThreadState.mutate(
-        { id, patch },
-        {
-          onSuccess: () => {
-            toast.success(label, {
-              action: { label: "Undo", onClick: () => setThreadState.mutate({ id, patch: undo }) },
-            });
-          },
+  const moveThread = (
+    patch: { trashed?: boolean; spam?: boolean },
+    label: string,
+    undo: typeof patch,
+  ) => {
+    if (!threadId) return;
+    const id = threadId;
+    setThreadState.mutate(
+      { id, patch },
+      {
+        onSuccess: () => {
+          toast.success(label, {
+            action: { label: "Undo", onClick: () => setThreadState.mutate({ id, patch: undo }) },
+          });
         },
-      );
-      if (mailboxId) nav({ to: "/app/m/$mailboxId", params: { mailboxId }, search: { view } });
-    },
-    [threadId, mailboxId, view, nav, setThreadState],
-  );
+      },
+    );
+    if (mailboxId) nav({ to: "/app/m/$mailboxId", params: { mailboxId }, search: { view } });
+  };
 
-  const navigateThread = useCallback(
-    (delta: number) => {
-      if (!mailboxId) return;
-      const threads = feed.items;
-      if (threads.length === 0) return;
-      const idx = threadId ? threads.findIndex((t) => t.id === threadId) : -1;
-      const nextIdx =
-        idx === -1
-          ? delta > 0
-            ? 0
-            : threads.length - 1
-          : Math.min(Math.max(idx + delta, 0), threads.length - 1);
-      const target = threads[nextIdx];
-      if (!target) return;
-      nav({
-        to: "/app/m/$mailboxId/t/$threadId",
-        params: { mailboxId, threadId: target.id },
-        search: { view },
-      });
-    },
-    [mailboxId, threadId, view, feed.items, nav],
-  );
+  const navigateThread = (delta: number) => {
+    if (!mailboxId) return;
+    const threads = feed.items;
+    if (threads.length === 0) return;
+    const idx = threadId ? threads.findIndex((t) => t.id === threadId) : -1;
+    const nextIdx =
+      idx === -1
+        ? delta > 0
+          ? 0
+          : threads.length - 1
+        : Math.min(Math.max(idx + delta, 0), threads.length - 1);
+    const target = threads[nextIdx];
+    if (!target) return;
+    nav({
+      to: "/app/m/$mailboxId/t/$threadId",
+      params: { mailboxId, threadId: target.id },
+      search: { view },
+    });
+  };
 
-  const withLastMessage = useCallback(
-    async (fn: (msg: MessageRow) => void) => {
-      if (!threadId) return;
-      const data = await qc.ensureQueryData(threadQuery(threadId));
-      const last = data?.messages?.at(-1);
-      if (last) fn(last);
-    },
-    [qc, threadId],
-  );
+  const withLastMessage = async (fn: (msg: MessageRow) => void) => {
+    if (!threadId) return;
+    const data = await qc.ensureQueryData(threadQuery(threadId));
+    const last = data?.messages?.at(-1);
+    if (last) fn(last);
+  };
 
   useKeyboardShortcuts((e) => {
     if (e.key === "?") {

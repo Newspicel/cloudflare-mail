@@ -12,7 +12,7 @@ import {
   SlidersHorizontal,
   Sun,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { authClient } from "@/lib/auth-client.ts";
 import { cn } from "@/lib/cn.ts";
 import { useDateTimeFmt } from "@/lib/prefs.ts";
@@ -162,8 +162,8 @@ function SearchBox() {
     return () => document.removeEventListener("mousedown", onClick);
   }, [open]);
 
-  const query = useQuery(searchQuery({ q: debounced }));
-  const results = useMemo(() => query.data?.results ?? [], [query.data]);
+  const { data, isLoading, isError, refetch } = useQuery(searchQuery({ q: debounced }));
+  const results = data?.results ?? [];
 
   function go(result: SearchResult) {
     setOpen(false);
@@ -224,6 +224,7 @@ function SearchBox() {
           aria-label="Search mail"
           aria-expanded={showDropdown}
           aria-controls="search-results"
+          // eslint-disable-next-line react-doctor/no-redundant-roles -- plain text input is not a combobox by default; role is required to pair with aria-expanded/aria-controls for this custom search dropdown.
           role="combobox"
         />
         <button
@@ -240,12 +241,12 @@ function SearchBox() {
 
       {showDropdown && (
         <div className="absolute top-full right-0 left-0 z-40 mt-2 overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-black/10 shadow-lg">
-          {query.isLoading && !query.data ? (
+          {isLoading && !data ? (
             <div className="p-3 text-[12px] text-muted-foreground">Searching…</div>
-          ) : query.isError ? (
+          ) : isError ? (
             <div className="flex items-center justify-between gap-2 p-3 text-[12px]">
               <span className="text-destructive">Search failed</span>
-              <Button variant="outline" size="sm" onClick={() => query.refetch()}>
+              <Button variant="outline" size="sm" onClick={() => refetch()}>
                 Retry
               </Button>
             </div>

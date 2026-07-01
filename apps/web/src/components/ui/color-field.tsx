@@ -4,7 +4,7 @@ import { ColorPicker } from "./color-picker.tsx";
 
 export const DEFAULT_COLOR = "#64748b";
 
-export const PRESET_COLORS = [
+const PRESET_COLORS = [
   "#64748b",
   "#ef4444",
   "#f97316",

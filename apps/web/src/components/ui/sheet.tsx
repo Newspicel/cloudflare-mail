@@ -3,8 +3,6 @@ import type * as React from "react";
 import { cn } from "@/lib/cn";
 
 export const Sheet = BaseDialog.Root;
-export const SheetTrigger = BaseDialog.Trigger;
-export const SheetClose = BaseDialog.Close;
 
 const SHEET_SIDE = {
   left: "inset-y-0 left-0 w-72 max-w-[85vw] flex-col border-r data-ending-style:-translate-x-full data-starting-style:-translate-x-full",

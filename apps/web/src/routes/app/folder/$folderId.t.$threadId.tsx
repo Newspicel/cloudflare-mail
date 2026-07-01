@@ -15,9 +15,9 @@ export const Route = createFileRoute("/app/folder/$folderId/t/$threadId")({
 function FolderThreadPage() {
   const { folderId, threadId } = Route.useParams();
   const feed = useFolderFeed(folderId);
-  const thread = useQuery(threadQuery(threadId));
-  const folders = useQuery(foldersQuery);
-  const folder = folders.data?.folders.find((f) => f.id === folderId);
+  const { data: threadData } = useQuery(threadQuery(threadId));
+  const { data: foldersData } = useQuery(foldersQuery);
+  const folder = foldersData?.folders.find((f) => f.id === folderId);
 
   return (
     <div className="flex h-full">
@@ -34,10 +34,10 @@ function FolderThreadPage() {
         />
       </aside>
       <section className="flex flex-1 flex-col overflow-hidden">
-        {thread.data ? (
+        {threadData ? (
           <MessageView
-            thread={thread.data.thread}
-            messages={thread.data.messages}
+            thread={threadData.thread}
+            messages={threadData.messages}
             folderId={folderId}
           />
         ) : (

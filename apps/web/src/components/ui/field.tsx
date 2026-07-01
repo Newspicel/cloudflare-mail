@@ -35,6 +35,7 @@ export const fieldLabelClass =
   "w-14 shrink-0 pt-1 text-[11px] uppercase tracking-wider text-muted-foreground leading-5";
 
 export function FieldLabel({ className, ...props }: React.ComponentProps<"label">) {
+  // eslint-disable-next-line react-doctor/label-has-associated-control -- generic label primitive; consumers pass htmlFor or nest the control via ...props
   return <label className={cn(fieldLabelClass, className)} {...props} />;
 }
 

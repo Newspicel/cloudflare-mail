@@ -3,7 +3,6 @@ import type * as React from "react";
 import { cn } from "@/lib/cn";
 
 export const Tabs = BaseTabs.Root;
-export const TabsPanel = BaseTabs.Panel;
 
 export function TabsList({ className, ...props }: React.ComponentProps<typeof BaseTabs.List>) {
   return (

@@ -2,7 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { type LucideIcon, Mails } from "lucide-react";
 import type * as React from "react";
-import { useCallback, useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 import { cn } from "@/lib/cn.ts";
 import { useDateTimeFmt, useUserPrefs } from "@/lib/prefs.ts";
 import {
@@ -106,18 +106,16 @@ export function ThreadRowView({
   // reliably catch that late change, leaving the rows below overlapped until a
   // re-render. Force a fresh height read when the row's line count can change.
   const node = useRef<HTMLLIElement | null>(null);
-  const setRow = useCallback(
-    (el: HTMLLIElement | null) => {
-      node.current = el;
-      rowRef?.(el);
-    },
-    [rowRef],
-  );
+  const setRow = (el: HTMLLIElement | null) => {
+    node.current = el;
+    rowRef?.(el);
+  };
   // Anything that adds/removes a line and can land after the first measure:
   // label chips (async query) plus summary/category (can stream in over SSE).
   const heightKey = `${labels?.map((l) => l.id).join(",") ?? ""}|${category ?? ""}|${showSummary ? 1 : 0}|${compact ? 1 : 0}`;
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure on height change
   useLayoutEffect(() => {
+    // eslint-disable-next-line react-doctor/no-prop-callback-in-effect -- virtualizer height remeasure must run post-layout when the row's line count changes
     if (node.current && dataIndex !== undefined) remeasure?.(dataIndex, node.current);
   }, [heightKey, dataIndex, remeasure]);
 
@@ -129,7 +127,7 @@ export function ThreadRowView({
   // delay keeps a fast scroll-sweep over rows from firing requests.
   const qc = useQueryClient();
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const prefetch = useCallback(() => {
+  const prefetch = () => {
     hoverTimer.current = setTimeout(() => {
       void qc
         .ensureQueryData(threadQuery(thread.id))
@@ -138,8 +136,8 @@ export function ThreadRowView({
         })
         .catch(() => {});
     }, 80);
-  }, [qc, thread.id]);
-  const cancelPrefetch = useCallback(() => clearTimeout(hoverTimer.current), []);
+  };
+  const cancelPrefetch = () => clearTimeout(hoverTimer.current);
   useLayoutEffect(() => () => clearTimeout(hoverTimer.current), []);
   const hoverProps = {
     onPointerEnter: prefetch,
@@ -179,9 +177,10 @@ export function ThreadRowView({
           {thread.subjectNorm || "(no subject)"}
         </span>
         {unread && (
+          // eslint-disable-next-line react-doctor/prefer-tag-over-role -- decorative status dot conveying unread count; not a real image
           <span
             className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary"
-            role="img"
+            role="img" // react-doctor-disable-line prefer-tag-over-role -- decorative CSS dot conveying unread count via aria-label; not a real image
             aria-label={`${thread.unreadCount} unread`}
           />
         )}

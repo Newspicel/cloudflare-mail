@@ -17,8 +17,8 @@ function MailboxIndex() {
   const isDrafts = view === "drafts";
   const feed = useThreadFeed(mailboxId, view, !isDrafts);
   const drafts = useDraftFeed(mailboxId, isDrafts);
-  const mailboxes = useQuery(mailboxesQuery);
-  const mailbox = mailboxes.data?.mailboxes.find((m) => m.id === mailboxId);
+  const { data: mailboxesData } = useQuery(mailboxesQuery);
+  const mailbox = mailboxesData?.mailboxes.find((m) => m.id === mailboxId);
 
   return (
     <div className="flex h-full flex-col">

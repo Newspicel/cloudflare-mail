@@ -16,9 +16,9 @@ function ThreadPage() {
   const { mailboxId, threadId } = Route.useParams();
   const { view } = Route.useSearch();
   const feed = useThreadFeed(mailboxId, view);
-  const thread = useQuery(threadQuery(threadId));
-  const mailboxes = useQuery(mailboxesQuery);
-  const mailbox = mailboxes.data?.mailboxes.find((m) => m.id === mailboxId);
+  const { data: threadData } = useQuery(threadQuery(threadId));
+  const { data: mailboxesData } = useQuery(mailboxesQuery);
+  const mailbox = mailboxesData?.mailboxes.find((m) => m.id === mailboxId);
 
   return (
     <div className="flex h-full">
@@ -36,8 +36,8 @@ function ThreadPage() {
         />
       </aside>
       <section className="flex flex-1 flex-col overflow-hidden">
-        {thread.data ? (
-          <MessageView thread={thread.data.thread} messages={thread.data.messages} view={view} />
+        {threadData ? (
+          <MessageView thread={threadData.thread} messages={threadData.messages} view={view} />
         ) : (
           <MessageSkeleton />
         )}
