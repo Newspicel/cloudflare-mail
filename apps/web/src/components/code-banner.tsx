@@ -87,23 +87,25 @@ export function CodeBanner({
               Package tracking
             </span>
           </div>
-          {detected.tracking.map((t) => (
-            <a
-              key={t.number ?? t.url}
-              href={t.url}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 font-medium text-[12px] text-primary-foreground transition-colors hover:bg-primary/90"
-            >
-              <Truck className="size-3.5 shrink-0" />
-              {t.carrier ? `Track with ${t.carrier}` : "Open tracking page"}
-              {t.number && (
-                <span className="font-mono font-normal opacity-80">
-                  ·&nbsp;{t.number.length > 12 ? `…${t.number.slice(-8)}` : t.number}
-                </span>
-              )}
-            </a>
-          ))}
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+            {detected.tracking.map((t) => (
+              <a
+                key={t.number ?? t.url}
+                href={t.url}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="inline-flex items-center gap-1.5 rounded-md border border-primary/30 bg-background px-2.5 py-1 font-medium text-[11px] transition-colors hover:bg-primary/10"
+              >
+                <Truck className="size-3.5 shrink-0 text-primary" />
+                {t.carrier ? `Track with ${t.carrier}` : "Track shipment"}
+                {t.number && (
+                  <span className="font-mono font-normal text-muted-foreground">
+                    ·&nbsp;{t.number.length > 12 ? `…${t.number.slice(-8)}` : t.number}
+                  </span>
+                )}
+              </a>
+            ))}
+          </div>
         </div>
       )}
     </div>
