@@ -17,9 +17,20 @@ export interface DetectedLink {
   label: string;
 }
 
+export type Carrier = "UPS" | "USPS" | "FedEx" | "DHL";
+
+export interface DetectedTracking {
+  carrier: Carrier;
+  // The tracking number, when we could read one out of the text/link.
+  number?: string;
+  // Carrier page to open (built from the number, or the link that was in the mail).
+  url: string;
+}
+
 export interface Detected {
   codes: DetectedCode[];
   links: DetectedLink[];
+  tracking: DetectedTracking[];
 }
 
 // Words that signal the message is a verification / auth email.
@@ -115,6 +126,117 @@ function detectMagicLinks(links: { url: string; text: string }[]): DetectedLink[
   return out;
 }
 
+// ── Shipment tracking ──────────────────────────────────────────────────────
+// Detect carrier tracking numbers / links so the reader can jump straight to
+// the tracking page. Same philosophy as codes above: keyword-gated and format
+// specific to keep order numbers, invoices and phone numbers from matching.
+
+// The message has to read like a shipping notification before we trust a bare
+// run of digits (FedEx / USPS labels are otherwise indistinguishable from any
+// long number).
+const SHIP_KEYWORDS =
+  /(track(?:ing)?|shipment|shipped|shipping|deliver|out for delivery|in transit|parcel|package|carrier|courier|way[-\s]?bill|\bawb\b|\bups\b|fedex|\busps\b|\bdhl\b|sendung|paket|versand|zustell|lieferung)/i;
+
+const CARRIER_URL: Record<Carrier, (n: string) => string> = {
+  UPS: (n) => `https://www.ups.com/track?loc=en_US&tracknum=${n}`,
+  USPS: (n) => `https://tools.usps.com/go/TrackConfirmAction?tLabels=${n}`,
+  FedEx: (n) => `https://www.fedex.com/fedextrack/?trknbr=${n}`,
+  DHL: (n) => `https://www.dhl.com/en/express/tracking.html?tracking-id=${n}`,
+};
+
+// Resolve the carrier for an S10 (UPU) number from its country suffix / prefix.
+function s10Carrier(n: string): Carrier {
+  if (/US$/i.test(n)) return "USPS";
+  if (/^J[DJ]/i.test(n)) return "DHL";
+  return "USPS";
+}
+
+// Distinctive formats — safe to trust without nearby context.
+const STRONG: { carrier: Carrier | ((n: string) => Carrier); re: RegExp }[] = [
+  { carrier: "UPS", re: /\b1Z[0-9A-Z]{16}\b/gi },
+  { carrier: s10Carrier, re: /\b[A-Z]{2}\d{9}[A-Z]{2}\b/gi },
+  { carrier: "USPS", re: /\b(?:9[0-5])\d{18,24}\b/g },
+  { carrier: "DHL", re: /\bJD\d{18}\b/gi },
+];
+
+// Loose digit runs — only trusted when a tracking word sits right next to them.
+const WEAK: { carrier: Carrier; re: RegExp }[] = [
+  { carrier: "FedEx", re: /\b\d{12}\b|\b\d{15}\b|\b\d{20}\b/g },
+  { carrier: "DHL", re: /\b\d{10,11}\b/g },
+];
+
+const TRACK_CTX = /(track|tracking|awb|waybill|sendung|shipment|parcel|package)/i;
+const MAX_TRACKING = 3;
+
+// Carrier tracking links already present in the mail (merchant emails routinely
+// embed a "Track your package" carrier link).
+const CARRIER_HOSTS: { carrier: Carrier; host: RegExp }[] = [
+  { carrier: "UPS", host: /(^|\.)ups\.com$/i },
+  { carrier: "USPS", host: /(^|\.)usps\.com$/i },
+  { carrier: "FedEx", host: /(^|\.)fedex\.com$/i },
+  { carrier: "DHL", host: /(^|\.)dhl\.[a-z.]+$/i },
+];
+const TRACK_LINK = /track|trknbr|tracknum|tLabels|awb|tracking[-_]?id/i;
+// Pull a number out of a carrier tracking link when it carries one.
+const LINK_NUMBER =
+  /(?:tracknum|trknbr|tLabels|awb|tracking[-_]?id|qtc_tLabels1)=([0-9A-Z]{8,35})/i;
+
+const carrierOf = (c: Carrier | ((n: string) => Carrier), n: string): Carrier =>
+  typeof c === "function" ? c(n) : c;
+
+function detectTracking(
+  subject: string,
+  text: string,
+  links: { url: string; text: string }[],
+): DetectedTracking[] {
+  const out = new Map<string, DetectedTracking>();
+  const add = (carrier: Carrier, number: string | undefined, url: string) => {
+    const key = number ?? url;
+    if (!out.has(key)) out.set(key, { carrier, number, url });
+  };
+
+  // 1. Explicit carrier tracking links — trustworthy regardless of keywords.
+  for (const { url, text: anchor } of links) {
+    if (out.size >= MAX_TRACKING) break;
+    let host: string;
+    try {
+      host = new URL(url).hostname;
+    } catch {
+      continue;
+    }
+    const hit = CARRIER_HOSTS.find((c) => c.host.test(host));
+    if (!hit) continue;
+    if (!TRACK_LINK.test(url) && !/track/i.test(anchor)) continue;
+    add(hit.carrier, url.match(LINK_NUMBER)?.[1], url);
+  }
+
+  const hay = `${subject}\n${text}`;
+  if (!SHIP_KEYWORDS.test(hay)) return [...out.values()].slice(0, MAX_TRACKING);
+
+  // 2. Distinctive tracking-number formats anywhere in the body.
+  for (const { carrier, re } of STRONG) {
+    for (const m of hay.matchAll(re)) {
+      if (out.size >= MAX_TRACKING) break;
+      const n = m[0].toUpperCase();
+      add(carrierOf(carrier, n), n, CARRIER_URL[carrierOf(carrier, n)](n));
+    }
+  }
+
+  // 3. Loose digit runs, only when a tracking word is in the vicinity.
+  for (const { carrier, re } of WEAK) {
+    for (const m of hay.matchAll(re)) {
+      if (out.size >= MAX_TRACKING) break;
+      const i = m.index ?? 0;
+      const ctx = hay.slice(Math.max(0, i - BEFORE), i + m[0].length + AFTER);
+      if (!TRACK_CTX.test(ctx)) continue;
+      const n = m[0];
+      add(carrier, n, CARRIER_URL[carrier](n));
+    }
+  }
+
+  return [...out.values()].slice(0, MAX_TRACKING);
+}
+
 const BLOCK = new Set([
   "P",
   "DIV",
@@ -192,5 +314,6 @@ export function detectCodesAndLinks(input: {
   return {
     codes: detectCodes(input.subject ?? "", body),
     links: detectMagicLinks(links),
+    tracking: detectTracking(input.subject ?? "", body, links),
   };
 }
