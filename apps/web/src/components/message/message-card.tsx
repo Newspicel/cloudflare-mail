@@ -236,7 +236,7 @@ export function MessageCard({
         <EmailFrame html={bodyHtml} />
       ) : (
         // Plain-text body once loaded (or the snippet if parsing yields neither).
-        <pre className="whitespace-pre-wrap px-4 py-3 font-sans text-[13px]">
+        <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] px-4 py-3 font-sans text-[13px]">
           {linkifyText(bodyData?.text ?? msg.snippet)}
         </pre>
       )}
