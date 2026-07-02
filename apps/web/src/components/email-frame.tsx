@@ -42,11 +42,16 @@ function buildDoc(bodyHtml: string, c: Colors): string {
     `<!doctype html><html><head><meta charset="utf-8">` +
     `<meta http-equiv="Content-Security-Policy" content="${CSP}">` +
     `<style>` +
-    `html{color-scheme:${scheme}}html,body{margin:0}` +
+    `html{color-scheme:${scheme};-webkit-text-size-adjust:100%;text-size-adjust:100%}` +
+    `html,body{margin:0}` +
     `body{padding:12px 16px;font:13px/1.5 "Inter var",ui-sans-serif,system-ui,-apple-system,` +
     `"Segoe UI",Roboto,sans-serif;color:${c.fg};background:${c.bg};` +
     `overflow-wrap:anywhere;word-break:break-word}` +
-    `img,video,table{max-width:100%}img{height:auto}` +
+    // Fixed-width layouts (width="600" tables, inline max-width, wrapper divs)
+    // must clamp to the pane or a narrow viewport side-scrolls the whole page;
+    // !important beats the email's own inline styles.
+    `img,video,table,div{max-width:100%!important}table{min-width:0!important}` +
+    `img{height:auto}` +
     `a{color:${c.link}}pre{white-space:pre-wrap}table{border-collapse:collapse}` +
     `blockquote{margin:0;padding-left:12px;border-left:2px solid currentColor;opacity:.7}` +
     `</style></head><body>${bodyHtml}</body></html>`
@@ -57,9 +62,11 @@ function buildDoc(bodyHtml: string, c: Colors): string {
 // content. `html` must already be sanitized (see `sanitizeEmailHtml`).
 export function EmailFrame({ html, className }: { html: string; className?: string }) {
   const ref = useRef<HTMLIFrameElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
   const roRef = useRef<ResizeObserver | null>(null);
   const [colors, setColors] = useState<Colors>(frameColors);
-  const [height, setHeight] = useState(0);
+  const [size, setSize] = useState({ height: 0, contentWidth: 0 });
+  const [paneWidth, setPaneWidth] = useState(0);
 
   // Re-theme the frame when the app toggles dark mode. State is lazily seeded
   // from the DOM above; this is a MutationObserver subscription, not an init.
@@ -84,7 +91,13 @@ export function EmailFrame({ html, className }: { html: string; className?: stri
     // body scrolling inside it. `documentElement.scrollHeight` can under-report
     // by a few px (margin collapse), leaving a sliver scrollbar — take the max
     // with the body and observe both so late reflow (image loads) stays exact.
-    const update = () => setHeight(Math.max(root.scrollHeight, body.scrollHeight));
+    // Width is measured too: content the stylesheet can't shrink below the pane
+    // (hard inline widths) gets scaled down to fit instead of side-scrolling.
+    const update = () =>
+      setSize({
+        height: Math.max(root.scrollHeight, body.scrollHeight),
+        contentWidth: Math.max(root.scrollWidth, body.scrollWidth),
+      });
     update();
     const ro = new ResizeObserver(update);
     ro.observe(root);
@@ -94,14 +107,36 @@ export function EmailFrame({ html, className }: { html: string; className?: stri
 
   useEffect(() => () => roRef.current?.disconnect(), []);
 
+  // Track the wrapper's width so the scale-to-fit fallback reacts to pane
+  // resize/rotation even while the iframe itself is pinned to a fixed width.
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setPaneWidth(el.clientWidth));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   // Until the first measure lands, the iframe is collapsed to 0 and hidden (a
   // height-less iframe otherwise defaults to 150px, so it would flash short then
   // jump to full). A skeleton holds the space so the card never collapses, and
   // the frame appears once at its final height — one render, no resize step.
-  const measured = height > 0;
+  const measured = size.height > 0;
+
+  // Last-resort fit: if the content is still wider than the pane after the
+  // stylesheet's clamps (hard inline widths the CSS can't shrink), lay the
+  // frame out at its natural width and scale it down visually so nothing is
+  // clipped and the page never scrolls sideways.
+  const scale = paneWidth > 0 && size.contentWidth > paneWidth ? paneWidth / size.contentWidth : 1;
 
   return (
-    <div className={cn("relative w-full", className)}>
+    <div
+      ref={wrapRef}
+      className={cn("relative w-full", className)}
+      // A scaled frame keeps its unscaled layout height, so pin the wrapper to
+      // the visual height to avoid a blank gap under the message.
+      style={scale < 1 ? { height: `${Math.ceil(size.height * scale)}px` } : undefined}
+    >
       {!measured && (
         <div className="space-y-2 px-4 py-3" aria-hidden>
           <Skeleton className="h-3 w-2/3" />
@@ -119,9 +154,12 @@ export function EmailFrame({ html, className }: { html: string; className?: stri
         // internally — only the surrounding thread pane scrolls.
         scrolling="no"
         referrerPolicy="no-referrer"
-        className="block w-full"
+        className="block"
         style={{
-          height: measured ? `${height}px` : 0,
+          width: scale < 1 ? `${size.contentWidth}px` : "100%",
+          height: measured ? `${size.height}px` : 0,
+          transform: scale < 1 ? `scale(${scale})` : undefined,
+          transformOrigin: "top left",
           visibility: measured ? "visible" : "hidden",
         }}
       />
