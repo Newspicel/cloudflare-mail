@@ -1,14 +1,14 @@
 import type { ReminderDto } from "@cfmail/shared";
 import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { api } from "./api.ts";
+import { rpc, unwrap } from "./api.ts";
 import { keys } from "./query-keys.ts";
 
 export type { ReminderDto as Reminder };
 
 export const remindersQuery = queryOptions({
   queryKey: keys.reminders(),
-  queryFn: () => api<{ reminders: ReminderDto[] }>("/api/reminders"),
+  queryFn: () => unwrap(rpc.reminders.$get()),
   staleTime: 30_000,
 });
 
@@ -24,11 +24,7 @@ export interface CreateReminderArgs {
 export function useCreateReminder() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: CreateReminderArgs) =>
-      api<{ reminder: ReminderDto }>("/api/reminders", {
-        method: "POST",
-        body: JSON.stringify(input),
-      }),
+    mutationFn: (input: CreateReminderArgs) => unwrap(rpc.reminders.$post({ json: input })),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: keys.reminders() });
       toast.success("Reminder set");
@@ -48,7 +44,7 @@ export function useUpdateReminder() {
       status?: "done";
     }) => {
       const { id, ...patch } = input;
-      return api(`/api/reminders/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+      return unwrap(rpc.reminders[":id"].$patch({ param: { id }, json: patch }));
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: keys.reminders() }),
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
@@ -58,7 +54,7 @@ export function useUpdateReminder() {
 export function useDeleteReminder() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api(`/api/reminders/${id}`, { method: "DELETE" }),
+    mutationFn: (id: string) => unwrap(rpc.reminders[":id"].$delete({ param: { id } })),
     onSuccess: () => qc.invalidateQueries({ queryKey: keys.reminders() }),
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });

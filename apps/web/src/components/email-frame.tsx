@@ -8,7 +8,9 @@ import { Skeleton } from "./ui/skeleton.tsx";
 // proxied same-origin images resolve) but NOT `allow-scripts`, so no script in
 // the body can execute — making the same-origin grant inert. A meta CSP is a
 // second, independent lock on scripts and remote loads.
-const SANDBOX = "allow-same-origin allow-popups allow-popups-to-escape-sandbox";
+// Exported for email-frame.test.ts, which guards this invariant: adding
+// `allow-scripts` to a same-origin srcDoc frame would be XSS.
+export const SANDBOX = "allow-same-origin allow-popups allow-popups-to-escape-sandbox";
 
 // Blocks scripts and every remote fetch except same-origin proxied images and
 // inline `data:` images; styles are inline-only (no remote stylesheets/fonts).

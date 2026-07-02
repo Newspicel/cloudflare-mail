@@ -2,17 +2,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, Timer } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { api } from "@/lib/api.ts";
+import { rpc, unwrap } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
 import { keys } from "@/lib/query-keys.ts";
 import { Button } from "./ui/button.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select.tsx";
-
-interface TempDomain {
-  id: string;
-  name: string;
-}
 
 interface CreatedTemp {
   id: string;
@@ -22,7 +17,7 @@ interface CreatedTemp {
 
 const tempDomainsQueryOptions = {
   queryKey: ["temp-domains"],
-  queryFn: () => api<{ domains: TempDomain[] }>("/api/temp/domains"),
+  queryFn: () => unwrap(rpc.temp.domains.$get()),
 };
 
 const TTL_PRESETS: { label: string; seconds: number }[] = [
@@ -80,11 +75,7 @@ function TempForm({ onCreated }: { onCreated: (t: CreatedTemp) => void }) {
   const [ttlSeconds, setTtlSeconds] = useState(TTL_PRESETS[0]!.seconds);
 
   const create = useMutation({
-    mutationFn: () =>
-      api<CreatedTemp>("/api/temp", {
-        method: "POST",
-        body: JSON.stringify({ domainId, ttlSeconds }),
-      }),
+    mutationFn: () => unwrap(rpc.temp.$post({ json: { domainId, ttlSeconds } })),
     onSuccess: (res) => {
       onCreated(res);
       qc.invalidateQueries({ queryKey: keys.mailboxes() });

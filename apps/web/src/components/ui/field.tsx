@@ -42,3 +42,31 @@ export function FieldLabel({ className, ...props }: React.ComponentProps<"label"
 export function FieldContent({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return <div className={cn("min-w-0 flex-1", className)} {...props} />;
 }
+
+// Stacked labeled field: label on top, control, then an optional hint below.
+// The settings, auth, and search forms all share this shape.
+export function LabeledField({
+  label,
+  hint,
+  htmlFor,
+  children,
+  className,
+}: {
+  label?: React.ReactNode;
+  hint?: React.ReactNode;
+  htmlFor?: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={cn("grid gap-1.5", className)}>
+      {label && (
+        <label htmlFor={htmlFor} className="text-[12px] font-medium text-foreground">
+          {label}
+        </label>
+      )}
+      {children}
+      {hint && <p className="text-[12px] leading-snug text-muted-foreground">{hint}</p>}
+    </div>
+  );
+}

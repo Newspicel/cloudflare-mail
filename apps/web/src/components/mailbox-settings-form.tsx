@@ -4,17 +4,16 @@ import { toast } from "sonner";
 import {
   CardHeader,
   cardClass,
-  Field,
   fieldClass,
   GroupLabel,
-  Input,
   Region,
   Section,
-  Textarea,
 } from "@/components/settings-ui.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { useConfirmHelpers } from "@/components/ui/confirm.tsx";
+import { LabeledField as Field } from "@/components/ui/field.tsx";
+import { Input } from "@/components/ui/input.tsx";
 import { Progress } from "@/components/ui/progress.tsx";
 import {
   Select,
@@ -24,7 +23,8 @@ import {
   SelectValue,
 } from "@/components/ui/select.tsx";
 import { Switch } from "@/components/ui/switch.tsx";
-import { api } from "@/lib/api.ts";
+import { Textarea } from "@/components/ui/textarea.tsx";
+import { rpc, unwrap } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
 import { type ImportProgress, runImport } from "@/lib/import.ts";
 import { keys } from "@/lib/query-keys.ts";
@@ -44,27 +44,19 @@ interface MailboxSettings {
   aiFeatures: boolean;
   aiTokenCap: number | null;
   aiUsage: { period: string; calls: number; tokens: number } | null;
-  pgpMode: PgpMode;
-  pgpFingerprint: string | null;
-  pgpPublicKey: string | null;
-  pgpConfigured: boolean;
-  pgpAutoFetch: boolean;
+  // Present on the owner endpoint (/api/mailboxes/:id/settings); the admin
+  // settings endpoint doesn't return gateway-PGP state.
+  pgpMode?: PgpMode;
+  pgpFingerprint?: string | null;
+  pgpPublicKey?: string | null;
+  pgpConfigured?: boolean;
+  pgpAutoFetch?: boolean;
 }
 
 interface ImportTarget {
   id: string;
   address: string;
   displayName?: string | null;
-}
-
-interface ContactKey {
-  id: string;
-  email: string;
-  fingerprint: string;
-  source: "import" | "tofu" | "wkd";
-  verified: boolean;
-  expiresAt: string | null;
-  createdAt: string;
 }
 
 const PGP_MODES: { value: PgpMode; label: string; hint: string }[] = [
@@ -76,6 +68,12 @@ const PGP_MODES: { value: PgpMode; label: string; hint: string }[] = [
     hint: "Encrypt to recipients with a known key; sign-only (and warn) when a key is missing.",
   },
 ];
+
+// Same settings document behind two mounts: the admin endpoint additionally
+// accepts the admin-only fields (spam level, budgets).
+function settingsApi(admin: boolean) {
+  return admin ? rpc.admin.mailboxes[":id"].settings : rpc.mailboxes[":id"].settings;
+}
 
 const SPAM_LEVELS: { value: SpamLevel; label: string; hint: string }[] = [
   { value: "off", label: "Off", hint: "No spam filtering." },
@@ -105,13 +103,10 @@ export function MailboxSettingsForm({
   type: MailboxSettings["type"];
   admin?: boolean;
 }) {
-  const base = admin
-    ? `/api/admin/mailboxes/${mailboxId}/settings`
-    : `/api/mailboxes/${mailboxId}/settings`;
   const queryKey = [admin ? "admin-mailbox-settings" : "mailbox-settings", mailboxId];
   const { data, isLoading } = useQuery({
     queryKey,
-    queryFn: () => api<MailboxSettings>(base),
+    queryFn: () => unwrap(settingsApi(admin).$get({ param: { id: mailboxId } })),
   });
 
   return (
@@ -128,7 +123,7 @@ export function MailboxSettingsForm({
         key={data ? "ready" : "loading"}
         settings={data}
         loading={isLoading}
-        base={base}
+        mailboxId={mailboxId}
         queryKey={queryKey}
         admin={admin}
         type={type}
@@ -143,14 +138,14 @@ export function MailboxSettingsForm({
 function MailboxSettingsFields({
   settings,
   loading,
-  base,
+  mailboxId,
   queryKey,
   admin,
   type,
 }: {
   settings: MailboxSettings | undefined;
   loading: boolean;
-  base: string;
+  mailboxId: string;
   queryKey: unknown[];
   admin: boolean;
   type: MailboxSettings["type"];
@@ -170,22 +165,24 @@ function MailboxSettingsFields({
 
   const save = useMutation({
     mutationFn: () =>
-      api(base, {
-        method: "PATCH",
-        body: JSON.stringify({
-          displayName: displayName.trim() || null,
-          replyTo: replyTo.trim() || null,
-          signature: signature.trim() ? signature : null,
-          ...(admin
-            ? {
-                spamFilter,
-                spamAiTokenCap: aiCap.trim() ? Number(aiCap) : null,
-                aiFeatures,
-                aiTokenCap: aiFeatureCap.trim() ? Number(aiFeatureCap) : null,
-              }
-            : {}),
+      unwrap(
+        settingsApi(admin).$patch({
+          param: { id: mailboxId },
+          json: {
+            displayName: displayName.trim() || null,
+            replyTo: replyTo.trim() || null,
+            signature: signature.trim() ? signature : null,
+            ...(admin
+              ? {
+                  spamFilter,
+                  spamAiTokenCap: aiCap.trim() ? Number(aiCap) : null,
+                  aiFeatures,
+                  aiTokenCap: aiFeatureCap.trim() ? Number(aiFeatureCap) : null,
+                }
+              : {}),
+          },
         }),
-      }),
+      ),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey });
       qc.invalidateQueries({ queryKey: keys.mailboxes() });
@@ -345,15 +342,16 @@ function MailboxSettingsFields({
 function MailboxPgpCard({ mailboxId, settingsKey }: { mailboxId: string; settingsKey: unknown[] }) {
   const qc = useQueryClient();
   const { confirm, confirmDelete } = useConfirmHelpers();
-  const base = `/api/mailboxes/${mailboxId}`;
+  const mbx = rpc.mailboxes[":id"];
+  const param = { id: mailboxId };
   const { data: s, isLoading: settingsLoading } = useQuery({
     queryKey: settingsKey,
-    queryFn: () => api<MailboxSettings>(`${base}/settings`),
+    queryFn: () => unwrap(mbx.settings.$get({ param })),
   });
   const contactsKey = ["mailbox-contacts", mailboxId];
   const { data: contactsData } = useQuery({
     queryKey: contactsKey,
-    queryFn: () => api<{ keys: ContactKey[] }>(`${base}/contacts`),
+    queryFn: () => unwrap(mbx.contacts.$get({ param })),
   });
 
   const [importKey, setImportKey] = useState("");
@@ -371,15 +369,14 @@ function MailboxPgpCard({ mailboxId, settingsKey }: { mailboxId: string; setting
 
   // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- invalidates via refreshSettings()
   const setMode = useMutation({
-    mutationFn: (mode: PgpMode) =>
-      api(`${base}/settings`, { method: "PATCH", body: JSON.stringify({ pgpMode: mode }) }),
+    mutationFn: (mode: PgpMode) => unwrap(mbx.settings.$patch({ param, json: { pgpMode: mode } })),
     onSuccess: refreshSettings,
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
   // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- invalidates via refreshSettings()
   const generate = useMutation({
-    mutationFn: () => api<{ fingerprint: string }>(`${base}/pgp/generate`, { method: "POST" }),
+    mutationFn: () => unwrap(mbx.pgp.generate.$post({ param })),
     onSuccess: (r) => {
       refreshSettings();
       toast.success(`Keypair generated (${shortFp(r.fingerprint)})`);
@@ -390,10 +387,12 @@ function MailboxPgpCard({ mailboxId, settingsKey }: { mailboxId: string; setting
   // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- invalidates via refreshSettings()
   const doImport = useMutation({
     mutationFn: () =>
-      api<{ fingerprint: string }>(`${base}/pgp/import`, {
-        method: "POST",
-        body: JSON.stringify({ privateKey: importKey, passphrase: importPass || undefined }),
-      }),
+      unwrap(
+        mbx.pgp.import.$post({
+          param,
+          json: { privateKey: importKey, passphrase: importPass || undefined },
+        }),
+      ),
     onSuccess: (r) => {
       refreshSettings();
       setImportKey("");
@@ -406,7 +405,7 @@ function MailboxPgpCard({ mailboxId, settingsKey }: { mailboxId: string; setting
 
   // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- invalidates via refreshSettings()
   const removeKey = useMutation({
-    mutationFn: () => api(`${base}/pgp`, { method: "DELETE" }),
+    mutationFn: () => unwrap(mbx.pgp.$delete({ param })),
     onSuccess: () => {
       refreshSettings();
       toast.success("PGP key removed");
@@ -416,10 +415,12 @@ function MailboxPgpCard({ mailboxId, settingsKey }: { mailboxId: string; setting
 
   const addContact = useMutation({
     mutationFn: () =>
-      api(`${base}/contacts`, {
-        method: "POST",
-        body: JSON.stringify({ publicKey: contactKey, email: contactEmail.trim() || undefined }),
-      }),
+      unwrap(
+        mbx.contacts.$post({
+          param,
+          json: { publicKey: contactKey, email: contactEmail.trim() || undefined },
+        }),
+      ),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: contactsKey });
       setContactEmail("");
@@ -430,14 +431,20 @@ function MailboxPgpCard({ mailboxId, settingsKey }: { mailboxId: string; setting
   });
 
   const removeContact = useMutation({
-    mutationFn: (id: string) => api(`${base}/contacts/${id}`, { method: "DELETE" }),
+    mutationFn: (id: string) =>
+      unwrap(mbx.contacts[":contactId"].$delete({ param: { ...param, contactId: id } })),
     onSuccess: () => qc.invalidateQueries({ queryKey: contactsKey }),
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
   const setVerified = useMutation({
     mutationFn: ({ id, verified }: { id: string; verified: boolean }) =>
-      api(`${base}/contacts/${id}`, { method: "PATCH", body: JSON.stringify({ verified }) }),
+      unwrap(
+        mbx.contacts[":contactId"].$patch({
+          param: { ...param, contactId: id },
+          json: { verified },
+        }),
+      ),
     onSuccess: () => qc.invalidateQueries({ queryKey: contactsKey }),
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
@@ -445,7 +452,7 @@ function MailboxPgpCard({ mailboxId, settingsKey }: { mailboxId: string; setting
   // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- invalidates via refreshSettings()
   const setAutoFetch = useMutation({
     mutationFn: (pgpAutoFetch: boolean) =>
-      api(`${base}/settings`, { method: "PATCH", body: JSON.stringify({ pgpAutoFetch }) }),
+      unwrap(mbx.settings.$patch({ param, json: { pgpAutoFetch } })),
     onSuccess: refreshSettings,
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });

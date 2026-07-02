@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { type ReactNode, useLayoutEffect, useRef } from "react";
 import { toast } from "sonner";
-import { api } from "@/lib/api.ts";
+import { rpc, unwrap } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
 import { ALL_MAILBOXES, foldersQuery, type MailboxSummary, mailboxesQuery } from "@/lib/queries.ts";
 import { formatRemaining, useNow } from "@/lib/time.ts";
@@ -99,7 +99,7 @@ function SidebarBody({ onClose }: { onClose?: () => void }) {
   });
 
   const deleteMailbox = useMutation({
-    mutationFn: (id: string) => api(`/api/mailboxes/${id}`, { method: "DELETE" }),
+    mutationFn: (id: string) => unwrap(rpc.mailboxes[":id"].$delete({ param: { id } })),
     onSuccess: (_res, id) => {
       qc.setQueryData<{ mailboxes: MailboxSummary[] }>(mailboxesQuery.queryKey, (old) =>
         old ? { mailboxes: old.mailboxes.filter((m) => m.id !== id) } : old,

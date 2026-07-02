@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { Folder, FolderPlus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { api } from "@/lib/api.ts";
+import { rpc, unwrap } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
 import { type FolderRow, foldersQuery } from "@/lib/queries.ts";
 import { keys } from "@/lib/query-keys.ts";
@@ -27,11 +27,7 @@ export function FoldersNav({ onClose }: { onClose?: () => void }) {
   const [color, setColor] = useState(DEFAULT_COLOR);
 
   const create = useMutation({
-    mutationFn: () =>
-      api<{ id: string }>("/api/folders", {
-        method: "POST",
-        body: JSON.stringify({ name: name.trim(), color }),
-      }),
+    mutationFn: () => unwrap(rpc.folders.$post({ json: { name: name.trim(), color } })),
     onSuccess: () => {
       setCreating(false);
       setName("");
@@ -42,7 +38,7 @@ export function FoldersNav({ onClose }: { onClose?: () => void }) {
   });
 
   const remove = useMutation({
-    mutationFn: (id: string) => api(`/api/folders/${id}`, { method: "DELETE" }),
+    mutationFn: (id: string) => unwrap(rpc.folders[":id"].$delete({ param: { id } })),
     onSuccess: (_res, id) => {
       qc.invalidateQueries({ queryKey: keys.folders() });
       if (activeId === id) nav({ to: "/app" });

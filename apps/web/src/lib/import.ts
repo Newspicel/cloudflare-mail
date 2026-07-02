@@ -1,5 +1,3 @@
-import { unzipSync } from "fflate";
-
 // Client-side extraction of exported mail. The browser unpacks .eml/.mbox/.zip
 // (or a directly-selected export folder) and uploads one raw RFC822 message per
 // request, so each call stays within the Worker's body/CPU limits no matter how
@@ -93,6 +91,12 @@ function parseProtonState(bytes: Uint8Array): ImportState | undefined {
 
 function u8(buf: ArrayBuffer): Uint8Array {
   return new Uint8Array(buf);
+}
+
+// fflate is only needed for .zip exports — load it on demand.
+async function unzip(bytes: Uint8Array): Promise<Record<string, Uint8Array>> {
+  const { unzipSync } = await import("fflate");
+  return unzipSync(bytes);
 }
 
 // fetch's BodyInit accepts ArrayBuffer cleanly (unlike the now-generic
@@ -217,7 +221,7 @@ async function plan(files: File[]): Promise<Task[]> {
       // A zip is fully in memory once unpacked; two-pass its entries so .eml
       // items can resolve metadata that may appear after them.
       // eslint-disable-next-line no-await-in-loop, react-doctor/async-await-in-loop -- one archive at a time bounds peak memory
-      const entries = Object.entries(unzipSync(u8(await file.arrayBuffer()))).flatMap(([p, b]) =>
+      const entries = Object.entries(await unzip(u8(await file.arrayBuffer()))).flatMap(([p, b]) =>
         p.endsWith("/") ? [] : [[basename(p), b] as const],
       );
       for (const [name, b] of entries) {

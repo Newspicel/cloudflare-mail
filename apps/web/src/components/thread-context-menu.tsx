@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Clock, FolderInput, Inbox, type LucideIcon, Tag } from "lucide-react";
 import { Fragment, type ReactNode } from "react";
-import { api } from "@/lib/api.ts";
+import { rpc, unwrap } from "@/lib/api.ts";
 import { foldersQuery, labelsQuery } from "@/lib/queries.ts";
 import { keys } from "@/lib/query-keys.ts";
 import { useCreateReminder } from "@/lib/reminders.ts";
@@ -86,8 +86,9 @@ export function LabelsSubmenu({
 
   const toggle = useMutation({
     mutationFn: (input: { labelId: string; on: boolean }) => {
-      const path = `/api/labels/${input.labelId}/threads/${threadId}`;
-      return input.on ? api(path, { method: "PUT", body: "{}" }) : api(path, { method: "DELETE" });
+      const target = rpc.labels[":id"].threads[":threadId"];
+      const param = { id: input.labelId, threadId };
+      return input.on ? unwrap(target.$put({ param })) : unwrap(target.$delete({ param }));
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: keys.messageLabelsRoot() });

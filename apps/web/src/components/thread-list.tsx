@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { type CSSProperties, useRef, useState } from "react";
 import { toast } from "sonner";
-import { api } from "@/lib/api.ts";
+import { rpc, unwrap } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
 import { patchThreadsInLists, removeThreadsFromLists } from "@/lib/invalidate.ts";
 import {
@@ -90,14 +90,14 @@ export function ThreadList({
   const [from, to] = visibleBlock(virtualizer, threads.length);
   const visibleIds = threads.slice(from, to).map((t) => t.id);
   const { data: labelsData } = useQuery(threadLabelsQuery(visibleIds));
-  const labelsByThread = labelsData?.labels;
+  const labelsByThread: Record<string, MessageLabel[]> | undefined = labelsData?.labels;
 
   const bulk = useThreadListMutation<{ trashed?: boolean; spam?: boolean }>({
     mailboxId,
     mutationFn: (patch) =>
       Promise.all(
         [...selected].map((id) =>
-          api(`/api/threads/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+          unwrap(rpc.threads[":id"].$patch({ param: { id }, json: patch })),
         ),
       ),
     optimistic: (_patch, qc) => removeThreadsFromLists(qc, mailboxId, [...selected]),
@@ -109,7 +109,7 @@ export function ThreadList({
     mutationFn: (read) =>
       Promise.all(
         [...selected].map((id) =>
-          api(`/api/threads/${id}`, { method: "PATCH", body: JSON.stringify({ read }) }),
+          unwrap(rpc.threads[":id"].$patch({ param: { id }, json: { read } })),
         ),
       ),
     optimistic: (read, qc) =>
@@ -119,7 +119,7 @@ export function ThreadList({
   const bulkDel = useThreadListMutation<string[]>({
     mailboxId,
     mutationFn: (ids) =>
-      Promise.all(ids.map((id) => api(`/api/threads/${id}`, { method: "DELETE" }))),
+      Promise.all(ids.map((id) => unwrap(rpc.threads[":id"].$delete({ param: { id } })))),
     optimistic: (ids, qc) => removeThreadsFromLists(qc, mailboxId, ids),
     onApply: () => setSelected(new Set()),
   });
@@ -345,7 +345,7 @@ function ThreadRowItem({
     mailboxId,
     threadId: thread.id,
     mutationFn: (body) =>
-      api(`/api/threads/${thread.id}`, { method: "PATCH", body: JSON.stringify(body) }),
+      unwrap(rpc.threads[":id"].$patch({ param: { id: thread.id }, json: body })),
     optimistic: (body, qc) => {
       if (body.trashed !== undefined || body.spam !== undefined)
         removeThreadsFromLists(qc, mailboxId, [thread.id]);
@@ -357,7 +357,7 @@ function ThreadRowItem({
   const del = useThreadListMutation<void>({
     mailboxId,
     threadId: thread.id,
-    mutationFn: () => api(`/api/threads/${thread.id}`, { method: "DELETE" }),
+    mutationFn: () => unwrap(rpc.threads[":id"].$delete({ param: { id: thread.id } })),
     optimistic: (_v, qc) => removeThreadsFromLists(qc, mailboxId, [thread.id]),
   });
 

@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CalendarClock, CalendarX2, Trash2 } from "lucide-react";
 import { type CSSProperties, useRef } from "react";
 import { toast } from "sonner";
-import { api } from "@/lib/api.ts";
+import { rpc, unwrap } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
 import { useDateTimeFmt } from "@/lib/prefs.ts";
 import type { DraftRow, MailView } from "@/lib/queries.ts";
@@ -59,7 +59,7 @@ export function DraftList({
   const vItems = virtualizer.getVirtualItems();
 
   const remove = useMutation({
-    mutationFn: (id: string) => api(`/api/drafts/${id}`, { method: "DELETE" }),
+    mutationFn: (id: string) => unwrap(rpc.drafts[":id"].$delete({ param: { id } })),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: keys.drafts(mailboxId) });
       qc.invalidateQueries({ queryKey: keys.folderCounts(mailboxId) });
@@ -69,7 +69,7 @@ export function DraftList({
 
   // Clear a draft's scheduled/failed state — reverts it to an ordinary draft.
   const unschedule = useMutation({
-    mutationFn: (id: string) => api(`/api/drafts/${id}/schedule`, { method: "DELETE" }),
+    mutationFn: (id: string) => unwrap(rpc.drafts[":id"].schedule.$delete({ param: { id } })),
     onSuccess: () => qc.invalidateQueries({ queryKey: keys.drafts(mailboxId) }),
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });

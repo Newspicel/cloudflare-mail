@@ -6,6 +6,17 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**", ".wrangler/**"]
     },
+    // apps/web depends on @cfmail/worker only for types (Hono RPC AppType,
+    // imported straight from worker sources) — no build artifacts are needed,
+    // and inheriting ^build would close a cycle with the worker's asset embed.
+    "@cfmail/web#build": {
+      "dependsOn": [],
+      "outputs": ["dist/**"]
+    },
+    "@cfmail/web#typecheck": {
+      "dependsOn": [],
+      "outputs": []
+    },
     "@cfmail/worker#build": {
       "dependsOn": ["^build", "@cfmail/web#build"],
       "outputs": ["dist/**", ".wrangler/**"]
@@ -20,7 +31,7 @@
     },
     "test": {
       "dependsOn": ["^build"],
-      "outputs": ["coverage/**"]
+      "outputs": []
     }
   }
 }

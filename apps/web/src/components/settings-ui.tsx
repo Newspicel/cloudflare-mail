@@ -115,33 +115,6 @@ export function Region({
   );
 }
 
-/** Stacked field: label on top, control, then an optional hint below. */
-export function Field({
-  label,
-  hint,
-  htmlFor,
-  children,
-  className,
-}: {
-  label?: React.ReactNode;
-  hint?: React.ReactNode;
-  htmlFor?: string;
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <div className={cn("grid gap-1.5", className)}>
-      {label && (
-        <label htmlFor={htmlFor} className="text-[12px] font-medium text-foreground">
-          {label}
-        </label>
-      )}
-      {children}
-      {hint && <p className="text-[12px] leading-snug text-muted-foreground">{hint}</p>}
-    </div>
-  );
-}
-
 /** Inline row: label/hint on the left, a control pinned to the right. */
 export function Row({
   label,
@@ -160,16 +133,6 @@ export function Row({
       </div>
       <div className="shrink-0">{children}</div>
     </div>
-  );
-}
-
-export function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
-  return <input {...props} className={cn(fieldClass, props.className)} />;
-}
-
-export function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return (
-    <textarea {...props} className={cn(fieldClass, "h-auto leading-normal", props.className)} />
   );
 }
 

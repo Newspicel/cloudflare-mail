@@ -4,7 +4,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
 import { CardShell, Field, PrimaryButton } from "@/components/auth-card.tsx";
-import { api } from "@/lib/api.ts";
+import { rpc, unwrap } from "@/lib/api.ts";
 import { authClient } from "@/lib/auth-client.ts";
 
 const searchSchema = z.object({ token: z.string().optional() });
@@ -13,13 +13,6 @@ export const Route = createFileRoute("/accept-invite")({
   validateSearch: searchSchema,
   component: AcceptInvitePage,
 });
-
-interface InviteInfo {
-  email: string;
-  role: "admin" | "user";
-  used: boolean;
-  expired: boolean;
-}
 
 function AcceptInvitePage() {
   const nav = useNavigate();
@@ -34,7 +27,8 @@ function AcceptInvitePage() {
     error: inviteError,
   } = useQuery({
     queryKey: ["invite", token],
-    queryFn: () => api<InviteInfo>(`/api/users/invites/by-token/${encodeURIComponent(token!)}`),
+    queryFn: () =>
+      unwrap(rpc.users.invites["by-token"][":token"].$get({ param: { token: token! } })),
     enabled: Boolean(token),
     retry: false,
   });
@@ -44,10 +38,7 @@ function AcceptInvitePage() {
     if (!token) return;
     setBusy(true);
     try {
-      await api("/api/users/invites/accept", {
-        method: "POST",
-        body: JSON.stringify({ token, name, password }),
-      });
+      await unwrap(rpc.users.invites.accept.$post({ json: { token, name, password } }));
       if (invite?.email) {
         const res = await authClient.signIn.email({ email: invite.email, password });
         if (res.error) throw new Error(res.error.message ?? "sign-in failed");

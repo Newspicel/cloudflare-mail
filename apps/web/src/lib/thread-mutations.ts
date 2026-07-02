@@ -47,6 +47,9 @@ export function useThreadListMutation<V>({
       if (ctx?.snapshot) restoreSnapshot(qc, ctx.snapshot);
       toast.error(e instanceof Error ? e.message : errorMessage);
     },
-    onSettled: () => invalidateThreadChange(qc, mailboxId, threadId),
+    // Every list mutation (trash/spam/read/delete) moves threads or flips unread
+    // state, so mailbox badges and folder membership are always in scope.
+    onSettled: () =>
+      invalidateThreadChange(qc, { mailboxId, threadId, counts: true, folders: true }),
   });
 }
