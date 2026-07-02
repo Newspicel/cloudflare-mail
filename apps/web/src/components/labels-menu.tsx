@@ -2,9 +2,14 @@ import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tansta
 import { Check, Minus, Plus, Tag, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { api } from "@/lib/api.ts";
+import { rpc, unwrap } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
-import { labelsQuery, messageLabelsQuery, threadLabelsQuery } from "@/lib/queries.ts";
+import {
+  labelsQuery,
+  type MessageLabel,
+  messageLabelsQuery,
+  threadLabelsQuery,
+} from "@/lib/queries.ts";
 import { keys } from "@/lib/query-keys.ts";
 import { Button } from "./ui/button.tsx";
 import { ColorField, DEFAULT_COLOR } from "./ui/color-field.tsx";
@@ -32,13 +37,15 @@ export function LabelsMenu({
 }) {
   const qc = useQueryClient();
   const { data: appliedData } = useQuery(messageLabelsQuery([messageId]));
-  const applied = new Set((appliedData?.labels[messageId] ?? []).map((l) => l.id));
+  const byMessage: Record<string, MessageLabel[]> = appliedData?.labels ?? {};
+  const applied = new Set((byMessage[messageId] ?? []).map((l) => l.id));
 
   // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- onSuccess refreshes label caches via invalidateLabels()
   const toggle = useMutation({
     mutationFn: (input: { labelId: string; on: boolean }) => {
-      const path = `/api/labels/${input.labelId}/messages/${messageId}`;
-      return input.on ? api(path, { method: "PUT", body: "{}" }) : api(path, { method: "DELETE" });
+      const target = rpc.labels[":id"].messages[":messageId"];
+      const param = { id: input.labelId, messageId };
+      return input.on ? unwrap(target.$put({ param })) : unwrap(target.$delete({ param }));
     },
     onSuccess: () => invalidateLabels(qc, mailboxId),
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
@@ -67,7 +74,7 @@ export function BulkLabelsMenu({
 }) {
   const qc = useQueryClient();
   const { data: appliedData } = useQuery(threadLabelsQuery(threadIds));
-  const byThread = appliedData?.labels ?? {};
+  const byThread: Record<string, MessageLabel[]> = appliedData?.labels ?? {};
 
   // A label is fully "applied" only when it rides on every selected thread;
   // present on some-but-not-all shows an indeterminate dash.
@@ -82,10 +89,9 @@ export function BulkLabelsMenu({
     mutationFn: (input: { labelId: string; on: boolean }) =>
       Promise.all(
         threadIds.map((tid) => {
-          const path = `/api/labels/${input.labelId}/threads/${tid}`;
-          return input.on
-            ? api(path, { method: "PUT", body: "{}" })
-            : api(path, { method: "DELETE" });
+          const target = rpc.labels[":id"].threads[":threadId"];
+          const param = { id: input.labelId, threadId: tid };
+          return input.on ? unwrap(target.$put({ param })) : unwrap(target.$delete({ param }));
         }),
       ),
     onSuccess: () => invalidateLabels(qc, mailboxId),
@@ -147,11 +153,7 @@ function LabelsPopover({ mailboxId, applied, partial, busy, onToggle }: ShellPro
 
   // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- onSuccess refreshes label caches via invalidate()
   const create = useMutation({
-    mutationFn: () =>
-      api<{ id: string }>("/api/labels", {
-        method: "POST",
-        body: JSON.stringify({ mailboxId, name: name.trim(), color }),
-      }),
+    mutationFn: () => unwrap(rpc.labels.$post({ json: { mailboxId, name: name.trim(), color } })),
     onSuccess: (res) => {
       setCreating(false);
       setName("");
@@ -164,7 +166,7 @@ function LabelsPopover({ mailboxId, applied, partial, busy, onToggle }: ShellPro
 
   // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- onSuccess refreshes label caches via invalidate()
   const remove = useMutation({
-    mutationFn: (labelId: string) => api(`/api/labels/${labelId}`, { method: "DELETE" }),
+    mutationFn: (labelId: string) => unwrap(rpc.labels[":id"].$delete({ param: { id: labelId } })),
     onSuccess: invalidate,
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
@@ -269,7 +271,8 @@ function LabelsPopover({ mailboxId, applied, partial, busy, onToggle }: ShellPro
 
 export function LabelChips({ messageId, className }: { messageId: string; className?: string }) {
   const { data } = useQuery(messageLabelsQuery([messageId]));
-  const labels = data?.labels[messageId] ?? [];
+  const byMessage: Record<string, MessageLabel[]> = data?.labels ?? {};
+  const labels = byMessage[messageId] ?? [];
   if (labels.length === 0) return null;
   return (
     <div className={cn("flex flex-wrap gap-1", className)}>

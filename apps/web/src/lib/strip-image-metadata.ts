@@ -1,5 +1,3 @@
-import piexif from "piexifjs";
-
 // Lossless removal of privacy-sensitive image metadata (EXIF/GPS, text chunks)
 // before an image leaves the browser. "Lossless" = the pixel data is never
 // re-encoded; we only drop metadata segments/chunks, so quality and size are
@@ -21,7 +19,9 @@ export async function stripImageMetadata(file: File): Promise<File> {
 
 // JPEG: piexifjs rewrites the file without the APP1/Exif segment. It throws
 // when there's no Exif to remove, in which case the original is already clean.
+// The library is loaded on demand — attaching a JPEG is a rare path.
 async function stripJpeg(file: File): Promise<File> {
+  const { default: piexif } = await import("piexifjs");
   const dataUrl = await fileToDataUrl(file);
   let cleaned: string;
   try {

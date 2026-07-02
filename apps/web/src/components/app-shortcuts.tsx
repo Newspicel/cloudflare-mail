@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useState } from "react";
 import { toast } from "sonner";
-import { api } from "@/lib/api.ts";
+import { rpc, unwrap } from "@/lib/api.ts";
 import { invalidateThreadChange } from "@/lib/invalidate.ts";
 import { type MessageRow, parseMailView, threadQuery } from "@/lib/queries.ts";
 import { useKeyboardShortcuts } from "@/lib/shortcuts.ts";
@@ -25,9 +25,10 @@ export function AppShortcuts() {
   // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- onSuccess refreshes via invalidateThreadChange
   const setThreadState = useMutation({
     mutationFn: (input: { id: string; patch: { trashed?: boolean; spam?: boolean } }) =>
-      api(`/api/threads/${input.id}`, { method: "PATCH", body: JSON.stringify(input.patch) }),
+      unwrap(rpc.threads[":id"].$patch({ param: { id: input.id }, json: input.patch })),
     onSuccess: () => {
-      if (mailboxId) invalidateThreadChange(qc, mailboxId, threadId);
+      if (mailboxId)
+        invalidateThreadChange(qc, { mailboxId, threadId, counts: true, folders: true });
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
@@ -122,11 +123,13 @@ export function AppShortcuts() {
     if (e.key === "s") {
       e.preventDefault();
       void withLastMessage((last) =>
-        api(`/api/messages/${last.id}`, {
-          method: "PATCH",
-          body: JSON.stringify({ starred: !hasFlag(last.flags, Flag.STARRED) }),
-        }).then(() => {
-          if (mailboxId) invalidateThreadChange(qc, mailboxId, threadId);
+        unwrap(
+          rpc.messages[":id"].$patch({
+            param: { id: last.id },
+            json: { starred: !hasFlag(last.flags, Flag.STARRED) },
+          }),
+        ).then(() => {
+          if (mailboxId) invalidateThreadChange(qc, { mailboxId, threadId });
         }),
       );
       return;
@@ -134,12 +137,12 @@ export function AppShortcuts() {
     if (e.key === "u") {
       e.preventDefault();
       void withLastMessage((last) =>
-        api(`/api/messages/${last.id}`, {
-          method: "PATCH",
-          body: JSON.stringify({ seen: false }),
-        }).then(() => {
-          if (mailboxId) invalidateThreadChange(qc, mailboxId, threadId);
-        }),
+        unwrap(rpc.messages[":id"].$patch({ param: { id: last.id }, json: { seen: false } })).then(
+          () => {
+            if (mailboxId)
+              invalidateThreadChange(qc, { mailboxId, threadId, counts: true, folders: true });
+          },
+        ),
       );
       return;
     }

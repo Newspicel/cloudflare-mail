@@ -1,30 +1,27 @@
 import type {
   ContactDto,
   DraftDto,
-  DraftListDto,
   FolderCountsDto,
   FolderDto,
   LabelDto,
   MailboxSummaryDto,
   MailView,
-  MessageBodyDto,
   MessageDto,
   MessageLabelDto,
   MeUserDto,
   RuleDto,
   SearchFilters,
   SearchResultDto,
-  SearchResultsDto,
   ThreadDto,
-  ThreadListDto,
 } from "@cfmail/shared";
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
-import { api } from "./api.ts";
+import { rpc, unwrap } from "./api.ts";
 import { keys } from "./query-keys.ts";
 
 // Response models are owned by `@cfmail/shared` (single source of truth, derived
 // from the DB schema). Re-exported here under the names the UI already uses so
-// call sites stay put.
+// call sites stay put. Requests themselves go through the typed RPC client
+// (`rpc`), so paths and response bodies are checked against the worker's routes.
 export type {
   ContactDto as Contact,
   DraftDto as DraftRow,
@@ -44,24 +41,24 @@ export type {
 
 export const meQuery = queryOptions({
   queryKey: keys.me(),
-  queryFn: () => api<{ user: MeUserDto | null }>("/api/me"),
+  queryFn: () => unwrap(rpc.me.$get()),
   staleTime: 60_000,
 });
 
 export const bootstrapQuery = queryOptions({
   queryKey: keys.bootstrap(),
-  queryFn: () => api<{ needsBootstrap: boolean }>("/api/bootstrap"),
+  queryFn: () => unwrap(rpc.bootstrap.$get()),
   staleTime: 0,
 });
 
 export const mailboxesQuery = queryOptions({
   queryKey: keys.mailboxes(),
-  queryFn: () => api<{ mailboxes: MailboxSummaryDto[] }>("/api/mailboxes"),
+  queryFn: () => unwrap(rpc.mailboxes.$get()),
 });
 
 export const contactsQuery = queryOptions({
   queryKey: keys.contacts(),
-  queryFn: () => api<{ contacts: ContactDto[] }>("/api/contacts"),
+  queryFn: () => unwrap(rpc.contacts.$get()),
   staleTime: 5 * 60_000,
 });
 
@@ -84,9 +81,15 @@ export const threadsQuery = (mailboxId: string, view: MailView = "inbox") =>
   infiniteQueryOptions({
     queryKey: keys.threads(mailboxId, view),
     queryFn: ({ pageParam }) =>
-      api<ThreadListDto>(
-        `/api/threads?mailboxId=${encodeURIComponent(mailboxId)}&view=${view}&limit=${THREAD_PAGE}` +
-          (pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ""),
+      unwrap(
+        rpc.threads.$get({
+          query: {
+            mailboxId,
+            view,
+            limit: String(THREAD_PAGE),
+            cursor: pageParam ?? undefined,
+          },
+        }),
       ),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
@@ -98,9 +101,10 @@ export const draftsQuery = (mailboxId: string) =>
   infiniteQueryOptions({
     queryKey: keys.drafts(mailboxId),
     queryFn: ({ pageParam }) =>
-      api<DraftListDto>(
-        `/api/drafts?mailboxId=${encodeURIComponent(mailboxId)}&limit=${THREAD_PAGE}` +
-          (pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ""),
+      unwrap(
+        rpc.drafts.$get({
+          query: { mailboxId, limit: String(THREAD_PAGE), cursor: pageParam ?? undefined },
+        }),
       ),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
@@ -112,7 +116,7 @@ export const draftsQuery = (mailboxId: string) =>
 export const draftQuery = (draftId: string) =>
   queryOptions({
     queryKey: keys.draft(draftId),
-    queryFn: () => api<{ draft: DraftDto }>(`/api/drafts/${draftId}`),
+    queryFn: () => unwrap(rpc.drafts[":id"].$get({ param: { id: draftId } })),
     enabled: Boolean(draftId),
   });
 
@@ -121,17 +125,14 @@ export const draftQuery = (draftId: string) =>
 export const folderCountsQuery = (mailboxId: string) =>
   queryOptions({
     queryKey: keys.folderCounts(mailboxId),
-    queryFn: () =>
-      api<{ counts: FolderCountsDto }>(
-        `/api/threads/counts?mailboxId=${encodeURIComponent(mailboxId)}`,
-      ),
+    queryFn: () => unwrap(rpc.threads.counts.$get({ query: { mailboxId } })),
     enabled: Boolean(mailboxId),
   });
 
 export const threadQuery = (threadId: string) =>
   queryOptions({
     queryKey: keys.thread(threadId),
-    queryFn: () => api<{ thread: ThreadDto; messages: MessageDto[] }>(`/api/threads/${threadId}`),
+    queryFn: () => unwrap(rpc.threads[":id"].$get({ param: { id: threadId } })),
     enabled: Boolean(threadId),
   });
 
@@ -140,7 +141,7 @@ export const threadQuery = (threadId: string) =>
 export const messageBodyQuery = (messageId: string) =>
   queryOptions({
     queryKey: keys.messageBody(messageId),
-    queryFn: () => api<MessageBodyDto>(`/api/messages/${messageId}/body`),
+    queryFn: () => unwrap(rpc.messages[":id"].body.$get({ param: { id: messageId } })),
     enabled: Boolean(messageId),
     staleTime: Number.POSITIVE_INFINITY,
   });
@@ -190,7 +191,7 @@ export const searchQuery = (filters: SearchFilterInput) => {
   const qs = buildSearchParams(filters);
   return queryOptions({
     queryKey: keys.search(qs),
-    queryFn: () => api<SearchResultsDto>(`/api/search?${qs}`),
+    queryFn: () => unwrap(rpc.search.$get({ query: Object.fromEntries(new URLSearchParams(qs)) })),
     enabled: hasSearchCriteria(filters),
     staleTime: 15_000,
   });
@@ -199,8 +200,7 @@ export const searchQuery = (filters: SearchFilterInput) => {
 export const labelsQuery = (mailboxId: string) =>
   queryOptions({
     queryKey: keys.labels(mailboxId),
-    queryFn: () =>
-      api<{ labels: LabelDto[] }>(`/api/labels?mailboxId=${encodeURIComponent(mailboxId)}`),
+    queryFn: () => unwrap(rpc.labels.$get({ query: { mailboxId } })),
     enabled: Boolean(mailboxId),
     staleTime: 5 * 60_000,
   });
@@ -208,15 +208,14 @@ export const labelsQuery = (mailboxId: string) =>
 export const rulesQuery = (mailboxId: string) =>
   queryOptions({
     queryKey: keys.rules(mailboxId),
-    queryFn: () =>
-      api<{ rules: RuleDto[] }>(`/api/rules?mailboxId=${encodeURIComponent(mailboxId)}`),
+    queryFn: () => unwrap(rpc.rules.$get({ query: { mailboxId } })),
     enabled: Boolean(mailboxId),
     staleTime: 5 * 60_000,
   });
 
 export const foldersQuery = queryOptions({
   queryKey: keys.folders(),
-  queryFn: () => api<{ folders: FolderDto[] }>("/api/folders"),
+  queryFn: () => unwrap(rpc.folders.$get()),
   staleTime: 5 * 60_000,
 });
 
@@ -224,9 +223,11 @@ export const folderThreadsQuery = (folderId: string) =>
   infiniteQueryOptions({
     queryKey: keys.folderThreads(folderId),
     queryFn: ({ pageParam }) =>
-      api<ThreadListDto>(
-        `/api/folders/${folderId}/threads?limit=${THREAD_PAGE}` +
-          (pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ""),
+      unwrap(
+        rpc.folders[":id"].threads.$get({
+          param: { id: folderId },
+          query: { limit: String(THREAD_PAGE), cursor: pageParam ?? undefined },
+        }),
       ),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
@@ -236,10 +237,7 @@ export const folderThreadsQuery = (folderId: string) =>
 export const messageLabelsQuery = (messageIds: string[]) =>
   queryOptions({
     queryKey: keys.messageLabels(messageIds.toSorted().join(",")),
-    queryFn: () => {
-      const qs = messageIds.map((id) => `id=${encodeURIComponent(id)}`).join("&");
-      return api<{ labels: Record<string, MessageLabelDto[]> }>(`/api/labels/by-messages?${qs}`);
-    },
+    queryFn: () => unwrap(rpc.labels["by-messages"].$get({ query: { id: messageIds } })),
     enabled: messageIds.length > 0,
   });
 
@@ -248,10 +246,7 @@ export const messageLabelsQuery = (messageIds: string[]) =>
 export const threadLabelsQuery = (threadIds: string[]) =>
   queryOptions({
     queryKey: keys.threadLabels(threadIds.toSorted().join(",")),
-    queryFn: () => {
-      const qs = threadIds.map((id) => `id=${encodeURIComponent(id)}`).join("&");
-      return api<{ labels: Record<string, MessageLabelDto[]> }>(`/api/labels/by-threads?${qs}`);
-    },
+    queryFn: () => unwrap(rpc.labels["by-threads"].$get({ query: { id: threadIds } })),
     enabled: threadIds.length > 0,
     staleTime: 15_000,
   });

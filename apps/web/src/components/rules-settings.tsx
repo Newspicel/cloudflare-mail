@@ -11,7 +11,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Copy, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { api } from "@/lib/api.ts";
+import { rpc, unwrap } from "@/lib/api.ts";
 import {
   foldersQuery,
   labelsQuery,
@@ -138,15 +138,15 @@ function RulesList({
 
   // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- onSuccess refreshes the rules cache via invalidate()
   const update = useMutation({
-    mutationFn: ({ id, ...body }: { id: string } & Record<string, unknown>) =>
-      api(`/api/rules/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    mutationFn: ({ id, ...body }: { id: string; priority?: number; enabled?: boolean }) =>
+      unwrap(rpc.rules[":id"].$patch({ param: { id }, json: body })),
     onSuccess: () => invalidate(mailboxId),
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
   // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- onSuccess refreshes the rules cache via invalidate()
   const remove = useMutation({
-    mutationFn: (id: string) => api(`/api/rules/${id}`, { method: "DELETE" }),
+    mutationFn: (id: string) => unwrap(rpc.rules[":id"].$delete({ param: { id } })),
     onSuccess: () => invalidate(mailboxId),
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
@@ -154,10 +154,7 @@ function RulesList({
   // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- onSuccess refreshes the target mailbox's rules cache via invalidate()
   const clone = useMutation({
     mutationFn: ({ id, targetId }: { id: string; targetId: string }) =>
-      api<{ id: string; strippedLabels: string[] }>(`/api/rules/${id}/clone`, {
-        method: "POST",
-        body: JSON.stringify({ mailboxId: targetId }),
-      }),
+      unwrap(rpc.rules[":id"].clone.$post({ param: { id }, json: { mailboxId: targetId } })),
     onSuccess: (res, vars) => {
       invalidate(vars.targetId);
       if (res.strippedLabels.length) {
@@ -396,7 +393,7 @@ function RuleEditor({
 
   // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- onSaved() (from RulesList) invalidates the rules cache on success
   const save = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       const body = {
         name: name.trim(),
         conditionMode: mode,
@@ -418,8 +415,8 @@ function RuleEditor({
         enabled,
       };
       return rule
-        ? api(`/api/rules/${rule.id}`, { method: "PATCH", body: JSON.stringify(body) })
-        : api("/api/rules", { method: "POST", body: JSON.stringify({ mailboxId, ...body }) });
+        ? await unwrap(rpc.rules[":id"].$patch({ param: { id: rule.id }, json: body }))
+        : await unwrap(rpc.rules.$post({ json: { mailboxId, ...body } }));
     },
     onSuccess: () => {
       onSaved();

@@ -2,6 +2,7 @@ import type React from "react";
 import { useId } from "react";
 import { Logo } from "./logo.tsx";
 import { Button } from "./ui/button.tsx";
+import { LabeledField } from "./ui/field.tsx";
 import { Input } from "./ui/input.tsx";
 
 export function CardShell({ title, children }: { title: string; children?: React.ReactNode }) {
@@ -41,10 +42,7 @@ export function Field({
 }) {
   const id = useId();
   return (
-    <div className="mb-3">
-      <label htmlFor={id} className="mb-1.5 block font-medium text-[12px] text-foreground">
-        {label}
-      </label>
+    <LabeledField label={label} htmlFor={id} className="mb-3">
       <Input
         id={id}
         required={required}
@@ -54,7 +52,7 @@ export function Field({
         value={value}
         onChange={(e) => onChange(e.target.value)}
       />
-    </div>
+    </LabeledField>
   );
 }
 

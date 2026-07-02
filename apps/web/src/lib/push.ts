@@ -1,4 +1,4 @@
-import { api } from "./api.ts";
+import { rpc, unwrap } from "./api.ts";
 
 export function pushSupported(): boolean {
   return (
@@ -48,17 +48,21 @@ export async function enablePush(): Promise<void> {
 
   let sub = await reg.pushManager.getSubscription();
   if (!sub) {
-    const { publicKey } = await api<{ publicKey: string }>("/api/push/key");
+    const { publicKey } = await unwrap(rpc.push.key.$get());
     sub = await reg.pushManager.subscribe({
       userVisibleOnly: true,
       applicationServerKey: urlBase64ToUint8Array(publicKey) as BufferSource,
     });
   }
   const json = sub.toJSON();
-  await api("/api/push/subscribe", {
-    method: "POST",
-    body: JSON.stringify({ endpoint: json.endpoint, keys: json.keys }),
-  });
+  await unwrap(
+    rpc.push.subscribe.$post({
+      json: {
+        endpoint: sub.endpoint,
+        keys: { p256dh: json.keys?.p256dh ?? "", auth: json.keys?.auth ?? "" },
+      },
+    }),
+  );
 }
 
 export async function disablePush(): Promise<void> {
@@ -67,5 +71,5 @@ export async function disablePush(): Promise<void> {
   if (!sub) return;
   const endpoint = sub.endpoint;
   await sub.unsubscribe().catch(() => {});
-  await api("/api/push/unsubscribe", { method: "POST", body: JSON.stringify({ endpoint }) });
+  await unwrap(rpc.push.unsubscribe.$post({ json: { endpoint } }));
 }

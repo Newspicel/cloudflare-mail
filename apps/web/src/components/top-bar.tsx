@@ -11,12 +11,14 @@ import {
   Settings,
   SlidersHorizontal,
   Sun,
+  WifiOff,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { authClient } from "@/lib/auth-client.ts";
 import { cn } from "@/lib/cn.ts";
 import { useDateTimeFmt } from "@/lib/prefs.ts";
 import { meQuery, type SearchResult, searchQuery } from "@/lib/queries.ts";
+import { useStreamStatus } from "@/lib/sse.ts";
 import { type Theme, useTheme } from "@/lib/theme.ts";
 import { type DateTimeFmt, formatStamp } from "@/lib/time.ts";
 import { Logo } from "./logo.tsx";
@@ -60,10 +62,26 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
       <SearchBox />
 
       <div className="flex flex-1 items-center justify-end gap-1">
+        <StreamStatusIndicator />
         <NotificationBell />
         <AccountMenu email={data?.user?.email} name={data?.user?.name} image={data?.user?.image} />
       </div>
     </header>
+  );
+}
+
+// Shown only while the live-update stream is down; EventSource keeps retrying
+// on its own, this just makes the gap visible.
+function StreamStatusIndicator() {
+  const status = useStreamStatus();
+  if (status === "connected") return null;
+  return (
+    <span
+      title="Live updates disconnected — reconnecting…"
+      className="grid size-8 shrink-0 place-items-center text-muted-foreground"
+    >
+      <WifiOff className="size-4 animate-pulse" aria-label="Reconnecting" />
+    </span>
   );
 }
 

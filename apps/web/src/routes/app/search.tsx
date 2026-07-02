@@ -21,6 +21,7 @@ import { useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Checkbox } from "@/components/ui/checkbox.tsx";
+import { LabeledField as Field } from "@/components/ui/field.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover.tsx";
 import {
@@ -430,15 +431,6 @@ function AdvancedPanel({ form, set }: { form: SearchParams; set: SetFn }) {
         Tip: prefix a word with <code className="rounded bg-muted px-1">-</code> in the search box
         to exclude it.
       </p>
-    </div>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-1 text-[11px]">
-      <span className="text-muted-foreground">{label}</span>
-      {children}
     </div>
   );
 }

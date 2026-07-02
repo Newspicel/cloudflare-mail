@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { api } from "@/lib/api.ts";
+import { rpc, unwrap } from "@/lib/api.ts";
 import { useDateTimeFmt } from "@/lib/prefs.ts";
 import type { MessageRow } from "@/lib/queries.ts";
 import { sanitizeEmailHtml } from "@/lib/sanitize-email.ts";
@@ -109,10 +109,7 @@ export function MessageMenu({
   // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- creates an admin-side block request; no client cache to update
   const requestBlock = useMutation({
     mutationFn: () =>
-      api<{ status: string }>(`/api/messages/${msg.id}/block-request`, {
-        method: "POST",
-        body: JSON.stringify({}),
-      }),
+      unwrap(rpc.messages[":id"]["block-request"].$post({ param: { id: msg.id }, json: {} })),
     onSuccess: (res) => {
       toast.success(
         res.status === "already-blocked"

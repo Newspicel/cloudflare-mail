@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FolderInput, FolderPlus, Inbox } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { api } from "@/lib/api.ts";
+import { rpc, unwrap } from "@/lib/api.ts";
 import { foldersQuery } from "@/lib/queries.ts";
 import { keys } from "@/lib/query-keys.ts";
 import { useFileThread, useUnfileThread } from "@/lib/use-folder-mutations.ts";
@@ -83,11 +83,7 @@ function MovePopover({ threadIds, mailboxId, currentFolderId, onMoved }: Props) 
   const otherFolders = folders.filter((f) => f.id !== currentFolderId);
 
   const create = useMutation({
-    mutationFn: () =>
-      api<{ id: string }>("/api/folders", {
-        method: "POST",
-        body: JSON.stringify({ name: name.trim() }),
-      }),
+    mutationFn: () => unwrap(rpc.folders.$post({ json: { name: name.trim() } })),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: keys.folders() });
       move(res.id, name.trim());

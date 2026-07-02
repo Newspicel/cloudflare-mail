@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Folder as FolderIcon, FolderInput, Mail, MailOpen } from "lucide-react";
 import { type CSSProperties, useRef } from "react";
-import { api } from "@/lib/api.ts";
+import { rpc, unwrap } from "@/lib/api.ts";
 import {
   type FolderRow,
   type MessageLabel,
@@ -55,7 +55,7 @@ export function FolderThreadList({
   const [from, to] = visibleBlock(virtualizer, threads.length);
   const visibleIds = threads.slice(from, to).map((t) => t.id);
   const { data: labelsData } = useQuery(threadLabelsQuery(visibleIds));
-  const labelsByThread = labelsData?.labels;
+  const labelsByThread: Record<string, MessageLabel[]> | undefined = labelsData?.labels;
   return (
     <TooltipProvider delay={400}>
       <div className="flex h-full flex-col bg-card">
@@ -147,7 +147,7 @@ function FolderRowItem({
     mailboxId: thread.mailboxId,
     threadId: thread.id,
     mutationFn: (read) =>
-      api(`/api/threads/${thread.id}`, { method: "PATCH", body: JSON.stringify({ read }) }),
+      unwrap(rpc.threads[":id"].$patch({ param: { id: thread.id }, json: { read } })),
   });
 
   const menuActions: RowAction[] = [
