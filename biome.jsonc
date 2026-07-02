@@ -37,6 +37,20 @@
       }
     }
   },
+  "overrides": [
+    {
+      // Ambient stand-ins for Cloudflare runtime types (see file header):
+      // deliberately loose `any` shapes that only need to resolve.
+      "includes": ["apps/web/src/types/cloudflare-worker-shim.d.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noExplicitAny": "off"
+          }
+        }
+      }
+    }
+  ],
   "javascript": {
     "formatter": {
       "quoteStyle": "double",
