@@ -1,4 +1,16 @@
+import type { MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
+import type { AppBindings } from "../env.ts";
+
+// Type-only declaration of a route's expected query params so the RPC client
+// (`hc` in apps/web) can pass a `query` object on routes that also take path
+// params. Pure pass-through: the handler keeps reading/validating the query
+// manually, exactly as before.
+export function typedQuery<
+  T extends Record<string, string | string[] | undefined>,
+>(): MiddlewareHandler<AppBindings, string, { in: { query: T }; out: { query: T } }> {
+  return (_c, next) => next();
+}
 
 type PatchField =
   // biome-ignore lint/suspicious/noExplicitAny: transforms run over heterogeneous body fields

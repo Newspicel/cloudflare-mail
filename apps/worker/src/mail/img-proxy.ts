@@ -6,15 +6,11 @@
 // server-side. The HMAC means we only ever fetch URLs we ourselves emitted
 // (no open proxy); host checks below blunt SSRF against internal addresses.
 
+import { bytesToB64url } from "../lib/encoding.ts";
+
 const PROXY_PATH = "/api/messages/proxy-image";
 
 // ─── base64url (URL-safe, unpadded) ─────────────────────────────────────────
-
-function bytesToB64url(buf: ArrayBuffer): string {
-  let s = "";
-  for (const b of new Uint8Array(buf)) s += String.fromCharCode(b);
-  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
 
 function strToB64url(str: string): string {
   return bytesToB64url(new TextEncoder().encode(str).buffer as ArrayBuffer);

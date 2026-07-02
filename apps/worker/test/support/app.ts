@@ -81,6 +81,8 @@ export async function applyMigrationsOnce(): Promise<void> {
 // Order matters: children before parents to respect FKs. Better Auth tables are
 // left alone — tests seed `user` directly and never touch sessions.
 const TRUNCATE_TABLES = [
+  "rate_limit",
+  "rate_limit_counter",
   "reminder",
   "block_request",
   "blocklist",

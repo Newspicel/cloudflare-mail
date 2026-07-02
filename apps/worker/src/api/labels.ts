@@ -13,215 +13,221 @@ import { requireEntityAccess, requirePerm } from "../permissions.ts";
 import { buildPatch, wrapUnique } from "./util.ts";
 
 export function labelsRoutes() {
-  const r = new Hono<AppBindings>();
-  r.use("*", requireUser);
+  const r = new Hono<AppBindings>()
+    .use("*", requireUser)
 
-  r.get("/", async (c) => {
-    const db = dbFromCtx(c);
-    const user = c.get("user")!;
-    const mailboxId = c.req.query("mailboxId");
-    if (!mailboxId) throw new HTTPException(400, { message: "mailboxId required" });
-    await requirePerm(db, user.id, mailboxId, Perm.READ);
-    const rows = await db
-      .select()
-      .from(label)
-      .where(eq(label.mailboxId, mailboxId))
-      .orderBy(asc(label.name));
-    return c.json({ labels: rows } satisfies LabelListDto);
-  });
+    .get("/", async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      const mailboxId = c.req.query("mailboxId");
+      if (!mailboxId) throw new HTTPException(400, { message: "mailboxId required" });
+      await requirePerm(db, user.id, mailboxId, Perm.READ);
+      const rows = await db
+        .select()
+        .from(label)
+        .where(eq(label.mailboxId, mailboxId))
+        .orderBy(asc(label.name));
+      return c.json({ labels: rows } satisfies LabelListDto);
+    })
 
-  r.post("/", zValidator("json", createLabel), async (c) => {
-    const db = dbFromCtx(c);
-    const user = c.get("user")!;
-    const body = c.req.valid("json");
-    await requirePerm(db, user.id, body.mailboxId, Perm.WRITE);
-    const id = crypto.randomUUID();
-    await wrapUnique(
-      () =>
-        db.insert(label).values({
-          id,
-          mailboxId: body.mailboxId,
-          name: body.name.trim(),
-          color: body.color ?? "#64748b",
-        }),
-      "name already exists",
-    );
-    return c.json({ id }, 201);
-  });
+    .post("/", zValidator("json", createLabel), async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      const body = c.req.valid("json");
+      await requirePerm(db, user.id, body.mailboxId, Perm.WRITE);
+      const id = crypto.randomUUID();
+      await wrapUnique(
+        () =>
+          db.insert(label).values({
+            id,
+            mailboxId: body.mailboxId,
+            name: body.name.trim(),
+            color: body.color ?? "#64748b",
+          }),
+        "name already exists",
+      );
+      return c.json({ id }, 201);
+    })
 
-  r.patch("/:id", zValidator("json", updateLabel), async (c) => {
-    const db = dbFromCtx(c);
-    const user = c.get("user")!;
-    const id = c.req.param("id");
-    const body = c.req.valid("json");
-    await requireEntityAccess(db, user.id, label, id, Perm.WRITE);
-    const patch = buildPatch<typeof label.$inferInsert>(body, {
-      name: (v: string) => v.trim(),
-      color: true,
-    });
-    if (Object.keys(patch).length === 0) return c.json({ ok: true });
-    await db.update(label).set(patch).where(eq(label.id, id));
-    return c.json({ ok: true });
-  });
+    .patch("/:id", zValidator("json", updateLabel), async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      const id = c.req.param("id");
+      const body = c.req.valid("json");
+      await requireEntityAccess(db, user.id, label, id, Perm.WRITE);
+      const patch = buildPatch<typeof label.$inferInsert>(body, {
+        name: (v: string) => v.trim(),
+        color: true,
+      });
+      if (Object.keys(patch).length === 0) return c.json({ ok: true });
+      await db.update(label).set(patch).where(eq(label.id, id));
+      return c.json({ ok: true });
+    })
 
-  r.delete("/:id", async (c) => {
-    const db = dbFromCtx(c);
-    const user = c.get("user")!;
-    const id = c.req.param("id");
-    await requireEntityAccess(db, user.id, label, id, Perm.WRITE);
-    await db.delete(label).where(eq(label.id, id));
-    return c.body(null, 204);
-  });
+    .delete("/:id", async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      const id = c.req.param("id");
+      await requireEntityAccess(db, user.id, label, id, Perm.WRITE);
+      await db.delete(label).where(eq(label.id, id));
+      return c.body(null, 204);
+    })
 
-  // Apply/remove a label on a single message.
-  r.put("/:id/messages/:messageId", async (c) => {
-    const db = dbFromCtx(c);
-    const user = c.get("user")!;
-    const id = c.req.param("id");
-    const messageId = c.req.param("messageId");
-    const { mailboxId } = await loadLabelAndMessage(db, id, messageId);
-    await requirePerm(db, user.id, mailboxId, Perm.WRITE);
-    await db.insert(messageLabel).values({ messageId, labelId: id }).onConflictDoNothing();
-    return c.json({ ok: true });
-  });
+    // Apply/remove a label on a single message.
+    .put("/:id/messages/:messageId", async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      const id = c.req.param("id");
+      const messageId = c.req.param("messageId");
+      const { mailboxId } = await loadLabelAndMessage(db, id, messageId);
+      await requirePerm(db, user.id, mailboxId, Perm.WRITE);
+      await db.insert(messageLabel).values({ messageId, labelId: id }).onConflictDoNothing();
+      return c.json({ ok: true });
+    })
 
-  r.delete("/:id/messages/:messageId", async (c) => {
-    const db = dbFromCtx(c);
-    const user = c.get("user")!;
-    const id = c.req.param("id");
-    const messageId = c.req.param("messageId");
-    const { mailboxId } = await loadLabelAndMessage(db, id, messageId);
-    await requirePerm(db, user.id, mailboxId, Perm.WRITE);
-    await db
-      .delete(messageLabel)
-      .where(and(eq(messageLabel.messageId, messageId), eq(messageLabel.labelId, id)));
-    return c.body(null, 204);
-  });
-
-  // Apply/remove a label across every message in a thread — bulk labelling from
-  // the list operates on threads, but labels are stored per message.
-  r.put("/:id/threads/:threadId", async (c) => {
-    const db = dbFromCtx(c);
-    const user = c.get("user")!;
-    const id = c.req.param("id");
-    const threadId = c.req.param("threadId");
-    const { mailboxId, messageIds } = await loadLabelAndThread(db, id, threadId);
-    await requirePerm(db, user.id, mailboxId, Perm.WRITE);
-    if (messageIds.length > 0) {
-      await db
-        .insert(messageLabel)
-        .values(messageIds.map((messageId) => ({ messageId, labelId: id })))
-        .onConflictDoNothing();
-    }
-    return c.json({ ok: true });
-  });
-
-  r.delete("/:id/threads/:threadId", async (c) => {
-    const db = dbFromCtx(c);
-    const user = c.get("user")!;
-    const id = c.req.param("id");
-    const threadId = c.req.param("threadId");
-    const { mailboxId, messageIds } = await loadLabelAndThread(db, id, threadId);
-    await requirePerm(db, user.id, mailboxId, Perm.WRITE);
-    if (messageIds.length > 0) {
+    .delete("/:id/messages/:messageId", async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      const id = c.req.param("id");
+      const messageId = c.req.param("messageId");
+      const { mailboxId } = await loadLabelAndMessage(db, id, messageId);
+      await requirePerm(db, user.id, mailboxId, Perm.WRITE);
       await db
         .delete(messageLabel)
-        .where(and(eq(messageLabel.labelId, id), inArray(messageLabel.messageId, messageIds)));
-    }
-    return c.body(null, 204);
-  });
+        .where(and(eq(messageLabel.messageId, messageId), eq(messageLabel.labelId, id)));
+      return c.body(null, 204);
+    })
 
-  // Resolve labels attached to a set of message ids the caller already has access to.
-  r.get("/by-messages", async (c) => {
-    const db = dbFromCtx(c);
-    const user = c.get("user")!;
-    const ids = c.req.queries("id") ?? [];
-    if (ids.length === 0) return c.json({ labels: {} } satisfies MessageLabelsDto);
-
-    const rows = await db
-      .select({
-        messageId: messageLabel.messageId,
-        labelId: messageLabel.labelId,
-        name: label.name,
-        color: label.color,
-        mailboxId: label.mailboxId,
-      })
-      .from(messageLabel)
-      .innerJoin(label, eq(label.id, messageLabel.labelId))
-      .where(inArray(messageLabel.messageId, ids));
-
-    const uniqueMailboxIds = [...new Set(rows.map((row) => row.mailboxId))];
-    const accessEntries = await Promise.all(
-      uniqueMailboxIds.map(async (mid) => {
-        try {
-          await requirePerm(db, user.id, mid, Perm.READ);
-          return [mid, true] as const;
-        } catch {
-          return [mid, false] as const;
-        }
-      }),
-    );
-    const accessCache = new Map<string, boolean>(accessEntries);
-    const out: Record<string, { id: string; name: string; color: string }[]> = {};
-    for (const row of rows) {
-      if (!accessCache.get(row.mailboxId)) continue;
-      let list = out[row.messageId];
-      if (!list) {
-        list = [];
-        out[row.messageId] = list;
+    // Apply/remove a label across every message in a thread — bulk labelling from
+    // the list operates on threads, but labels are stored per message.
+    .put("/:id/threads/:threadId", async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      const id = c.req.param("id");
+      const threadId = c.req.param("threadId");
+      const { mailboxId, messageIds } = await loadLabelAndThread(db, id, threadId);
+      await requirePerm(db, user.id, mailboxId, Perm.WRITE);
+      if (messageIds.length > 0) {
+        await db
+          .insert(messageLabel)
+          .values(messageIds.map((messageId) => ({ messageId, labelId: id })))
+          .onConflictDoNothing();
       }
-      list.push({ id: row.labelId, name: row.name, color: row.color });
-    }
-    return c.json({ labels: out } satisfies MessageLabelsDto);
-  });
+      return c.json({ ok: true });
+    })
 
-  // Distinct labels applied to any message in each thread — powers the chips on
-  // the thread list rows (labels are per-message, but the list shows threads).
-  r.get("/by-threads", async (c) => {
-    const db = dbFromCtx(c);
-    const user = c.get("user")!;
-    const ids = c.req.queries("id") ?? [];
-    if (ids.length === 0) return c.json({ labels: {} } satisfies ThreadLabelsDto);
-
-    const rows = await db
-      .select({
-        threadId: message.threadId,
-        labelId: messageLabel.labelId,
-        name: label.name,
-        color: label.color,
-        mailboxId: label.mailboxId,
-      })
-      .from(messageLabel)
-      .innerJoin(message, eq(message.id, messageLabel.messageId))
-      .innerJoin(label, eq(label.id, messageLabel.labelId))
-      .where(inArray(message.threadId, ids));
-
-    const uniqueMailboxIds = [...new Set(rows.map((row) => row.mailboxId))];
-    const accessEntries = await Promise.all(
-      uniqueMailboxIds.map(async (mid) => {
-        try {
-          await requirePerm(db, user.id, mid, Perm.READ);
-          return [mid, true] as const;
-        } catch {
-          return [mid, false] as const;
-        }
-      }),
-    );
-    const accessCache = new Map<string, boolean>(accessEntries);
-    const out: Record<string, { id: string; name: string; color: string }[]> = {};
-    for (const row of rows) {
-      if (!accessCache.get(row.mailboxId)) continue;
-      let list = out[row.threadId];
-      if (!list) {
-        list = [];
-        out[row.threadId] = list;
+    .delete("/:id/threads/:threadId", async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      const id = c.req.param("id");
+      const threadId = c.req.param("threadId");
+      const { mailboxId, messageIds } = await loadLabelAndThread(db, id, threadId);
+      await requirePerm(db, user.id, mailboxId, Perm.WRITE);
+      if (messageIds.length > 0) {
+        await db
+          .delete(messageLabel)
+          .where(and(eq(messageLabel.labelId, id), inArray(messageLabel.messageId, messageIds)));
       }
-      // A label can ride on several messages in the thread; show it once.
-      if (list.some((l) => l.id === row.labelId)) continue;
-      list.push({ id: row.labelId, name: row.name, color: row.color });
-    }
-    return c.json({ labels: out } satisfies ThreadLabelsDto);
-  });
+      return c.body(null, 204);
+    })
+
+    // Resolve labels attached to a set of message ids the caller already has access to.
+    .get("/by-messages", async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      const ids = c.req.queries("id") ?? [];
+      if (ids.length === 0) {
+        const empty: MessageLabelsDto = { labels: {} };
+        return c.json(empty);
+      }
+
+      const rows = await db
+        .select({
+          messageId: messageLabel.messageId,
+          labelId: messageLabel.labelId,
+          name: label.name,
+          color: label.color,
+          mailboxId: label.mailboxId,
+        })
+        .from(messageLabel)
+        .innerJoin(label, eq(label.id, messageLabel.labelId))
+        .where(inArray(messageLabel.messageId, ids));
+
+      const uniqueMailboxIds = [...new Set(rows.map((row) => row.mailboxId))];
+      const accessEntries = await Promise.all(
+        uniqueMailboxIds.map(async (mid) => {
+          try {
+            await requirePerm(db, user.id, mid, Perm.READ);
+            return [mid, true] as const;
+          } catch {
+            return [mid, false] as const;
+          }
+        }),
+      );
+      const accessCache = new Map<string, boolean>(accessEntries);
+      const out: Record<string, { id: string; name: string; color: string }[]> = {};
+      for (const row of rows) {
+        if (!accessCache.get(row.mailboxId)) continue;
+        let list = out[row.messageId];
+        if (!list) {
+          list = [];
+          out[row.messageId] = list;
+        }
+        list.push({ id: row.labelId, name: row.name, color: row.color });
+      }
+      return c.json({ labels: out } satisfies MessageLabelsDto);
+    })
+
+    // Distinct labels applied to any message in each thread — powers the chips on
+    // the thread list rows (labels are per-message, but the list shows threads).
+    .get("/by-threads", async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      const ids = c.req.queries("id") ?? [];
+      if (ids.length === 0) {
+        const empty: ThreadLabelsDto = { labels: {} };
+        return c.json(empty);
+      }
+
+      const rows = await db
+        .select({
+          threadId: message.threadId,
+          labelId: messageLabel.labelId,
+          name: label.name,
+          color: label.color,
+          mailboxId: label.mailboxId,
+        })
+        .from(messageLabel)
+        .innerJoin(message, eq(message.id, messageLabel.messageId))
+        .innerJoin(label, eq(label.id, messageLabel.labelId))
+        .where(inArray(message.threadId, ids));
+
+      const uniqueMailboxIds = [...new Set(rows.map((row) => row.mailboxId))];
+      const accessEntries = await Promise.all(
+        uniqueMailboxIds.map(async (mid) => {
+          try {
+            await requirePerm(db, user.id, mid, Perm.READ);
+            return [mid, true] as const;
+          } catch {
+            return [mid, false] as const;
+          }
+        }),
+      );
+      const accessCache = new Map<string, boolean>(accessEntries);
+      const out: Record<string, { id: string; name: string; color: string }[]> = {};
+      for (const row of rows) {
+        if (!accessCache.get(row.mailboxId)) continue;
+        let list = out[row.threadId];
+        if (!list) {
+          list = [];
+          out[row.threadId] = list;
+        }
+        // A label can ride on several messages in the thread; show it once.
+        if (list.some((l) => l.id === row.labelId)) continue;
+        list.push({ id: row.labelId, name: row.name, color: row.color });
+      }
+      return c.json({ labels: out } satisfies ThreadLabelsDto);
+    });
 
   return r;
 }

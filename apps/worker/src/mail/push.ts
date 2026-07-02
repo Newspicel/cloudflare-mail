@@ -4,6 +4,7 @@ import { mailboxNotify, pushSubscription } from "@cfmail/db/schema";
 import { buildPushHTTPRequest } from "@pushforge/builder";
 import { and, eq, inArray } from "drizzle-orm";
 import { getConfig, setConfig } from "../config.ts";
+import { bytesToB64url } from "../lib/encoding.ts";
 import { safeRedirectFetch } from "../ssrf.ts";
 
 const VAPID_PUBLIC = "vapid_public";
@@ -32,7 +33,7 @@ export async function getOrCreateVapid(db: DB): Promise<VapidKeys> {
   const jwk = (await crypto.subtle.exportKey("jwk", keypair.privateKey)) as JsonWebKey;
   const privateJWK = JSON.stringify({ alg: "ES256", ...jwk });
   const rawPub = (await crypto.subtle.exportKey("raw", keypair.publicKey)) as ArrayBuffer;
-  const publicKey = base64UrlEncode(rawPub);
+  const publicKey = bytesToB64url(rawPub);
 
   // setConfig upserts; concurrent isolates converge because both keys are
   // written together and we read them back below.
@@ -154,11 +155,4 @@ export async function notifyMailbox(db: DB, n: MailNotification): Promise<void> 
   } catch (err) {
     console.error("notifyMailbox failed", err);
   }
-}
-
-function base64UrlEncode(buf: ArrayBuffer): string {
-  const bytes = new Uint8Array(buf);
-  let s = "";
-  for (const b of bytes) s += String.fromCharCode(b);
-  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }

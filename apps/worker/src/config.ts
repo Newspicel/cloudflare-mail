@@ -1,6 +1,7 @@
 import type { DB } from "@cfmail/db";
 import { systemConfig } from "@cfmail/db/schema";
 import { eq } from "drizzle-orm";
+import { randomBase64 } from "./lib/encoding.ts";
 import { importMasterKey } from "./mail/pgp.ts";
 
 const SECRET_KEY = "auth_secret";
@@ -51,12 +52,4 @@ export async function getOrCreatePgpMasterKey(db: DB): Promise<CryptoKey> {
     if (!secret) throw new Error("failed to persist pgp master key");
   }
   return importMasterKey(secret);
-}
-
-function randomBase64(byteLen: number): string {
-  const bytes = new Uint8Array(byteLen);
-  crypto.getRandomValues(bytes);
-  let s = "";
-  for (const b of bytes) s += String.fromCharCode(b);
-  return btoa(s);
 }

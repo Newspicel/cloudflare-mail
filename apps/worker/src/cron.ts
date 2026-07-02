@@ -1,18 +1,14 @@
 import { type DB, makeDB } from "@cfmail/db";
-import { domain, draft, mailbox, reminder, thread } from "@cfmail/db/schema";
-import { and, asc, eq, isNotNull, isNull, lte, or } from "drizzle-orm";
+import { domain, draft, mailbox, rateLimitCounter, reminder, thread } from "@cfmail/db/schema";
+import { and, asc, eq, isNotNull, isNull, lt, lte, or } from "drizzle-orm";
 import type { Env } from "./env.ts";
 import { broadcastToUsers } from "./hub.ts";
-import {
-  collectMailboxBlobKeys,
-  collectThreadBlobKeys,
-  deleteBlobs,
-  deleteThreadsByIds,
-} from "./mail/blobs.ts";
+import { collectThreadBlobKeys, deleteBlobs, deleteThreadsByIds } from "./mail/blobs.ts";
 import { checkDomainHealth } from "./mail/dns.ts";
 import { pushToUsers } from "./mail/push.ts";
 import { buildQuote } from "./mail/quote.ts";
 import { sendFromMailbox } from "./mail/send.ts";
+import { markMailboxPurge } from "./mailbox-purge.ts";
 
 const DNS_RECHECK_INTERVAL_MS = 60 * 60 * 1000;
 const DNS_BATCH_LIMIT = 10;
@@ -43,49 +39,79 @@ const REMINDER_LIMIT = 100;
 // before it's marked failed.
 const SCHEDULED_SEND_MAX_ATTEMPTS = 3;
 
+// Each top-level cron job is isolated: one throwing must not silently skip the
+// rest of the tick (the whole run sits under a single waitUntil).
+async function step(name: string, fn: () => Promise<void>): Promise<void> {
+  try {
+    await fn();
+  } catch (err) {
+    console.error(`cron step failed: ${name}`, err);
+  }
+}
+
 export async function runCron(env: Env, now: Date): Promise<void> {
   const db = makeDB(env.DB);
 
-  await dispatchScheduledSends(env, db, now);
-  await dispatchReminders(env, db, now);
+  await step("scheduled-sends", () => dispatchScheduledSends(env, db, now));
+  await step("reminders", () => dispatchReminders(env, db, now));
+  await step("expire-temp-mailboxes", () => expireTempMailboxes(env, db, now));
+  await step("purge-trash", () => purgeStaleTrash(env, db, now));
+  await step("purge-service-retention", () => purgeStaleServiceThreads(env, db, now));
+  await step("purge-pending-mailboxes", () => purgePendingMailboxes(env, db));
+  await step("prune-rate-limit-counters", () => pruneRateLimitCounters(db, now));
+  await step("dns-recheck", () => recheckDomains(db, now));
+}
 
+// Expired temp mailboxes go through the same background purge as admin/owner
+// deletes: mark pending (the mailbox reads as gone at once), let the cron's
+// purgePendingMailboxes drain threads/blobs in bounded batches. The pending
+// filter keeps a mailbox from being re-marked (and re-broadcast) every tick.
+async function expireTempMailboxes(env: Env, db: DB, now: Date): Promise<void> {
   const expired = await db
     .select({ id: mailbox.id, ownerUserId: mailbox.ownerUserId })
     .from(mailbox)
-    .where(and(eq(mailbox.type, "temp"), isNotNull(mailbox.expiresAt), lte(mailbox.expiresAt, now)))
+    .where(
+      and(
+        eq(mailbox.type, "temp"),
+        isNotNull(mailbox.expiresAt),
+        lte(mailbox.expiresAt, now),
+        isNull(mailbox.pendingPurge),
+      ),
+    )
     .limit(100);
 
   await Promise.all(
     expired.map(async (mb) => {
-      const keys = await collectMailboxBlobKeys(db, mb.id);
-      await deleteBlobs(env, keys);
-      await db.delete(mailbox).where(eq(mailbox.id, mb.id));
+      await markMailboxPurge(db, mb.id, "delete");
       await broadcastToUsers(env, [mb.ownerUserId], {
         type: "mailbox_expired",
         mailboxId: mb.id,
       });
     }),
   );
+}
 
-  // Purge threads that have sat in the trash past the retention window.
-  // Deleting the thread cascades to its messages/attachments via FKs; blobs
-  // (R2) have no cascade, so drop those first.
+// Purge threads that have sat in the trash past the retention window.
+// Deleting the thread cascades to its messages/attachments via FKs; blobs
+// (R2) have no cascade, so drop those first.
+async function purgeStaleTrash(env: Env, db: DB, now: Date): Promise<void> {
   const trashCutoff = new Date(now.getTime() - TRASH_RETENTION_MS);
   const staleTrash = await db
     .select({ id: thread.id })
     .from(thread)
     .where(and(eq(thread.trashed, true), lte(thread.trashedAt, trashCutoff)))
     .limit(TRASH_PURGE_LIMIT);
+  if (!staleTrash.length) return;
 
-  if (staleTrash.length) {
-    const ids = staleTrash.map((t) => t.id);
-    const keys = await collectThreadBlobKeys(db, ids);
-    await deleteBlobs(env, keys);
-    await deleteThreadsByIds(db, ids);
-  }
+  const ids = staleTrash.map((t) => t.id);
+  const keys = await collectThreadBlobKeys(db, ids);
+  await deleteBlobs(env, keys);
+  await deleteThreadsByIds(db, ids);
+}
 
-  // Purge service-mailbox threads older than the retention window. Threads
-  // whose newest message predates the cutoff are fully aged out.
+// Purge service-mailbox threads older than the retention window. Threads
+// whose newest message predates the cutoff are fully aged out.
+async function purgeStaleServiceThreads(env: Env, db: DB, now: Date): Promise<void> {
   const svcCutoff = new Date(now.getTime() - SERVICE_RETENTION_MS);
   const staleSvc = await db
     .select({ id: thread.id })
@@ -93,16 +119,22 @@ export async function runCron(env: Env, now: Date): Promise<void> {
     .innerJoin(mailbox, eq(thread.mailboxId, mailbox.id))
     .where(and(eq(mailbox.type, "service"), lte(thread.lastMsgAt, svcCutoff)))
     .limit(SERVICE_PURGE_LIMIT);
+  if (!staleSvc.length) return;
 
-  if (staleSvc.length) {
-    const ids = staleSvc.map((t) => t.id);
-    const keys = await collectThreadBlobKeys(db, ids);
-    await deleteBlobs(env, keys);
-    await deleteThreadsByIds(db, ids);
-  }
+  const ids = staleSvc.map((t) => t.id);
+  const keys = await collectThreadBlobKeys(db, ids);
+  await deleteBlobs(env, keys);
+  await deleteThreadsByIds(db, ids);
+}
 
-  await purgePendingMailboxes(env, db);
+// App rate-limit counters (rate-limit.ts) are one row per key; drop rows whose
+// window ended over a day ago so IP-keyed rows don't accumulate forever.
+async function pruneRateLimitCounters(db: DB, now: Date): Promise<void> {
+  const cutoff = now.getTime() - 24 * 60 * 60 * 1000;
+  await db.delete(rateLimitCounter).where(lt(rateLimitCounter.windowStart, cutoff));
+}
 
+async function recheckDomains(db: DB, now: Date): Promise<void> {
   const stale = new Date(now.getTime() - DNS_RECHECK_INTERVAL_MS);
   const dueDomains = await db
     .select({ id: domain.id, name: domain.name })

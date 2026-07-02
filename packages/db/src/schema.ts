@@ -169,6 +169,26 @@ export const passkey = sqliteTable(
   (t) => [index("passkey_user_idx").on(t.userId)],
 );
 
+// Better Auth rate-limit storage (`rateLimit.storage: "database"` in the worker's
+// auth.ts). Field names (key/count/lastRequest) are Better Auth's contract;
+// `lastRequest` is a raw epoch-ms number, not a timestamp column.
+export const rateLimit = sqliteTable("rate_limit", {
+  id: text("id").primaryKey(),
+  key: text("key").notNull().unique(),
+  count: integer("count").notNull(),
+  lastRequest: integer("last_request").notNull(),
+});
+
+// App-level fixed-window rate-limit counters (worker's rate-limit.ts). Separate
+// from `rate_limit` because Better Auth prunes that table on its own (short)
+// windows, which would reset longer app windows mid-flight. One row per key;
+// `windowStart` is epoch ms. Stale rows are pruned by the cron.
+export const rateLimitCounter = sqliteTable("rate_limit_counter", {
+  key: text("key").primaryKey(),
+  count: integer("count").notNull(),
+  windowStart: integer("window_start").notNull(),
+});
+
 // ─── App-level user invites (admin-controlled signup) ───────────────────────
 
 export const userInvite = sqliteTable(

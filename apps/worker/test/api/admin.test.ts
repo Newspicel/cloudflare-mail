@@ -337,12 +337,12 @@ describe("admin service mailboxes", () => {
     expect(res.status).toBe(404);
   });
 
-  it("deletes a service mailbox", async () => {
+  it("marks a service mailbox for delete-purge", async () => {
     await seedService();
     const res = await request(asAdmin(), "DELETE", `/service/${SERVICE_ID}`);
     expect(res.status).toBe(204);
     const row = await db().query.mailbox.findFirst({ where: eq(mailbox.id, SERVICE_ID) });
-    expect(row).toBeUndefined();
+    expect(row?.pendingPurge).toBe("delete");
   });
 
   it("404s deleting an unknown service mailbox", async () => {

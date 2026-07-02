@@ -6,6 +6,7 @@ import { admin } from "better-auth/plugins/admin";
 import { twoFactor } from "better-auth/plugins/two-factor";
 import { getConfig, getOrCreateAuthSecret } from "./config.ts";
 import type { Env } from "./env.ts";
+import { materializeInvites } from "./invites.ts";
 import { sendMail } from "./mail/notify.ts";
 
 export type Auth = Awaited<ReturnType<typeof createAuth>>;
@@ -68,9 +69,21 @@ export async function createAuth({ env, db, baseURL }: CreateAuthOpts) {
         verification: schema.verification,
         twoFactor: schema.twoFactor,
         passkey: schema.passkey,
+        rateLimit: schema.rateLimit,
       },
       usePlural: false,
     }),
+    // Brute-force protection for login/2FA/password-reset. Database storage —
+    // Workers isolates have no shared memory, so counters must live in D1.
+    rateLimit: {
+      enabled: true,
+      storage: "database",
+      window: 60,
+      max: 120,
+      customRules: {
+        "/sign-in/email": { window: 60, max: 10 },
+      },
+    },
     emailAndPassword: {
       enabled: true,
       autoSignIn: true,
@@ -123,6 +136,22 @@ export async function createAuth({ env, db, baseURL }: CreateAuthOpts) {
     advanced: {
       crossSubDomainCookies: { enabled: false },
       defaultCookieAttributes: { sameSite: "lax" },
+      // Cloudflare's canonical client-IP header, so rate-limit buckets key on
+      // the real client rather than an easily spoofed X-Forwarded-For.
+      ipAddress: { ipAddressHeaders: ["cf-connecting-ip", "x-forwarded-for"] },
+    },
+    databaseHooks: {
+      session: {
+        create: {
+          // Materialize pending mailbox invites at login instead of on every
+          // request (the mailbox list also runs this for long-lived sessions).
+          after: async (session) => {
+            await materializeInvites(database, session.userId).catch((err) =>
+              console.error("invite materialization failed", err),
+            );
+          },
+        },
+      },
     },
     session: {
       expiresIn: 60 * 60 * 24 * 30,

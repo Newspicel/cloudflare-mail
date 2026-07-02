@@ -44,87 +44,87 @@ const lvl = z.enum(NOTIFY_LEVELS);
 const configBody = z.object({ high: lvl, normal: lvl, low: lvl });
 
 export function pushRoutes() {
-  const r = new Hono<AppBindings>();
+  const r = new Hono<AppBindings>()
 
-  r.use("*", requireUser);
+    .use("*", requireUser)
 
-  // VAPID application server key the browser needs to subscribe.
-  r.get("/key", async (c) => {
-    const { publicKey } = await getOrCreateVapid(dbFromCtx(c));
-    return c.json({ publicKey });
-  });
+    // VAPID application server key the browser needs to subscribe.
+    .get("/key", async (c) => {
+      const { publicKey } = await getOrCreateVapid(dbFromCtx(c));
+      return c.json({ publicKey });
+    })
 
-  // Register (or refresh) this device's push subscription for the current user.
-  r.post("/subscribe", zValidator("json", subscribeBody), async (c) => {
-    const db = dbFromCtx(c);
-    const u = c.get("user")!;
-    const body = c.req.valid("json");
-    await db
-      .insert(pushSubscription)
-      .values({
-        id: crypto.randomUUID(),
-        userId: u.id,
-        endpoint: body.endpoint,
-        p256dh: body.keys.p256dh,
-        auth: body.keys.auth,
-        userAgent: c.req.header("user-agent") ?? null,
-      })
-      .onConflictDoUpdate({
-        target: pushSubscription.endpoint,
-        set: { userId: u.id, p256dh: body.keys.p256dh, auth: body.keys.auth },
-      });
-    return c.json({ ok: true });
-  });
-
-  r.post("/unsubscribe", zValidator("json", z.object({ endpoint: z.string() })), async (c) => {
-    const db = dbFromCtx(c);
-    const u = c.get("user")!;
-    const { endpoint } = c.req.valid("json");
-    await db
-      .delete(pushSubscription)
-      .where(and(eq(pushSubscription.endpoint, endpoint), eq(pushSubscription.userId, u.id)));
-    return c.body(null, 204);
-  });
-
-  // Per-mailbox notification config for this user. Each tier (high/normal/low)
-  // maps to a style; an absent mailbox means off.
-  r.get("/mailboxes", async (c) => {
-    const db = dbFromCtx(c);
-    const u = c.get("user")!;
-    const rows = await db
-      .select({
-        mailboxId: mailboxNotify.mailboxId,
-        high: mailboxNotify.high,
-        normal: mailboxNotify.normal,
-        low: mailboxNotify.low,
-      })
-      .from(mailboxNotify)
-      .where(eq(mailboxNotify.userId, u.id));
-    return c.json({ configs: rows });
-  });
-
-  r.put("/mailboxes/:id", zValidator("json", configBody), async (c) => {
-    const db = dbFromCtx(c);
-    const u = c.get("user")!;
-    const id = c.req.param("id");
-    const cfg = c.req.valid("json");
-    await requirePerm(db, u.id, id, Perm.READ);
-    // All-none means "off" — drop the row so it no longer notifies.
-    if (cfg.high === "none" && cfg.normal === "none" && cfg.low === "none") {
+    // Register (or refresh) this device's push subscription for the current user.
+    .post("/subscribe", zValidator("json", subscribeBody), async (c) => {
+      const db = dbFromCtx(c);
+      const u = c.get("user")!;
+      const body = c.req.valid("json");
       await db
-        .delete(mailboxNotify)
-        .where(and(eq(mailboxNotify.mailboxId, id), eq(mailboxNotify.userId, u.id)));
+        .insert(pushSubscription)
+        .values({
+          id: crypto.randomUUID(),
+          userId: u.id,
+          endpoint: body.endpoint,
+          p256dh: body.keys.p256dh,
+          auth: body.keys.auth,
+          userAgent: c.req.header("user-agent") ?? null,
+        })
+        .onConflictDoUpdate({
+          target: pushSubscription.endpoint,
+          set: { userId: u.id, p256dh: body.keys.p256dh, auth: body.keys.auth },
+        });
       return c.json({ ok: true });
-    }
-    await db
-      .insert(mailboxNotify)
-      .values({ mailboxId: id, userId: u.id, ...cfg })
-      .onConflictDoUpdate({
-        target: [mailboxNotify.mailboxId, mailboxNotify.userId],
-        set: cfg,
-      });
-    return c.json({ ok: true });
-  });
+    })
+
+    .post("/unsubscribe", zValidator("json", z.object({ endpoint: z.string() })), async (c) => {
+      const db = dbFromCtx(c);
+      const u = c.get("user")!;
+      const { endpoint } = c.req.valid("json");
+      await db
+        .delete(pushSubscription)
+        .where(and(eq(pushSubscription.endpoint, endpoint), eq(pushSubscription.userId, u.id)));
+      return c.body(null, 204);
+    })
+
+    // Per-mailbox notification config for this user. Each tier (high/normal/low)
+    // maps to a style; an absent mailbox means off.
+    .get("/mailboxes", async (c) => {
+      const db = dbFromCtx(c);
+      const u = c.get("user")!;
+      const rows = await db
+        .select({
+          mailboxId: mailboxNotify.mailboxId,
+          high: mailboxNotify.high,
+          normal: mailboxNotify.normal,
+          low: mailboxNotify.low,
+        })
+        .from(mailboxNotify)
+        .where(eq(mailboxNotify.userId, u.id));
+      return c.json({ configs: rows });
+    })
+
+    .put("/mailboxes/:id", zValidator("json", configBody), async (c) => {
+      const db = dbFromCtx(c);
+      const u = c.get("user")!;
+      const id = c.req.param("id");
+      const cfg = c.req.valid("json");
+      await requirePerm(db, u.id, id, Perm.READ);
+      // All-none means "off" — drop the row so it no longer notifies.
+      if (cfg.high === "none" && cfg.normal === "none" && cfg.low === "none") {
+        await db
+          .delete(mailboxNotify)
+          .where(and(eq(mailboxNotify.mailboxId, id), eq(mailboxNotify.userId, u.id)));
+        return c.json({ ok: true });
+      }
+      await db
+        .insert(mailboxNotify)
+        .values({ mailboxId: id, userId: u.id, ...cfg })
+        .onConflictDoUpdate({
+          target: [mailboxNotify.mailboxId, mailboxNotify.userId],
+          set: cfg,
+        });
+      return c.json({ ok: true });
+    });
 
   return r;
 }
