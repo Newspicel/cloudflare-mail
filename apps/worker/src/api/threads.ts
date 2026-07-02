@@ -24,319 +24,319 @@ import { cursorBefore, decodeCursor, nextCursor } from "./pagination.ts";
 import { serializeMessage, serializeThread } from "./serialize.ts";
 
 export function threadsRoutes() {
-  const r = new Hono<AppBindings>();
-  r.use("*", requireUser);
+  const r = new Hono<AppBindings>()
+    .use("*", requireUser)
 
-  r.get("/", async (c) => {
-    const db = dbFromCtx(c);
-    const user = c.get("user")!;
-    const mailboxId = c.req.query("mailboxId");
-    if (!mailboxId) throw new HTTPException(400, { message: "mailboxId required" });
+    .get("/", async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      const mailboxId = c.req.query("mailboxId");
+      if (!mailboxId) throw new HTTPException(400, { message: "mailboxId required" });
 
-    // The combined "All" view spans every mailbox the user can read; a normal
-    // request is scoped (and permission-checked) to a single mailbox.
-    let scope: SQL;
-    if (mailboxId === ALL_MAILBOXES) {
-      const ids = await accessibleMailboxIds(db, user.id);
-      if (ids.length === 0) return c.json({ threads: [] });
-      scope = inArray(thread.mailboxId, ids);
-    } else {
-      const access = await requirePerm(db, user.id, mailboxId, Perm.READ);
-      // Being emptied in the background: its threads are already on their way out.
-      if (access.purging) return c.json({ threads: [] });
-      scope = eq(thread.mailboxId, mailboxId);
-    }
+      // The combined "All" view spans every mailbox the user can read; a normal
+      // request is scoped (and permission-checked) to a single mailbox.
+      let scope: SQL;
+      if (mailboxId === ALL_MAILBOXES) {
+        const ids = await accessibleMailboxIds(db, user.id);
+        if (ids.length === 0) return c.json({ threads: [] });
+        scope = inArray(thread.mailboxId, ids);
+      } else {
+        const access = await requirePerm(db, user.id, mailboxId, Perm.READ);
+        // Being emptied in the background: its threads are already on their way out.
+        if (access.purging) return c.json({ threads: [] });
+        scope = eq(thread.mailboxId, mailboxId);
+      }
 
-    const limit = Math.min(Number(c.req.query("limit") ?? 50), 200);
-    const view = c.req.query("view") ?? "inbox";
-    const cursor = decodeCursor(c.req.query("cursor"));
+      const limit = Math.min(Number(c.req.query("limit") ?? 50), 200);
+      const view = c.req.query("view") ?? "inbox";
+      const cursor = decodeCursor(c.req.query("cursor"));
 
-    // Threads not in trash/spam and not filed into a custom folder by this user
-    // — the basis for the active inbox/sent/marked views (filed = "moved away").
-    const active = and(eq(thread.trashed, false), eq(thread.spam, false), notFiledBy(user.id));
+      // Threads not in trash/spam and not filed into a custom folder by this user
+      // — the basis for the active inbox/sent/marked views (filed = "moved away").
+      const active = and(eq(thread.trashed, false), eq(thread.spam, false), notFiledBy(user.id));
 
-    let filter: SQL | undefined;
-    switch (view) {
-      case "trash":
-        // Whole-thread trash, plus live threads holding an individually-deleted
-        // message (those surface in Trash for just that message).
-        filter = trashFilter;
-        break;
-      case "spam":
-        filter = and(eq(thread.spam, true), eq(thread.trashed, false));
-        break;
-      case "all":
-        filter = undefined;
-        break;
-      case "sent":
-        filter = and(active, hasMessage(and(eq(message.direction, "out"), LIVE_MSG)));
-        break;
-      case "marked":
-        filter = and(active, hasMessage(and(STARRED_MSG, LIVE_MSG)));
-        break;
-      default:
-        filter = and(active, hasMessage(and(eq(message.direction, "in"), LIVE_MSG)));
-    }
+      let filter: SQL | undefined;
+      switch (view) {
+        case "trash":
+          // Whole-thread trash, plus live threads holding an individually-deleted
+          // message (those surface in Trash for just that message).
+          filter = trashFilter;
+          break;
+        case "spam":
+          filter = and(eq(thread.spam, true), eq(thread.trashed, false));
+          break;
+        case "all":
+          filter = undefined;
+          break;
+        case "sent":
+          filter = and(active, hasMessage(and(eq(message.direction, "out"), LIVE_MSG)));
+          break;
+        case "marked":
+          filter = and(active, hasMessage(and(STARRED_MSG, LIVE_MSG)));
+          break;
+        default:
+          filter = and(active, hasMessage(and(eq(message.direction, "in"), LIVE_MSG)));
+      }
 
-    const where = and(scope, filter, cursorBefore(cursor, thread.lastMsgAt, thread.id));
-    const rows = await db
-      .select()
-      .from(thread)
-      .where(where)
-      // Keyset order must be deterministic: tie-break equal timestamps on id so
-      // the cursor never straddles or repeats a row across pages.
-      .orderBy(desc(thread.lastMsgAt), desc(thread.id))
-      .limit(limit);
-    return c.json({
-      threads: rows.map(serializeThread),
-      nextCursor: nextCursor(rows, limit, (row) => ({ ts: row.lastMsgAt, id: row.id })),
-    });
-  });
-
-  // Per-folder badge counts for the icon bar. `unread` is only meaningful for
-  // the inbox/spam buckets; the rest report totals.
-  r.get("/counts", async (c) => {
-    const db = dbFromCtx(c);
-    const user = c.get("user")!;
-    const mailboxId = c.req.query("mailboxId");
-    if (!mailboxId) throw new HTTPException(400, { message: "mailboxId required" });
-
-    const isAll = mailboxId === ALL_MAILBOXES;
-    let inMailbox: SQL;
-    if (isAll) {
-      const ids = await accessibleMailboxIds(db, user.id);
-      if (ids.length === 0)
-        return c.json({ counts: emptyCounts() } satisfies FolderCountsResponseDto);
-      inMailbox = inArray(thread.mailboxId, ids);
-    } else {
-      const access = await requirePerm(db, user.id, mailboxId, Perm.READ);
-      if (access.purging)
-        return c.json({ counts: emptyCounts() } satisfies FolderCountsResponseDto);
-      inMailbox = eq(thread.mailboxId, mailboxId);
-    }
-
-    const active = and(
-      inMailbox,
-      eq(thread.trashed, false),
-      eq(thread.spam, false),
-      notFiledBy(user.id),
-    );
-    const inSpam = and(inMailbox, eq(thread.spam, true), eq(thread.trashed, false));
-
-    // Every folder badge is a count over the same `thread` rows, so fold them
-    // into one scan with conditional sums instead of nine separate COUNT(*)
-    // round-trips. Each correlated EXISTS is evaluated once per row in that pass.
-    const unread = gt(thread.unreadCount, 0);
-    const inLive = hasMessage(and(eq(message.direction, "in"), LIVE_MSG));
-    const aggP = db
-      .select({
-        inbox: sumIf(and(active, inLive)!),
-        inboxUnread: sumIf(and(active, inLive, unread)!),
-        sent: sumIf(and(active, hasMessage(and(eq(message.direction, "out"), LIVE_MSG)))!),
-        marked: sumIf(and(active, hasMessage(and(STARRED_MSG, LIVE_MSG)))!),
-        spam: sumIf(inSpam!),
-        spamUnread: sumIf(and(inSpam, unread)!),
-        trash: sumIf(trashFilter!),
-        all: count(),
-      })
-      .from(thread)
-      .where(inMailbox);
-    // Drafts are per-author and live in their own table; the "All" view counts
-    // the user's drafts across every mailbox, otherwise just the one.
-    const draftWhere = isAll
-      ? eq(draft.userId, user.id)
-      : and(eq(draft.mailboxId, mailboxId), eq(draft.userId, user.id));
-    const draftP = db.select({ c: count() }).from(draft).where(draftWhere);
-
-    const [[agg], draftRows] = await Promise.all([aggP, draftP]);
-
-    return c.json({
-      counts: {
-        inbox: { total: n(agg?.inbox), unread: n(agg?.inboxUnread) },
-        drafts: { total: draftRows[0]?.c ?? 0, unread: 0 },
-        sent: { total: n(agg?.sent), unread: 0 },
-        marked: { total: n(agg?.marked), unread: 0 },
-        spam: { total: n(agg?.spam), unread: n(agg?.spamUnread) },
-        trash: { total: n(agg?.trash), unread: 0 },
-        all: { total: n(agg?.all), unread: 0 },
-      },
-    } satisfies FolderCountsResponseDto);
-  });
-
-  r.get("/:id", async (c) => {
-    const db = dbFromCtx(c);
-    const user = c.get("user")!;
-    const id = c.req.param("id");
-
-    const th = await requireEntityAccess(db, user.id, thread, id, Perm.READ);
-
-    const msgs = await db
-      .select()
-      .from(message)
-      .where(and(eq(message.threadId, id), eq(message.mailboxId, th.mailboxId)))
-      .orderBy(asc(message.createdAt));
-
-    // Attach the stored correspondent key for each inbound sender so the reader
-    // can show which key verified a signature and its trust state. One batched
-    // lookup keyed by lowercased From address.
-    const senders = [
-      ...new Set(
-        msgs
-          .filter((m) => m.direction === "in" && (m.pgpSigned || m.pgpEncrypted))
-          .map((m) => m.fromAddr.toLowerCase()),
-      ),
-    ];
-    const keyRows = senders.length
-      ? await db.query.contactKey.findMany({
-          where: and(eq(contactKey.mailboxId, th.mailboxId), inArray(contactKey.email, senders)),
-          columns: { email: true, fingerprint: true, source: true, verified: true },
-        })
-      : [];
-    const keyByEmail = new Map(keyRows.map((k) => [k.email, k]));
-
-    return c.json({
-      thread: serializeThread(th),
-      messages: msgs.map((m) => {
-        const k = m.direction === "in" ? keyByEmail.get(m.fromAddr.toLowerCase()) : undefined;
-        return serializeMessage(
-          m,
-          k ? { fingerprint: k.fingerprint, source: k.source, verified: k.verified } : null,
-        );
-      }),
-    });
-  });
-
-  // AI catch-up summary of a whole thread (best-effort, on-demand). READ only —
-  // it just condenses messages the caller can already see.
-  r.post("/:id/summary", async (c) => {
-    const db = dbFromCtx(c);
-    const user = c.get("user")!;
-    const id = c.req.param("id");
-    const th = await requireEntityAccess(db, user.id, thread, id, Perm.READ);
-
-    const mb = await db.query.mailbox.findFirst({
-      where: (m) => eq(m.id, th.mailboxId),
-      columns: { aiFeatures: true, aiTokenCap: true },
-    });
-    if (!mb?.aiFeatures) throw new HTTPException(403, { message: "AI features are off" });
-
-    // Reuse a cached summary while the thread is unchanged. `msgCount` moves on
-    // any add/remove, so a stale cache is simply ignored and regenerated.
-    const cached = await db.query.threadSummary.findFirst({
-      where: (s) => eq(s.threadId, id),
-    });
-    if (cached && cached.msgCount === th.msgCount) {
-      return c.json({ bullets: cached.bullets } satisfies ThreadSummaryDto);
-    }
-
-    // Cap how many messages feed the model so a long thread can't blow the
-    // budget; keep the most recent ones, oldest-first for chronological context.
-    const msgs = await db
-      .select({
-        fromName: message.fromName,
-        fromAddr: message.fromAddr,
-        subject: message.subject,
-        bodyText: message.bodyText,
-      })
-      .from(message)
-      .where(and(eq(message.threadId, id), eq(message.mailboxId, th.mailboxId)))
-      .orderBy(desc(message.createdAt))
-      .limit(20);
-    msgs.reverse();
-
-    const bullets = await generateThreadSummary(
-      c.env,
-      db,
-      th.mailboxId,
-      mb.aiTokenCap ?? null,
-      msgs.map((m) => ({
-        from: m.fromName ? `${m.fromName} <${m.fromAddr}>` : m.fromAddr,
-        subject: m.subject,
-        body: m.bodyText ?? "",
-      })),
-    );
-    // Only cache a real result — an empty list means generation failed or the
-    // budget was exhausted, so leave it uncached to retry next time.
-    if (bullets.length > 0) {
-      await db
-        .insert(threadSummary)
-        .values({ threadId: id, bullets, msgCount: th.msgCount, updatedAt: new Date() })
-        .onConflictDoUpdate({
-          target: threadSummary.threadId,
-          set: { bullets, msgCount: th.msgCount, updatedAt: new Date() },
-        });
-    }
-    return c.json({ bullets } satisfies ThreadSummaryDto);
-  });
-
-  r.patch("/:id", zValidator("json", updateThread), async (c) => {
-    const db = dbFromCtx(c);
-    const user = c.get("user")!;
-    const id = c.req.param("id");
-    const body = c.req.valid("json");
-
-    const th = await requireEntityAccess(db, user.id, thread, id, Perm.WRITE);
-
-    // Trash and spam are mutually exclusive buckets: entering one clears the
-    // other so a thread only ever shows up in a single folder.
-    const patch: Partial<{ trashed: boolean; trashedAt: Date | null; spam: boolean }> = {};
-    if (body.trashed !== undefined) {
-      patch.trashed = body.trashed;
-      patch.trashedAt = body.trashed ? new Date() : null;
-      if (body.trashed && body.spam === undefined) patch.spam = false;
-    }
-    if (body.spam !== undefined) {
-      patch.spam = body.spam;
-      if (body.spam && body.trashed === undefined) patch.trashed = false;
-    }
-    if (Object.keys(patch).length > 0) {
-      await db.update(thread).set(patch).where(eq(thread.id, id));
-    }
-
-    // Read/unread lives on message SEEN flags; flip every inbound message, then
-    // reconcile the thread's cached unreadCount.
-    let unreadCount = th.unreadCount;
-    if (body.read !== undefined) {
-      const seenBit = sql`${message.flags} | ${Flag.SEEN}`;
-      const clearBit = sql`${message.flags} & ${~Flag.SEEN}`;
-      await db
-        .update(message)
-        .set({ flags: body.read ? seenBit : clearBit })
-        .where(and(eq(message.threadId, id), eq(message.direction, "in")));
-      unreadCount = await recomputeThreadUnread(db, id);
-      // Sync the reader's other devices: update their unread badge and dismiss
-      // the thread's push notification once it's been read somewhere.
-      await broadcastToUsers(c.env, [user.id], {
-        type: "thread_read",
-        mailboxId: th.mailboxId,
-        threadId: id,
-        read: body.read,
+      const where = and(scope, filter, cursorBefore(cursor, thread.lastMsgAt, thread.id));
+      const rows = await db
+        .select()
+        .from(thread)
+        .where(where)
+        // Keyset order must be deterministic: tie-break equal timestamps on id so
+        // the cursor never straddles or repeats a row across pages.
+        .orderBy(desc(thread.lastMsgAt), desc(thread.id))
+        .limit(limit);
+      return c.json({
+        threads: rows.map(serializeThread),
+        nextCursor: nextCursor(rows, limit, (row) => ({ ts: row.lastMsgAt, id: row.id })),
       });
-    }
+    })
 
-    return c.json({
-      trashed: patch.trashed ?? th.trashed,
-      spam: patch.spam ?? th.spam,
-      unreadCount,
+    // Per-folder badge counts for the icon bar. `unread` is only meaningful for
+    // the inbox/spam buckets; the rest report totals.
+    .get("/counts", async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      const mailboxId = c.req.query("mailboxId");
+      if (!mailboxId) throw new HTTPException(400, { message: "mailboxId required" });
+
+      const isAll = mailboxId === ALL_MAILBOXES;
+      let inMailbox: SQL;
+      if (isAll) {
+        const ids = await accessibleMailboxIds(db, user.id);
+        if (ids.length === 0)
+          return c.json({ counts: emptyCounts() } satisfies FolderCountsResponseDto);
+        inMailbox = inArray(thread.mailboxId, ids);
+      } else {
+        const access = await requirePerm(db, user.id, mailboxId, Perm.READ);
+        if (access.purging)
+          return c.json({ counts: emptyCounts() } satisfies FolderCountsResponseDto);
+        inMailbox = eq(thread.mailboxId, mailboxId);
+      }
+
+      const active = and(
+        inMailbox,
+        eq(thread.trashed, false),
+        eq(thread.spam, false),
+        notFiledBy(user.id),
+      );
+      const inSpam = and(inMailbox, eq(thread.spam, true), eq(thread.trashed, false));
+
+      // Every folder badge is a count over the same `thread` rows, so fold them
+      // into one scan with conditional sums instead of nine separate COUNT(*)
+      // round-trips. Each correlated EXISTS is evaluated once per row in that pass.
+      const unread = gt(thread.unreadCount, 0);
+      const inLive = hasMessage(and(eq(message.direction, "in"), LIVE_MSG));
+      const aggP = db
+        .select({
+          inbox: sumIf(and(active, inLive)!),
+          inboxUnread: sumIf(and(active, inLive, unread)!),
+          sent: sumIf(and(active, hasMessage(and(eq(message.direction, "out"), LIVE_MSG)))!),
+          marked: sumIf(and(active, hasMessage(and(STARRED_MSG, LIVE_MSG)))!),
+          spam: sumIf(inSpam!),
+          spamUnread: sumIf(and(inSpam, unread)!),
+          trash: sumIf(trashFilter!),
+          all: count(),
+        })
+        .from(thread)
+        .where(inMailbox);
+      // Drafts are per-author and live in their own table; the "All" view counts
+      // the user's drafts across every mailbox, otherwise just the one.
+      const draftWhere = isAll
+        ? eq(draft.userId, user.id)
+        : and(eq(draft.mailboxId, mailboxId), eq(draft.userId, user.id));
+      const draftP = db.select({ c: count() }).from(draft).where(draftWhere);
+
+      const [[agg], draftRows] = await Promise.all([aggP, draftP]);
+
+      return c.json({
+        counts: {
+          inbox: { total: n(agg?.inbox), unread: n(agg?.inboxUnread) },
+          drafts: { total: draftRows[0]?.c ?? 0, unread: 0 },
+          sent: { total: n(agg?.sent), unread: 0 },
+          marked: { total: n(agg?.marked), unread: 0 },
+          spam: { total: n(agg?.spam), unread: n(agg?.spamUnread) },
+          trash: { total: n(agg?.trash), unread: 0 },
+          all: { total: n(agg?.all), unread: 0 },
+        },
+      } satisfies FolderCountsResponseDto);
+    })
+
+    .get("/:id", async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      const id = c.req.param("id");
+
+      const th = await requireEntityAccess(db, user.id, thread, id, Perm.READ);
+
+      const msgs = await db
+        .select()
+        .from(message)
+        .where(and(eq(message.threadId, id), eq(message.mailboxId, th.mailboxId)))
+        .orderBy(asc(message.createdAt));
+
+      // Attach the stored correspondent key for each inbound sender so the reader
+      // can show which key verified a signature and its trust state. One batched
+      // lookup keyed by lowercased From address.
+      const senders = [
+        ...new Set(
+          msgs
+            .filter((m) => m.direction === "in" && (m.pgpSigned || m.pgpEncrypted))
+            .map((m) => m.fromAddr.toLowerCase()),
+        ),
+      ];
+      const keyRows = senders.length
+        ? await db.query.contactKey.findMany({
+            where: and(eq(contactKey.mailboxId, th.mailboxId), inArray(contactKey.email, senders)),
+            columns: { email: true, fingerprint: true, source: true, verified: true },
+          })
+        : [];
+      const keyByEmail = new Map(keyRows.map((k) => [k.email, k]));
+
+      return c.json({
+        thread: serializeThread(th),
+        messages: msgs.map((m) => {
+          const k = m.direction === "in" ? keyByEmail.get(m.fromAddr.toLowerCase()) : undefined;
+          return serializeMessage(
+            m,
+            k ? { fingerprint: k.fingerprint, source: k.source, verified: k.verified } : null,
+          );
+        }),
+      });
+    })
+
+    // AI catch-up summary of a whole thread (best-effort, on-demand). READ only —
+    // it just condenses messages the caller can already see.
+    .post("/:id/summary", async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      const id = c.req.param("id");
+      const th = await requireEntityAccess(db, user.id, thread, id, Perm.READ);
+
+      const mb = await db.query.mailbox.findFirst({
+        where: (m) => eq(m.id, th.mailboxId),
+        columns: { aiFeatures: true, aiTokenCap: true },
+      });
+      if (!mb?.aiFeatures) throw new HTTPException(403, { message: "AI features are off" });
+
+      // Reuse a cached summary while the thread is unchanged. `msgCount` moves on
+      // any add/remove, so a stale cache is simply ignored and regenerated.
+      const cached = await db.query.threadSummary.findFirst({
+        where: (s) => eq(s.threadId, id),
+      });
+      if (cached && cached.msgCount === th.msgCount) {
+        return c.json({ bullets: cached.bullets } satisfies ThreadSummaryDto);
+      }
+
+      // Cap how many messages feed the model so a long thread can't blow the
+      // budget; keep the most recent ones, oldest-first for chronological context.
+      const msgs = await db
+        .select({
+          fromName: message.fromName,
+          fromAddr: message.fromAddr,
+          subject: message.subject,
+          bodyText: message.bodyText,
+        })
+        .from(message)
+        .where(and(eq(message.threadId, id), eq(message.mailboxId, th.mailboxId)))
+        .orderBy(desc(message.createdAt))
+        .limit(20);
+      msgs.reverse();
+
+      const bullets = await generateThreadSummary(
+        c.env,
+        db,
+        th.mailboxId,
+        mb.aiTokenCap ?? null,
+        msgs.map((m) => ({
+          from: m.fromName ? `${m.fromName} <${m.fromAddr}>` : m.fromAddr,
+          subject: m.subject,
+          body: m.bodyText ?? "",
+        })),
+      );
+      // Only cache a real result — an empty list means generation failed or the
+      // budget was exhausted, so leave it uncached to retry next time.
+      if (bullets.length > 0) {
+        await db
+          .insert(threadSummary)
+          .values({ threadId: id, bullets, msgCount: th.msgCount, updatedAt: new Date() })
+          .onConflictDoUpdate({
+            target: threadSummary.threadId,
+            set: { bullets, msgCount: th.msgCount, updatedAt: new Date() },
+          });
+      }
+      return c.json({ bullets } satisfies ThreadSummaryDto);
+    })
+
+    .patch("/:id", zValidator("json", updateThread), async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      const id = c.req.param("id");
+      const body = c.req.valid("json");
+
+      const th = await requireEntityAccess(db, user.id, thread, id, Perm.WRITE);
+
+      // Trash and spam are mutually exclusive buckets: entering one clears the
+      // other so a thread only ever shows up in a single folder.
+      const patch: Partial<{ trashed: boolean; trashedAt: Date | null; spam: boolean }> = {};
+      if (body.trashed !== undefined) {
+        patch.trashed = body.trashed;
+        patch.trashedAt = body.trashed ? new Date() : null;
+        if (body.trashed && body.spam === undefined) patch.spam = false;
+      }
+      if (body.spam !== undefined) {
+        patch.spam = body.spam;
+        if (body.spam && body.trashed === undefined) patch.trashed = false;
+      }
+      if (Object.keys(patch).length > 0) {
+        await db.update(thread).set(patch).where(eq(thread.id, id));
+      }
+
+      // Read/unread lives on message SEEN flags; flip every inbound message, then
+      // reconcile the thread's cached unreadCount.
+      let unreadCount = th.unreadCount;
+      if (body.read !== undefined) {
+        const seenBit = sql`${message.flags} | ${Flag.SEEN}`;
+        const clearBit = sql`${message.flags} & ${~Flag.SEEN}`;
+        await db
+          .update(message)
+          .set({ flags: body.read ? seenBit : clearBit })
+          .where(and(eq(message.threadId, id), eq(message.direction, "in")));
+        unreadCount = await recomputeThreadUnread(db, id);
+        // Sync the reader's other devices: update their unread badge and dismiss
+        // the thread's push notification once it's been read somewhere.
+        await broadcastToUsers(c.env, [user.id], {
+          type: "thread_read",
+          mailboxId: th.mailboxId,
+          threadId: id,
+          read: body.read,
+        });
+      }
+
+      return c.json({
+        trashed: patch.trashed ?? th.trashed,
+        spam: patch.spam ?? th.spam,
+        unreadCount,
+      });
+    })
+
+    // Permanent delete: drop the thread for good (used by the Trash folder).
+    // Deleting the row cascades to messages/attachments via FKs; R2 blobs have no
+    // cascade, so collect and delete them first.
+    .delete("/:id", async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      const id = c.req.param("id");
+
+      await requireEntityAccess(db, user.id, thread, id, Perm.WRITE);
+
+      const keys = await collectThreadBlobKeys(db, [id]);
+      await deleteBlobs(c.env, keys);
+      await db.delete(thread).where(eq(thread.id, id));
+
+      return c.json({ deleted: true });
     });
-  });
-
-  // Permanent delete: drop the thread for good (used by the Trash folder).
-  // Deleting the row cascades to messages/attachments via FKs; R2 blobs have no
-  // cascade, so collect and delete them first.
-  r.delete("/:id", async (c) => {
-    const db = dbFromCtx(c);
-    const user = c.get("user")!;
-    const id = c.req.param("id");
-
-    await requireEntityAccess(db, user.id, thread, id, Perm.WRITE);
-
-    const keys = await collectThreadBlobKeys(db, [id]);
-    await deleteBlobs(c.env, keys);
-    await db.delete(thread).where(eq(thread.id, id));
-
-    return c.json({ deleted: true });
-  });
 
   return r;
 }

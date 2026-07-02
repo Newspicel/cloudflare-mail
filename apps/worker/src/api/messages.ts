@@ -41,12 +41,14 @@ import {
   unwrapSecret,
 } from "../mail/pgp.ts";
 import { buildQuote } from "../mail/quote.ts";
+import { sanitizeEmailHtml } from "../mail/sanitize.ts";
 import { sendFromMailbox } from "../mail/send.ts";
 import { recomputeThreadAfterMessageDelete, recomputeThreadUnread } from "../mail/threads.ts";
 import { performUnsubscribe } from "../mail/unsubscribe.ts";
 import { fetchWkdKey } from "../mail/wkd.ts";
 import { requireUser } from "../middleware.ts";
 import { requireEntityAccess, requirePerm } from "../permissions.ts";
+import { enforceRateLimit } from "../rate-limit.ts";
 
 // ASCII-safe, filesystem-safe stem for a downloaded `.eml` (Content-Disposition
 // filename); collapses anything non-alphanumeric to a single dash.
@@ -65,416 +67,435 @@ const patchSchema = z.object({
 });
 
 export function messagesRoutes() {
-  const r = new Hono<AppBindings>();
-  r.use("*", requireUser);
+  const r = new Hono<AppBindings>()
+    .use("*", requireUser)
 
-  r.post("/send", zValidator("json", sendMessage), async (c) => {
-    const db = dbFromCtx(c);
-    const user = c.get("user")!;
-    const body = c.req.valid("json");
-    await requirePerm(db, user.id, body.mailboxId, Perm.WRITE);
-    assertOwnedAttachmentKeys(user.id, body.attachments);
-    // Reply/forward quoting is resolved server-side from the original raw `.eml`
-    // so the quoted body keeps its real (un-proxied) image URLs for the recipient.
-    const quote = body.quote ? await buildQuote(c.env, db, user.id, body.quote) : undefined;
-    const result = await sendFromMailbox(c.env, db, user.id, body, quote);
-    return c.json(result, 201);
-  });
+    .post("/send", zValidator("json", sendMessage), async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      const body = c.req.valid("json");
+      await enforceRateLimit(db, "send", user.id, 60, 60 * 60 * 1000);
+      await requirePerm(db, user.id, body.mailboxId, Perm.WRITE);
+      assertOwnedAttachmentKeys(user.id, body.attachments);
+      // Reply/forward quoting is resolved server-side from the original raw `.eml`
+      // so the quoted body keeps its real (un-proxied) image URLs for the recipient.
+      const quote = body.quote ? await buildQuote(c.env, db, user.id, body.quote) : undefined;
+      const result = await sendFromMailbox(c.env, db, user.id, body, quote);
+      return c.json(result, 201);
+    })
 
-  r.patch("/:id", zValidator("json", patchSchema), async (c) => {
-    const db = dbFromCtx(c);
-    const user = c.get("user")!;
-    const id = c.req.param("id");
-    const patch = c.req.valid("json");
+    .patch("/:id", zValidator("json", patchSchema), async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      const id = c.req.param("id");
+      const patch = c.req.valid("json");
 
-    // Trashing hides mail thread-wide, so it needs WRITE (matches thread-level trash);
-    // seen/starred are per-reader state and only need READ.
-    const msg = await requireEntityAccess(
-      db,
-      user.id,
-      message,
-      id,
-      patch.trash !== undefined ? Perm.WRITE : Perm.READ,
-    );
-
-    let flags = msg.flags;
-    if (patch.seen !== undefined) flags = setFlag(flags, Flag.SEEN, patch.seen);
-    if (patch.starred !== undefined) flags = setFlag(flags, Flag.STARRED, patch.starred);
-    if (patch.trash !== undefined) flags = setFlag(flags, Flag.TRASH, patch.trash);
-
-    await db.update(message).set({ flags }).where(eq(message.id, id));
-    // SEEN drives the thread's unread badge, and a trashed message drops out of
-    // the count — keep the cached total in sync after either changes.
-    if (patch.seen !== undefined || patch.trash !== undefined) {
-      const unread = await recomputeThreadUnread(db, msg.threadId);
-      // Mirror the read state to the reader's other devices (badge sync +
-      // notification dismissal) when this clears/sets the thread's last unread.
-      if (patch.seen !== undefined)
-        await broadcastToUsers(c.env, [user.id], {
-          type: "thread_read",
-          mailboxId: msg.mailboxId,
-          threadId: msg.threadId,
-          read: unread === 0,
-        });
-    }
-    return c.json({ flags });
-  });
-
-  // Permanently drop a single message out of its thread (irreversible). Deleting
-  // the row cascades to its attachments via FKs; R2 blobs don't cascade, so
-  // collect and delete them first. When it's the thread's last message the whole
-  // (now-empty) thread goes too; otherwise the thread's cached aggregates are
-  // reconciled with the survivors.
-  r.delete("/:id", async (c) => {
-    const db = dbFromCtx(c);
-    const user = c.get("user")!;
-    const id = c.req.param("id");
-
-    // Deleting hides mail thread-wide and can't be undone — gate on WRITE.
-    const msg = await requireEntityAccess(db, user.id, message, id, Perm.WRITE);
-
-    const keys = await collectMessageBlobKeys(db, id);
-    await deleteBlobs(c.env, keys);
-
-    const rows = await db
-      .select({ c: count() })
-      .from(message)
-      .where(eq(message.threadId, msg.threadId));
-    const remaining = (rows[0]?.c ?? 1) - 1;
-
-    await db.delete(message).where(eq(message.id, id));
-
-    if (remaining <= 0) {
-      await db.delete(thread).where(eq(thread.id, msg.threadId));
-      return c.json({ deleted: true, threadDeleted: true });
-    }
-
-    await recomputeThreadAfterMessageDelete(db, msg.threadId);
-    return c.json({ deleted: true, threadDeleted: false });
-  });
-
-  // Act on the message's List-Unsubscribe headers (newsletter opt-out). May POST
-  // a one-click request, send a mailto, or hand back an https link to open.
-  r.post("/:id/unsubscribe", async (c) => {
-    const db = dbFromCtx(c);
-    const user = c.get("user")!;
-    const id = c.req.param("id");
-    // Unsubscribing acts outward on the sender's behalf (sends mail / hits their
-    // endpoint), so it needs WRITE — the same bar as sending from the mailbox.
-    const msg = await requireEntityAccess(db, user.id, message, id, Perm.WRITE);
-    if (msg.direction !== "in") throw new HTTPException(400, { message: "not an inbound message" });
-    return c.json(await performUnsubscribe(c.env, db, msg));
-  });
-
-  // Submit a request to block this message's sender. The deployment-wide
-  // blocklist is admin-managed (invariant: hard blocks reject inbound at intake),
-  // so a reader can only *request* a block; an admin approves it. READ is enough
-  // — requesting is harmless until reviewed.
-  r.post("/:id/block-request", zValidator("json", createBlockRequest), async (c) => {
-    const db = dbFromCtx(c);
-    const user = c.get("user")!;
-    const id = c.req.param("id");
-    const body = c.req.valid("json");
-    const msg = await requireEntityAccess(db, user.id, message, id, Perm.READ);
-    if (msg.direction !== "in") throw new HTTPException(400, { message: "not an inbound message" });
-
-    const value = msg.fromAddr.trim().toLowerCase();
-    if (!value.includes("@")) throw new HTTPException(400, { message: "no sender address" });
-
-    // No-op if the sender is already blocked, or this reader already has a
-    // pending request for them — keep the queue free of duplicates.
-    const already = await db.query.blocklist.findFirst({
-      where: and(eq(blocklist.type, "email"), eq(blocklist.value, value)),
-      columns: { id: true },
-    });
-    if (already) return c.json({ status: "already-blocked" });
-    const pending = await db.query.blockRequest.findFirst({
-      where: and(
-        eq(blockRequest.requestedByUserId, user.id),
-        eq(blockRequest.value, value),
-        eq(blockRequest.status, "pending"),
-      ),
-      columns: { id: true },
-    });
-    if (pending) return c.json({ status: "pending" });
-
-    await db.insert(blockRequest).values({
-      id: crypto.randomUUID(),
-      type: "email",
-      value,
-      fromName: msg.fromName ?? null,
-      subject: msg.subject || null,
-      note: body.note?.trim() || null,
-      messageId: msg.id,
-      mailboxId: msg.mailboxId,
-      requestedByUserId: user.id,
-    });
-    return c.json({ status: "submitted" }, 201);
-  });
-
-  // AI-drafted reply suggestions for an inbound message (best-effort, on-demand).
-  // READ is enough — it only returns text the user may choose to send.
-  r.post("/:id/smart-reply", async (c) => {
-    const db = dbFromCtx(c);
-    const user = c.get("user")!;
-    const id = c.req.param("id");
-    const msg = await requireEntityAccess(db, user.id, message, id, Perm.READ);
-    if (msg.direction !== "in") throw new HTTPException(400, { message: "not an inbound message" });
-
-    const mb = await db.query.mailbox.findFirst({
-      where: (m) => eq(m.id, msg.mailboxId),
-      columns: { aiFeatures: true, aiTokenCap: true },
-    });
-    if (!mb?.aiFeatures) throw new HTTPException(403, { message: "AI features are off" });
-
-    const suggestions = await generateSmartReply(c.env, db, msg.mailboxId, mb.aiTokenCap ?? null, {
-      from: msg.fromName ? `${msg.fromName} <${msg.fromAddr}>` : msg.fromAddr,
-      subject: msg.subject,
-      body: msg.bodyText ?? "",
-    });
-    return c.json({ suggestions } satisfies SmartReplyDto);
-  });
-
-  // Full body, parsed on demand from the raw `.eml`. Listing endpoints only
-  // carry the snippet; this is fetched lazily when a message is opened.
-  r.get("/:id/body", async (c) => {
-    const db = dbFromCtx(c);
-    const user = c.get("user")!;
-    const id = c.req.param("id");
-    const msg = await requireEntityAccess(db, user.id, message, id, Perm.READ);
-    // For decrypted inbound mail the plaintext lives at plainR2Key; the original
-    // ciphertext stays at rawR2Key (served by /:id/raw). Prefer plaintext here.
-    const bodyKey = msg.plainR2Key ?? msg.rawR2Key;
-    if (!bodyKey) throw new HTTPException(404, { message: "not found" });
-    const obj = await c.env.BLOBS.get(bodyKey);
-    if (!obj) throw new HTTPException(404, { message: "blob missing" });
-    const parsed = await parseMime(await obj.arrayBuffer());
-
-    const atts = await db
-      .select({
-        id: attachment.id,
-        filename: attachment.filename,
-        contentType: attachment.contentType,
-        sizeBytes: attachment.sizeBytes,
-        inline: attachment.inline,
-        contentId: attachment.contentId,
-      })
-      .from(attachment)
-      .where(eq(attachment.messageId, id));
-
-    // Remote images are routed through `/proxy-image` so opening a message
-    // never leaks the reader's IP to the sender (tracking pixels); inline `cid:`
-    // images are rewritten to the same-origin attachment route so they render.
-    let html: string | null = null;
-    if (parsed.html) {
-      html = await proxyRemoteContent(parsed.html, await getOrCreateAuthSecret(db));
-      const cidMap = new Map(
-        atts.filter((a) => a.contentId).map((a) => [bareCid(a.contentId!), a.id]),
+      // Trashing hides mail thread-wide, so it needs WRITE (matches thread-level trash);
+      // seen/starred are per-reader state and only need READ.
+      const msg = await requireEntityAccess(
+        db,
+        user.id,
+        message,
+        id,
+        patch.trash !== undefined ? Perm.WRITE : Perm.READ,
       );
-      html = await rewriteInlineCids(html, id, cidMap);
-    }
-    // The raw `.eml` never changes once stored, so the parsed body is immutable.
-    c.header("Cache-Control", "private, max-age=31536000, immutable");
-    return c.json({
-      html,
-      text: parsed.text ?? null,
-      attachments: atts,
-      calendar: extractCalendar(parsed),
-    } satisfies MessageBodyDto);
-  });
 
-  // Trust an inbound sender's PGP key: extract it from the stored message (an
-  // attached/inline public key) or fetch it via WKD, save it as a contact key,
-  // and re-verify this message's signature against it. Turns a "signed — can't
-  // verify" or "new key" message into a resolved, verified one. Perm.MANAGE — it
-  // changes the mailbox's trust state.
-  r.post("/:id/pgp/trust-sender", async (c) => {
-    const db = dbFromCtx(c);
-    const user = c.get("user")!;
-    const id = c.req.param("id");
-    const msg = await requireEntityAccess(db, user.id, message, id, Perm.MANAGE);
-    const sender = msg.fromAddr.toLowerCase();
-    if (msg.direction !== "in") {
-      throw new HTTPException(400, { message: "not an inbound message" });
-    }
+      let flags = msg.flags;
+      if (patch.seen !== undefined) flags = setFlag(flags, Flag.SEEN, patch.seen);
+      if (patch.starred !== undefined) flags = setFlag(flags, Flag.STARRED, patch.starred);
+      if (patch.trash !== undefined) flags = setFlag(flags, Flag.TRASH, patch.trash);
 
-    // Read the stored raw once: used both to extract an embedded key and to
-    // re-verify the signature below.
-    let rawText: string | null = null;
-    if (msg.rawR2Key) {
-      const obj = await c.env.BLOBS.get(msg.rawR2Key);
-      if (obj) rawText = new TextDecoder("latin1").decode(await obj.arrayBuffer());
-    }
+      await db.update(message).set({ flags }).where(eq(message.id, id));
+      // SEEN drives the thread's unread badge, and a trashed message drops out of
+      // the count — keep the cached total in sync after either changes.
+      if (patch.seen !== undefined || patch.trash !== undefined) {
+        const unread = await recomputeThreadUnread(db, msg.threadId);
+        // Mirror the read state to the reader's other devices (badge sync +
+        // notification dismissal) when this clears/sets the thread's last unread.
+        if (patch.seen !== undefined)
+          await broadcastToUsers(c.env, [user.id], {
+            type: "thread_read",
+            mailboxId: msg.mailboxId,
+            threadId: msg.threadId,
+            read: unread === 0,
+          });
+      }
+      return c.json({ flags });
+    })
 
-    // Prefer the key carried in the message; fall back to the sender's WKD.
-    let info: PublicKeyInfo | null = null;
-    let source: "tofu" | "wkd" = "tofu";
-    if (rawText) {
-      const block = extractPublicKeyBlock(rawText);
-      if (block) {
-        try {
-          const parsed = await readPublicKeyInfo(block);
-          if (parsed.emails.includes(sender)) info = parsed;
-        } catch {
-          // not a usable key — fall through to WKD
+    // Permanently drop a single message out of its thread (irreversible). Deleting
+    // the row cascades to its attachments via FKs; R2 blobs don't cascade, so
+    // collect and delete them first. When it's the thread's last message the whole
+    // (now-empty) thread goes too; otherwise the thread's cached aggregates are
+    // reconciled with the survivors.
+    .delete("/:id", async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      const id = c.req.param("id");
+
+      // Deleting hides mail thread-wide and can't be undone — gate on WRITE.
+      const msg = await requireEntityAccess(db, user.id, message, id, Perm.WRITE);
+
+      const keys = await collectMessageBlobKeys(db, id);
+      await deleteBlobs(c.env, keys);
+
+      const rows = await db
+        .select({ c: count() })
+        .from(message)
+        .where(eq(message.threadId, msg.threadId));
+      const remaining = (rows[0]?.c ?? 1) - 1;
+
+      await db.delete(message).where(eq(message.id, id));
+
+      if (remaining <= 0) {
+        await db.delete(thread).where(eq(thread.id, msg.threadId));
+        return c.json({ deleted: true, threadDeleted: true });
+      }
+
+      await recomputeThreadAfterMessageDelete(db, msg.threadId);
+      return c.json({ deleted: true, threadDeleted: false });
+    })
+
+    // Act on the message's List-Unsubscribe headers (newsletter opt-out). May POST
+    // a one-click request, send a mailto, or hand back an https link to open.
+    .post("/:id/unsubscribe", async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      const id = c.req.param("id");
+      // Unsubscribing acts outward on the sender's behalf (sends mail / hits their
+      // endpoint), so it needs WRITE — the same bar as sending from the mailbox.
+      const msg = await requireEntityAccess(db, user.id, message, id, Perm.WRITE);
+      if (msg.direction !== "in")
+        throw new HTTPException(400, { message: "not an inbound message" });
+      return c.json(await performUnsubscribe(c.env, db, msg));
+    })
+
+    // Submit a request to block this message's sender. The deployment-wide
+    // blocklist is admin-managed (invariant: hard blocks reject inbound at intake),
+    // so a reader can only *request* a block; an admin approves it. READ is enough
+    // — requesting is harmless until reviewed.
+    .post("/:id/block-request", zValidator("json", createBlockRequest), async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      const id = c.req.param("id");
+      const body = c.req.valid("json");
+      const msg = await requireEntityAccess(db, user.id, message, id, Perm.READ);
+      if (msg.direction !== "in")
+        throw new HTTPException(400, { message: "not an inbound message" });
+
+      const value = msg.fromAddr.trim().toLowerCase();
+      if (!value.includes("@")) throw new HTTPException(400, { message: "no sender address" });
+
+      // No-op if the sender is already blocked, or this reader already has a
+      // pending request for them — keep the queue free of duplicates.
+      const already = await db.query.blocklist.findFirst({
+        where: and(eq(blocklist.type, "email"), eq(blocklist.value, value)),
+        columns: { id: true },
+      });
+      if (already) return c.json({ status: "already-blocked" });
+      const pending = await db.query.blockRequest.findFirst({
+        where: and(
+          eq(blockRequest.requestedByUserId, user.id),
+          eq(blockRequest.value, value),
+          eq(blockRequest.status, "pending"),
+        ),
+        columns: { id: true },
+      });
+      if (pending) return c.json({ status: "pending" });
+
+      await db.insert(blockRequest).values({
+        id: crypto.randomUUID(),
+        type: "email",
+        value,
+        fromName: msg.fromName ?? null,
+        subject: msg.subject || null,
+        note: body.note?.trim() || null,
+        messageId: msg.id,
+        mailboxId: msg.mailboxId,
+        requestedByUserId: user.id,
+      });
+      return c.json({ status: "submitted" }, 201);
+    })
+
+    // AI-drafted reply suggestions for an inbound message (best-effort, on-demand).
+    // READ is enough — it only returns text the user may choose to send.
+    .post("/:id/smart-reply", async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      const id = c.req.param("id");
+      const msg = await requireEntityAccess(db, user.id, message, id, Perm.READ);
+      if (msg.direction !== "in")
+        throw new HTTPException(400, { message: "not an inbound message" });
+
+      const mb = await db.query.mailbox.findFirst({
+        where: (m) => eq(m.id, msg.mailboxId),
+        columns: { aiFeatures: true, aiTokenCap: true },
+      });
+      if (!mb?.aiFeatures) throw new HTTPException(403, { message: "AI features are off" });
+
+      const suggestions = await generateSmartReply(
+        c.env,
+        db,
+        msg.mailboxId,
+        mb.aiTokenCap ?? null,
+        {
+          from: msg.fromName ? `${msg.fromName} <${msg.fromAddr}>` : msg.fromAddr,
+          subject: msg.subject,
+          body: msg.bodyText ?? "",
+        },
+      );
+      return c.json({ suggestions } satisfies SmartReplyDto);
+    })
+
+    // Full body, parsed on demand from the raw `.eml`. Listing endpoints only
+    // carry the snippet; this is fetched lazily when a message is opened.
+    .get("/:id/body", async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      const id = c.req.param("id");
+      const msg = await requireEntityAccess(db, user.id, message, id, Perm.READ);
+      // For decrypted inbound mail the plaintext lives at plainR2Key; the original
+      // ciphertext stays at rawR2Key (served by /:id/raw). Prefer plaintext here.
+      const bodyKey = msg.plainR2Key ?? msg.rawR2Key;
+      if (!bodyKey) throw new HTTPException(404, { message: "not found" });
+      const obj = await c.env.BLOBS.get(bodyKey);
+      if (!obj) throw new HTTPException(404, { message: "blob missing" });
+      const parsed = await parseMime(await obj.arrayBuffer());
+
+      const atts = await db
+        .select({
+          id: attachment.id,
+          filename: attachment.filename,
+          contentType: attachment.contentType,
+          sizeBytes: attachment.sizeBytes,
+          inline: attachment.inline,
+          contentId: attachment.contentId,
+        })
+        .from(attachment)
+        .where(eq(attachment.messageId, id));
+
+      // Remote images are routed through `/proxy-image` so opening a message
+      // never leaks the reader's IP to the sender (tracking pixels); inline `cid:`
+      // images are rewritten to the same-origin attachment route so they render.
+      let html: string | null = null;
+      if (parsed.html) {
+        html = await proxyRemoteContent(parsed.html, await getOrCreateAuthSecret(db));
+        const cidMap = new Map(
+          atts.filter((a) => a.contentId).map((a) => [bareCid(a.contentId!), a.id]),
+        );
+        html = await rewriteInlineCids(html, id, cidMap);
+        // Server-side defense-in-depth: strip script-capable elements/attributes
+        // before serving. Best-effort — the client sanitizer stays primary.
+        html = await sanitizeEmailHtml(html);
+      }
+      // The raw `.eml` never changes once stored, so the parsed body is immutable.
+      c.header("Cache-Control", "private, max-age=31536000, immutable");
+      return c.json({
+        html,
+        text: parsed.text ?? null,
+        attachments: atts,
+        calendar: extractCalendar(parsed),
+      } satisfies MessageBodyDto);
+    })
+
+    // Trust an inbound sender's PGP key: extract it from the stored message (an
+    // attached/inline public key) or fetch it via WKD, save it as a contact key,
+    // and re-verify this message's signature against it. Turns a "signed — can't
+    // verify" or "new key" message into a resolved, verified one. Perm.MANAGE — it
+    // changes the mailbox's trust state.
+    .post("/:id/pgp/trust-sender", async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      const id = c.req.param("id");
+      const msg = await requireEntityAccess(db, user.id, message, id, Perm.MANAGE);
+      const sender = msg.fromAddr.toLowerCase();
+      if (msg.direction !== "in") {
+        throw new HTTPException(400, { message: "not an inbound message" });
+      }
+
+      // Read the stored raw once: used both to extract an embedded key and to
+      // re-verify the signature below.
+      let rawText: string | null = null;
+      if (msg.rawR2Key) {
+        const obj = await c.env.BLOBS.get(msg.rawR2Key);
+        if (obj) rawText = new TextDecoder("latin1").decode(await obj.arrayBuffer());
+      }
+
+      // Prefer the key carried in the message; fall back to the sender's WKD.
+      let info: PublicKeyInfo | null = null;
+      let source: "tofu" | "wkd" = "tofu";
+      if (rawText) {
+        const block = extractPublicKeyBlock(rawText);
+        if (block) {
+          try {
+            const parsed = await readPublicKeyInfo(block);
+            if (parsed.emails.includes(sender)) info = parsed;
+          } catch {
+            // not a usable key — fall through to WKD
+          }
         }
       }
-    }
-    if (!info) {
-      info = await fetchWkdKey(sender);
-      source = "wkd";
-    }
-    if (!info) throw new HTTPException(404, { message: "no public key found for this sender" });
+      if (!info) {
+        info = await fetchWkdKey(sender);
+        source = "wkd";
+      }
+      if (!info) throw new HTTPException(404, { message: "no public key found for this sender" });
 
-    // Save (or replace, for a rotated key). Auto-discovered → unverified; the
-    // owner can confirm the fingerprint in settings.
-    const expiresAt = info.expiresAt ? new Date(info.expiresAt) : null;
-    await db
-      .insert(contactKey)
-      .values({
-        id: crypto.randomUUID(),
-        mailboxId: msg.mailboxId,
-        email: sender,
-        publicKey: info.publicArmored,
-        fingerprint: info.fingerprint,
-        source,
-        verified: false,
-        expiresAt,
-      })
-      .onConflictDoUpdate({
-        target: [contactKey.mailboxId, contactKey.email],
-        set: {
+      // Save (or replace, for a rotated key). Auto-discovered → unverified; the
+      // owner can confirm the fingerprint in settings.
+      const expiresAt = info.expiresAt ? new Date(info.expiresAt) : null;
+      await db
+        .insert(contactKey)
+        .values({
+          id: crypto.randomUUID(),
+          mailboxId: msg.mailboxId,
+          email: sender,
           publicKey: info.publicArmored,
           fingerprint: info.fingerprint,
           source,
           verified: false,
           expiresAt,
-        },
-      });
+        })
+        .onConflictDoUpdate({
+          target: [contactKey.mailboxId, contactKey.email],
+          set: {
+            publicKey: info.publicArmored,
+            fingerprint: info.fingerprint,
+            source,
+            verified: false,
+            expiresAt,
+          },
+        });
 
-    // Re-verify this message's signature against the freshly trusted key.
-    let verify = msg.pgpVerify;
-    let signedBy = msg.pgpSignedBy;
-    if (rawText) {
-      const mb = await db.query.mailbox.findFirst({
-        where: eq(mailbox.id, msg.mailboxId),
-        columns: { pgpPrivateKeyWrapped: true, pgpPassphraseWrapped: true },
-      });
-      if (mb?.pgpPrivateKeyWrapped && mb.pgpPassphraseWrapped) {
-        const masterKey = await getOrCreatePgpMasterKey(db);
-        const res = await decryptVerify({
-          rawText,
-          privArmored: await unwrapSecret(masterKey, mb.pgpPrivateKeyWrapped),
-          passphrase: await unwrapSecret(masterKey, mb.pgpPassphraseWrapped),
-          senderPublicKey: info.publicArmored,
-        }).catch(() => null);
-        if (res) {
-          verify = res.verify;
-          signedBy = res.signedBy;
+      // Re-verify this message's signature against the freshly trusted key.
+      let verify = msg.pgpVerify;
+      let signedBy = msg.pgpSignedBy;
+      if (rawText) {
+        const mb = await db.query.mailbox.findFirst({
+          where: eq(mailbox.id, msg.mailboxId),
+          columns: { pgpPrivateKeyWrapped: true, pgpPassphraseWrapped: true },
+        });
+        if (mb?.pgpPrivateKeyWrapped && mb.pgpPassphraseWrapped) {
+          const masterKey = await getOrCreatePgpMasterKey(db);
+          const res = await decryptVerify({
+            rawText,
+            privArmored: await unwrapSecret(masterKey, mb.pgpPrivateKeyWrapped),
+            passphrase: await unwrapSecret(masterKey, mb.pgpPassphraseWrapped),
+            senderPublicKey: info.publicArmored,
+          }).catch(() => null);
+          if (res) {
+            verify = res.verify;
+            signedBy = res.signedBy;
+          }
         }
       }
-    }
-    await db
-      .update(message)
-      .set({ pgpVerify: verify, pgpSignedBy: signedBy, pgpKeyEvent: null })
-      .where(eq(message.id, id));
+      await db
+        .update(message)
+        .set({ pgpVerify: verify, pgpSignedBy: signedBy, pgpKeyEvent: null })
+        .where(eq(message.id, id));
 
-    return c.json({ fingerprint: info.fingerprint, source, verify } satisfies TrustSenderDto);
-  });
+      return c.json({ fingerprint: info.fingerprint, source, verify } satisfies TrustSenderDto);
+    })
 
-  // Fetches a remote image referenced by a message body. Only URLs we signed
-  // when rewriting the body are honored (HMAC), so this is not an open proxy.
-  r.get("/proxy-image", async (c) => {
-    const db = dbFromCtx(c);
-    const encoded = c.req.query("u");
-    const sig = c.req.query("s");
-    if (!encoded || !sig) throw new HTTPException(400, { message: "missing params" });
-    const secret = await getOrCreateAuthSecret(db);
-    const url = await verifyProxyUrl(secret, encoded, sig);
-    if (!url) throw new HTTPException(403, { message: "bad signature" });
+    // Fetches a remote image referenced by a message body. Only URLs we signed
+    // when rewriting the body are honored (HMAC), so this is not an open proxy.
+    .get("/proxy-image", async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      await enforceRateLimit(db, "proxy-image", user.id, 300, 60_000);
+      const encoded = c.req.query("u");
+      const sig = c.req.query("s");
+      if (!encoded || !sig) throw new HTTPException(400, { message: "missing params" });
+      const secret = await getOrCreateAuthSecret(db);
+      const url = await verifyProxyUrl(secret, encoded, sig);
+      if (!url) throw new HTTPException(403, { message: "bad signature" });
 
-    // Manual redirect following: every hop is re-checked against the SSRF
-    // guard, so an attacker host can't 302 us at an internal address.
-    const result = await safeRedirectFetch(new URL(url), { headers: { accept: "image/*" } });
-    if ("blocked" in result) throw new HTTPException(403, { message: result.reason });
-    const upstream = result;
-    if (!upstream.ok || !upstream.body) throw new HTTPException(502, { message: "fetch failed" });
-    const contentType = upstream.headers.get("content-type") ?? "";
-    if (!contentType.startsWith("image/"))
-      throw new HTTPException(415, { message: "not an image" });
-    const declared = Number(upstream.headers.get("content-length") ?? "");
-    if (declared > MAX_IMAGE_BYTES) throw new HTTPException(413, { message: "too large" });
+      // Manual redirect following: every hop is re-checked against the SSRF
+      // guard, so an attacker host can't 302 us at an internal address.
+      const result = await safeRedirectFetch(new URL(url), { headers: { accept: "image/*" } });
+      if ("blocked" in result) throw new HTTPException(403, { message: result.reason });
+      const upstream = result;
+      if (!upstream.ok || !upstream.body) throw new HTTPException(502, { message: "fetch failed" });
+      const contentType = upstream.headers.get("content-type") ?? "";
+      if (!contentType.startsWith("image/"))
+        throw new HTTPException(415, { message: "not an image" });
+      // A present-and-oversized declared length 413s early; an absent or garbage
+      // header falls through to the streaming cap below.
+      const declared = upstream.headers.get("content-length");
+      if (declared !== null && Number(declared) > MAX_IMAGE_BYTES) {
+        throw new HTTPException(413, { message: "too large" });
+      }
 
-    // Cap the stream too — a chunked response can omit content-length.
-    let seen = 0;
-    const limited = upstream.body.pipeThrough(
-      new TransformStream<Uint8Array>({
-        transform(chunk, ctrl) {
-          seen += chunk.byteLength;
-          if (seen > MAX_IMAGE_BYTES) ctrl.error(new Error("image too large"));
-          else ctrl.enqueue(chunk);
+      // Cap the stream too — a chunked response can omit content-length.
+      let seen = 0;
+      const limited = upstream.body.pipeThrough(
+        new TransformStream<Uint8Array>({
+          transform(chunk, ctrl) {
+            seen += chunk.byteLength;
+            if (seen > MAX_IMAGE_BYTES) ctrl.error(new Error("image too large"));
+            else ctrl.enqueue(chunk);
+          },
+        }),
+      );
+      return new Response(limited, {
+        headers: {
+          "content-type": contentType,
+          "cache-control": "private, max-age=86400",
+          // The bytes are opaque image data; forbid them being treated as anything else.
+          "content-security-policy": "default-src 'none'; sandbox",
+          "x-content-type-options": "nosniff",
         },
-      }),
-    );
-    return new Response(limited, {
-      headers: {
-        "content-type": contentType,
-        "cache-control": "private, max-age=86400",
-        // The bytes are opaque image data; forbid them being treated as anything else.
+      });
+    })
+
+    .get("/:id/raw", async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      const id = c.req.param("id");
+      const msg = await requireEntityAccess(db, user.id, message, id, Perm.READ);
+      if (!msg.rawR2Key) throw new HTTPException(404, { message: "not found" });
+      const obj = await c.env.BLOBS.get(msg.rawR2Key);
+      if (!obj) throw new HTTPException(404, { message: "blob missing" });
+      const headers: Record<string, string> = { "content-type": "message/rfc822" };
+      // `?download` forces a save (Export) with a subject-derived filename;
+      // otherwise the bytes are served inline for in-app viewing.
+      if (c.req.query("download") !== undefined) {
+        const name = `${slugifyForFile(msg.subject) || "email"}.eml`;
+        headers["content-disposition"] = `attachment; filename="${name}"`;
+      }
+      return new Response(obj.body, { headers });
+    })
+
+    // Serve a stored attachment's bytes. Inline (cid) images load this directly in
+    // the body iframe; `?download` forces a save dialog with the real filename.
+    .get("/:id/attachments/:attId/raw", async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      const id = c.req.param("id");
+      const attId = c.req.param("attId");
+      // Gate on the parent message's mailbox RBAC, then confirm the attachment
+      // belongs to it — an attacker can't graft another message's attachment id on.
+      await requireEntityAccess(db, user.id, message, id, Perm.READ);
+      const att = await db.query.attachment.findFirst({
+        where: and(eq(attachment.id, attId), eq(attachment.messageId, id)),
+      });
+      if (!att) throw new HTTPException(404, { message: "not found" });
+      const obj = await c.env.BLOBS.get(att.r2Key);
+      if (!obj) throw new HTTPException(404, { message: "blob missing" });
+
+      const headers: Record<string, string> = {
+        "content-type": att.contentType,
+        // The bytes are opaque user data — forbid sniffing them into active content
+        // and deny any sub-resource loads if a viewer ever renders them as a doc.
         "content-security-policy": "default-src 'none'; sandbox",
         "x-content-type-options": "nosniff",
-      },
+        "cache-control": "private, max-age=31536000, immutable",
+      };
+      if (c.req.query("download") !== undefined) {
+        headers["content-disposition"] = contentDisposition(att.filename);
+      }
+      return new Response(obj.body, { headers });
     });
-  });
-
-  r.get("/:id/raw", async (c) => {
-    const db = dbFromCtx(c);
-    const user = c.get("user")!;
-    const id = c.req.param("id");
-    const msg = await requireEntityAccess(db, user.id, message, id, Perm.READ);
-    if (!msg.rawR2Key) throw new HTTPException(404, { message: "not found" });
-    const obj = await c.env.BLOBS.get(msg.rawR2Key);
-    if (!obj) throw new HTTPException(404, { message: "blob missing" });
-    const headers: Record<string, string> = { "content-type": "message/rfc822" };
-    // `?download` forces a save (Export) with a subject-derived filename;
-    // otherwise the bytes are served inline for in-app viewing.
-    if (c.req.query("download") !== undefined) {
-      const name = `${slugifyForFile(msg.subject) || "email"}.eml`;
-      headers["content-disposition"] = `attachment; filename="${name}"`;
-    }
-    return new Response(obj.body, { headers });
-  });
-
-  // Serve a stored attachment's bytes. Inline (cid) images load this directly in
-  // the body iframe; `?download` forces a save dialog with the real filename.
-  r.get("/:id/attachments/:attId/raw", async (c) => {
-    const db = dbFromCtx(c);
-    const user = c.get("user")!;
-    const id = c.req.param("id");
-    const attId = c.req.param("attId");
-    // Gate on the parent message's mailbox RBAC, then confirm the attachment
-    // belongs to it — an attacker can't graft another message's attachment id on.
-    await requireEntityAccess(db, user.id, message, id, Perm.READ);
-    const att = await db.query.attachment.findFirst({
-      where: and(eq(attachment.id, attId), eq(attachment.messageId, id)),
-    });
-    if (!att) throw new HTTPException(404, { message: "not found" });
-    const obj = await c.env.BLOBS.get(att.r2Key);
-    if (!obj) throw new HTTPException(404, { message: "blob missing" });
-
-    const headers: Record<string, string> = {
-      "content-type": att.contentType,
-      // The bytes are opaque user data — forbid sniffing them into active content
-      // and deny any sub-resource loads if a viewer ever renders them as a doc.
-      "content-security-policy": "default-src 'none'; sandbox",
-      "x-content-type-options": "nosniff",
-      "cache-control": "private, max-age=31536000, immutable",
-    };
-    if (c.req.query("download") !== undefined) {
-      headers["content-disposition"] = contentDisposition(att.filename);
-    }
-    return new Response(obj.body, { headers });
-  });
 
   return r;
 }

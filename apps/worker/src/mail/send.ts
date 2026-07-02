@@ -1,13 +1,14 @@
 import { EmailMessage } from "cloudflare:email";
 import type { DB } from "@cfmail/db";
-import { contactKey, domain, mailbox, message, reminder } from "@cfmail/db/schema";
+import { contactKey, domain, mailbox, message, reminder, thread } from "@cfmail/db/schema";
 import { Flag } from "@cfmail/shared/flags";
 import type { SendMessageInput } from "@cfmail/shared/schemas";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, count, eq, inArray } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import { getOrCreatePgpMasterKey } from "../config.ts";
 import type { Env } from "../env.ts";
 import { broadcastToUsers } from "../hub.ts";
+import { escapeHtml } from "../lib/encoding.ts";
 import { addrsToText, bodyForIndex, buildMime, snippet, type ThreadingHeaders } from "./mime.ts";
 import {
   buildEncryptedMime,
@@ -100,64 +101,21 @@ export async function sendFromMailbox(
 
   // Gateway PGP: when the mailbox has a keypair and PGP is on, sign/encrypt and
   // send a raw PGP/MIME message per recipient (invariant 4 exception). Otherwise
-  // the normal structured send path. Either way we archive plaintext locally
-  // (below) so search/threading keep working.
+  // the normal structured send path. Either way we archive plaintext locally so
+  // search/threading keep working.
   const pgpEnabled =
     mb.pgpMode !== "off" &&
     !!mb.pgpPublicKey &&
     !!mb.pgpPrivateKeyWrapped &&
     !!mb.pgpPassphraseWrapped;
 
-  let messageIdHdr: string;
-  let pgpEncrypted = false;
-  let pgpSigned = false;
-  let pgpWarning: string | undefined;
+  let messageIdHdr = `<${messageId}@${dom.name}>`;
 
-  if (!pgpEnabled) {
-    let returnedMessageId: string | undefined;
-    try {
-      const res = await env.EMAIL.send({
-        from: fromField,
-        to: input.to.map((a) => a.address),
-        cc: input.cc?.length ? input.cc.map((a) => a.address) : undefined,
-        bcc: input.bcc?.length ? input.bcc.map((a) => a.address) : undefined,
-        replyTo: replyToAddr,
-        subject: input.subject,
-        text,
-        html,
-        headers: Object.keys(sendHeaders).length ? sendHeaders : undefined,
-        attachments: attachmentBytes.length
-          ? attachmentBytes.map((a) =>
-              a.inline && a.contentId
-                ? {
-                    disposition: "inline" as const,
-                    contentId: a.contentId,
-                    filename: a.filename,
-                    type: a.contentType,
-                    content: a.data,
-                  }
-                : {
-                    disposition: "attachment" as const,
-                    filename: a.filename,
-                    type: a.contentType,
-                    content: a.data,
-                  },
-            )
-          : undefined,
-      });
-      returnedMessageId = res?.messageId;
-    } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err);
-      throw new HTTPException(502, { message: `send failed: ${detail}` });
-    }
-    messageIdHdr = returnedMessageId
-      ? returnedMessageId.startsWith("<")
-        ? returnedMessageId
-        : `<${returnedMessageId}>`
-      : `<${messageId}@${dom.name}>`;
-  } else {
-    messageIdHdr = `<${messageId}@${dom.name}>`;
-    const meta = await sendPgp(env, db, {
+  // Build the PGP payload up front (key lookup/WKD + MIME assembly can fail)
+  // so persistence below only precedes the actual delivery attempt.
+  let pgpMail: PgpMail | null = null;
+  if (pgpEnabled) {
+    pgpMail = await buildPgpMail(db, {
       mailboxId: mb.id,
       pgpMode: mb.pgpMode,
       pgpAutoFetch: mb.pgpAutoFetch,
@@ -175,10 +133,8 @@ export async function sendFromMailbox(
       messageIdHdr,
       date: sentAt,
     });
-    pgpEncrypted = meta.encrypted;
-    pgpSigned = meta.signed;
-    pgpWarning = meta.warning;
   }
+  const pgpWarning = pgpMail?.warning;
 
   const threading: ThreadingHeaders = { messageId: messageIdHdr };
   if (input.inReplyTo) threading.inReplyTo = input.inReplyTo;
@@ -210,6 +166,10 @@ export async function sendFromMailbox(
   const rawKey = `raw/${mb.id}/sent/${messageId}.eml`;
   const bodyIndex = bodyForIndex(text, html);
 
+  // Persist BEFORE delivering. The reverse order could deliver mail and then
+  // fail persistence — the API errors, the user re-sends, and the recipient
+  // gets duplicates. This way a delivery failure rolls the record back below
+  // and the retry is safe.
   await Promise.all([
     env.BLOBS.put(rawKey, raw, { httpMetadata: { contentType: "message/rfc822" } }),
     db.insert(message).values({
@@ -234,10 +194,69 @@ export async function sendFromMailbox(
       sentAt,
       rawR2Key: rawKey,
       sizeBytes: utf8Encoder.encode(raw).byteLength,
-      pgpEncrypted,
-      pgpSigned,
+      pgpEncrypted: pgpMail?.encrypted ?? false,
+      pgpSigned: pgpMail?.signed ?? false,
     }),
   ]);
+
+  let returnedMessageId: string | undefined;
+  try {
+    if (!pgpMail) {
+      const res = await env.EMAIL.send({
+        from: fromField,
+        to: input.to.map((a) => a.address),
+        cc: input.cc?.length ? input.cc.map((a) => a.address) : undefined,
+        bcc: input.bcc?.length ? input.bcc.map((a) => a.address) : undefined,
+        replyTo: replyToAddr,
+        subject: input.subject,
+        text,
+        html,
+        headers: Object.keys(sendHeaders).length ? sendHeaders : undefined,
+        attachments: attachmentBytes.length
+          ? attachmentBytes.map((a) =>
+              a.inline && a.contentId
+                ? {
+                    disposition: "inline" as const,
+                    contentId: a.contentId,
+                    filename: a.filename,
+                    type: a.contentType,
+                    content: a.data,
+                  }
+                : {
+                    disposition: "attachment" as const,
+                    filename: a.filename,
+                    type: a.contentType,
+                    content: a.data,
+                  },
+            )
+          : undefined,
+      });
+      returnedMessageId = res?.messageId;
+    } else {
+      const envelopeAddrs = [...new Set(allRecipients.map((a) => a.address))];
+      await Promise.all(
+        envelopeAddrs.map((to) => env.EMAIL.send(new EmailMessage(fromAddr, to, pgpMail!.raw))),
+      );
+    }
+  } catch (err) {
+    // Delivery failed — undo the just-persisted record so the caller's retry
+    // can't leave duplicate Sent entries, then surface the failure.
+    await cleanupFailedSend(env, db, { messageId, rawKey, threadId });
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new HTTPException(502, { message: `send failed: ${detail}` });
+  }
+
+  // The platform may assign its own Message-ID on structured sends; adopt it so
+  // inbound replies (In-Reply-To of what the recipient saw) thread correctly.
+  if (returnedMessageId) {
+    const normalized = returnedMessageId.startsWith("<")
+      ? returnedMessageId
+      : `<${returnedMessageId}>`;
+    if (normalized !== messageIdHdr) {
+      messageIdHdr = normalized;
+      await db.update(message).set({ messageIdHdr }).where(eq(message.id, messageId));
+    }
+  }
 
   await Promise.all([
     bumpThread(
@@ -303,14 +322,41 @@ interface PgpSendArgs {
   date: Date;
 }
 
-// Build a signed or sign+encrypted PGP/MIME message and deliver it raw, once per
-// envelope recipient. Encryption needs a public key for every recipient; when one
-// is missing we fall back to signed-only (never block the send) and warn.
-async function sendPgp(
+interface PgpMail {
+  raw: string;
+  encrypted: boolean;
+  signed: boolean;
+  warning?: string;
+}
+
+// Undo the persisted record of a send whose delivery then failed: drop the
+// message row and its raw blob, and a thread left with no messages (one freshly
+// created for this send) goes too. Best-effort — cleanup must not mask the
+// delivery error the caller is about to surface.
+async function cleanupFailedSend(
   env: Env,
   db: DB,
-  args: PgpSendArgs,
-): Promise<{ encrypted: boolean; signed: boolean; warning?: string }> {
+  ids: { messageId: string; rawKey: string; threadId: string },
+): Promise<void> {
+  try {
+    await db.delete(message).where(eq(message.id, ids.messageId));
+    await env.BLOBS.delete(ids.rawKey);
+    const rows = await db
+      .select({ c: count() })
+      .from(message)
+      .where(eq(message.threadId, ids.threadId));
+    if ((rows[0]?.c ?? 0) === 0) {
+      await db.delete(thread).where(eq(thread.id, ids.threadId));
+    }
+  } catch (err) {
+    console.error(`failed-send cleanup failed for message ${ids.messageId}`, err);
+  }
+}
+
+// Build a signed or sign+encrypted PGP/MIME message for raw per-recipient
+// delivery. Encryption needs a public key for every recipient; when one is
+// missing we fall back to signed-only (never block the send) and warn.
+async function buildPgpMail(db: DB, args: PgpSendArgs): Promise<PgpMail> {
   const masterKey = await getOrCreatePgpMasterKey(db);
   const privArmored = await unwrapSecret(masterKey, args.pgpPrivateKeyWrapped);
   const passphrase = await unwrapSecret(masterKey, args.pgpPassphraseWrapped);
@@ -373,34 +419,22 @@ async function sendPgp(
     attachments: args.attachmentBytes,
   };
 
-  let raw: string;
-  let meta: { encrypted: boolean; signed: boolean; warning?: string };
   if (encrypt) {
     // Encrypt to every recipient key plus our own, so the sender can read the
     // archived copy and each recipient can decrypt the same blob.
     const recipientKeys = [...new Set([...keyByEmail.values(), args.pgpPublicKey])];
-    raw = await buildEncryptedMime(headers, content, privArmored, passphrase, recipientKeys);
-    meta = { encrypted: true, signed: true };
-  } else {
-    raw = await buildSignedMime(headers, content, privArmored, passphrase);
-    meta = { encrypted: false, signed: true };
-    if (args.pgpMode === "sign_encrypt") {
-      meta.warning = "Sent signed-only — no PGP key on file for one or more recipients.";
-    }
+    const raw = await buildEncryptedMime(headers, content, privArmored, passphrase, recipientKeys);
+    return { raw, encrypted: true, signed: true };
   }
-
-  const envelopeAddrs = [...new Set(args.allRecipients.map((a) => a.address))];
-  await Promise.all(
-    envelopeAddrs.map(async (to) => {
-      try {
-        await env.EMAIL.send(new EmailMessage(args.fromAddr, to, raw));
-      } catch (err) {
-        const detail = err instanceof Error ? err.message : String(err);
-        throw new HTTPException(502, { message: `send failed: ${detail}` });
-      }
-    }),
-  );
-  return meta;
+  const raw = await buildSignedMime(headers, content, privArmored, passphrase);
+  return {
+    raw,
+    encrypted: false,
+    signed: true,
+    ...(args.pgpMode === "sign_encrypt"
+      ? { warning: "Sent signed-only — no PGP key on file for one or more recipients." }
+      : {}),
+  };
 }
 
 // The outbound From address. Defaults to the mailbox's own address; an explicit
@@ -445,12 +479,4 @@ function appendSignatureHtml(
 
 function textToHtml(s: string): string {
   return escapeHtml(s).replace(/\r?\n/g, "<br>");
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }

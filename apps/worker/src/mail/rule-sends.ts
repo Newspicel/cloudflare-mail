@@ -3,6 +3,7 @@ import type { DB } from "@cfmail/db";
 import { mailbox, ruleSendLog } from "@cfmail/db/schema";
 import { and, count, eq, gt } from "drizzle-orm";
 import type { Env } from "../env.ts";
+import { escapeHtml } from "../lib/encoding.ts";
 import { buildMime, type ParsedEmail } from "./mime.ts";
 import type { RuleOutcome } from "./rules.ts";
 
@@ -225,12 +226,4 @@ function formatAddrs(addrs: unknown): string {
     .map((a) => formatAddr(a as { name?: string; address?: string }))
     .filter(Boolean)
     .join(", ");
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }

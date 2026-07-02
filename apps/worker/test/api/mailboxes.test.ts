@@ -466,11 +466,11 @@ describe("DELETE /:id", () => {
     expect(res.status).toBe(403);
   });
 
-  it("lets the owner delete their mailbox", async () => {
+  it("lets the owner delete their mailbox (marked for background purge)", async () => {
     const res = await request(asOwner(), "DELETE", `/${OTHER_MAILBOX_ID}`);
     expect(res.status).toBe(204);
     const row = await db().query.mailbox.findFirst({ where: eq(mailbox.id, OTHER_MAILBOX_ID) });
-    expect(row).toBeUndefined();
+    expect(row?.pendingPurge).toBe("delete");
   });
 });
 

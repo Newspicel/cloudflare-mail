@@ -9,6 +9,7 @@ import { message } from "@cfmail/db/schema";
 import { Perm } from "@cfmail/shared/permissions";
 import { eq } from "drizzle-orm";
 import type { Env } from "../env.ts";
+import { escapeHtml } from "../lib/encoding.ts";
 import { requirePerm } from "../permissions.ts";
 import { parseMime } from "./mime.ts";
 
@@ -109,12 +110,4 @@ function stripHtml(html: string): string {
     .replace(/&nbsp;/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }

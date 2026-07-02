@@ -52,6 +52,68 @@ function isBlockedIpv4(ip: number): boolean {
   return false;
 }
 
+/**
+ * Parse an IPv6 literal into its eight 16-bit groups: expand `::`, strip a zone
+ * index, and fold a dotted-IPv4 tail (`::ffff:127.0.0.1`) into its two hex
+ * groups. Returns null when the literal is malformed.
+ */
+function parseIpv6(host: string): number[] | null {
+  let h = host;
+  const zone = h.indexOf("%");
+  if (zone !== -1) h = h.slice(0, zone);
+
+  // Dotted-IPv4 tail → two 16-bit groups, so both `::ffff:127.0.0.1` and its
+  // hex form `::ffff:7f00:1` parse identically.
+  const lastColon = h.lastIndexOf(":");
+  if (lastColon === -1) return null;
+  const tail = h.slice(lastColon + 1);
+  if (tail.includes(".")) {
+    const parts = tail.split(".");
+    if (parts.length !== 4) return null;
+    const bytes = parts.map((p) => (/^\d{1,3}$/.test(p) ? Number(p) : Number.NaN));
+    if (bytes.some((b) => !Number.isInteger(b) || b > 255)) return null;
+    const v4 = ((bytes[0]! << 24) | (bytes[1]! << 16) | (bytes[2]! << 8) | bytes[3]!) >>> 0;
+    h = `${h.slice(0, lastColon + 1)}${(v4 >>> 16).toString(16)}:${(v4 & 0xffff).toString(16)}`;
+  }
+
+  let groups: string[];
+  const dbl = h.indexOf("::");
+  if (dbl !== -1) {
+    if (dbl !== h.lastIndexOf("::")) return null; // more than one `::`
+    const head = h.slice(0, dbl).split(":").filter(Boolean);
+    const rest = h
+      .slice(dbl + 2)
+      .split(":")
+      .filter(Boolean);
+    if (head.length + rest.length > 7) return null;
+    groups = [...head, ...Array(8 - head.length - rest.length).fill("0"), ...rest];
+  } else {
+    groups = h.split(":");
+    if (groups.length !== 8) return null;
+  }
+
+  const nums = groups.map((g) => (/^[0-9a-f]{1,4}$/i.test(g) ? parseInt(g, 16) : Number.NaN));
+  return nums.some(Number.isNaN) ? null : nums;
+}
+
+function isBlockedIpv6(g: number[]): boolean {
+  const first5Zero = g[0] === 0 && g[1] === 0 && g[2] === 0 && g[3] === 0 && g[4] === 0;
+  // Unspecified (::) and loopback (::1).
+  if (first5Zero && g[5] === 0 && g[6] === 0 && (g[7] === 0 || g[7] === 1)) return true;
+  if ((g[0]! & 0xffc0) === 0xfe80) return true; // link-local fe80::/10
+  if ((g[0]! & 0xfe00) === 0xfc00) return true; // unique-local fc00::/7
+  if ((g[0]! & 0xff00) === 0xff00) return true; // multicast ff00::/8
+  const embedded = (((g[6]! << 16) | g[7]!) >>> 0) as number;
+  // IPv4-mapped ::ffff:0:0/96 and IPv4-compatible ::/96 — range-check the
+  // embedded v4 regardless of how it was written (dotted or hex groups).
+  if (first5Zero && (g[5] === 0xffff || g[5] === 0)) return isBlockedIpv4(embedded);
+  // NAT64 well-known prefix 64:ff9b::/96 — same embedded-v4 check.
+  if (g[0] === 0x64 && g[1] === 0xff9b && g[2] === 0 && g[3] === 0 && g[4] === 0 && g[5] === 0) {
+    return isBlockedIpv4(embedded);
+  }
+  return false;
+}
+
 /** Best-effort block of internal/reserved targets for IP-literal/internal hosts. */
 export function isBlockedHost(hostname: string): boolean {
   const h = hostname.toLowerCase().replace(/^\[|\]$/g, "");
@@ -64,23 +126,9 @@ export function isBlockedHost(hostname: string): boolean {
     return true;
   }
   if (h.includes(":")) {
-    // IPv6: unspecified, loopback, link-local, unique-local.
-    if (
-      h === "::" ||
-      h === "::1" ||
-      h.startsWith("fe80") ||
-      h.startsWith("fc") ||
-      h.startsWith("fd")
-    )
-      return true;
-    // IPv4-mapped/compat (`::ffff:127.0.0.1`): range-check the embedded dotted
-    // v4. A bare hex group (`::1111`) has no dot and isn't an IPv4 literal.
-    const tail = h.slice(h.lastIndexOf(":") + 1);
-    if (tail.includes(".")) {
-      const mapped = ipv4ToInt(tail);
-      if (mapped !== null && isBlockedIpv4(mapped)) return true;
-    }
-    return false;
+    const groups = parseIpv6(h);
+    // A colon means an IPv6 literal or nothing valid — block malformed ones.
+    return groups === null || isBlockedIpv6(groups);
   }
   const ip = ipv4ToInt(h);
   if (ip !== null) return isBlockedIpv4(ip);

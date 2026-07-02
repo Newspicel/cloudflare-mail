@@ -29,121 +29,121 @@ async function nextPriority(db: DB, mailboxId: string): Promise<number> {
 }
 
 export function rulesRoutes() {
-  const r = new Hono<AppBindings>();
-  r.use("*", requireUser);
+  const r = new Hono<AppBindings>()
+    .use("*", requireUser)
 
-  // List a mailbox's rules in evaluation order.
-  r.get("/", async (c) => {
-    const db = dbFromCtx(c);
-    const user = c.get("user")!;
-    const mailboxId = c.req.query("mailboxId");
-    if (!mailboxId) throw new HTTPException(400, { message: "mailboxId required" });
-    await requirePerm(db, user.id, mailboxId, Perm.READ);
-    const rows = await db
-      .select()
-      .from(rule)
-      .where(eq(rule.mailboxId, mailboxId))
-      .orderBy(asc(rule.priority), asc(rule.createdAt));
-    return c.json({ rules: rows.map(serializeRule) } satisfies RuleListDto);
-  });
+    // List a mailbox's rules in evaluation order.
+    .get("/", async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      const mailboxId = c.req.query("mailboxId");
+      if (!mailboxId) throw new HTTPException(400, { message: "mailboxId required" });
+      await requirePerm(db, user.id, mailboxId, Perm.READ);
+      const rows = await db
+        .select()
+        .from(rule)
+        .where(eq(rule.mailboxId, mailboxId))
+        .orderBy(asc(rule.priority), asc(rule.createdAt));
+      return c.json({ rules: rows.map(serializeRule) } satisfies RuleListDto);
+    })
 
-  r.post("/", zValidator("json", createRule), async (c) => {
-    const db = dbFromCtx(c);
-    const user = c.get("user")!;
-    const body = c.req.valid("json");
-    await requirePerm(db, user.id, body.mailboxId, Perm.MANAGE);
-    const id = crypto.randomUUID();
-    const priority = body.priority ?? (await nextPriority(db, body.mailboxId));
-    await wrapUnique(
-      () =>
-        db.insert(rule).values({
-          id,
-          mailboxId: body.mailboxId,
-          createdBy: user.id,
-          name: body.name.trim(),
-          conditions: body.conditions,
-          conditionMode: body.conditionMode,
-          actions: body.actions,
-          priority,
-          enabled: body.enabled ?? undefined,
-        }),
-      "a rule with that name already exists",
-    );
-    return c.json({ id }, 201);
-  });
+    .post("/", zValidator("json", createRule), async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      const body = c.req.valid("json");
+      await requirePerm(db, user.id, body.mailboxId, Perm.MANAGE);
+      const id = crypto.randomUUID();
+      const priority = body.priority ?? (await nextPriority(db, body.mailboxId));
+      await wrapUnique(
+        () =>
+          db.insert(rule).values({
+            id,
+            mailboxId: body.mailboxId,
+            createdBy: user.id,
+            name: body.name.trim(),
+            conditions: body.conditions,
+            conditionMode: body.conditionMode,
+            actions: body.actions,
+            priority,
+            enabled: body.enabled ?? undefined,
+          }),
+        "a rule with that name already exists",
+      );
+      return c.json({ id }, 201);
+    })
 
-  r.patch("/:id", zValidator("json", updateRule), async (c) => {
-    const db = dbFromCtx(c);
-    const user = c.get("user")!;
-    const id = c.req.param("id");
-    const body = c.req.valid("json");
-    await requireEntityAccess(db, user.id, rule, id, Perm.MANAGE);
-    const patch = buildPatch<typeof rule.$inferInsert>(body, {
-      name: (v: string) => v.trim(),
-      conditions: true,
-      conditionMode: true,
-      actions: true,
-      priority: true,
-      enabled: true,
+    .patch("/:id", zValidator("json", updateRule), async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      const id = c.req.param("id");
+      const body = c.req.valid("json");
+      await requireEntityAccess(db, user.id, rule, id, Perm.MANAGE);
+      const patch = buildPatch<typeof rule.$inferInsert>(body, {
+        name: (v: string) => v.trim(),
+        conditions: true,
+        conditionMode: true,
+        actions: true,
+        priority: true,
+        enabled: true,
+      });
+      if (Object.keys(patch).length === 0) return c.json({ ok: true });
+      await wrapUnique(
+        () => db.update(rule).set(patch).where(eq(rule.id, id)),
+        "a rule with that name already exists",
+      );
+      return c.json({ ok: true });
+    })
+
+    .delete("/:id", async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      const id = c.req.param("id");
+      await requireEntityAccess(db, user.id, rule, id, Perm.MANAGE);
+      await db.delete(rule).where(eq(rule.id, id));
+      return c.body(null, 204);
+    })
+
+    // Copy a rule, optionally into another mailbox. Labels are per-mailbox, so on a
+    // cross-mailbox clone each applyLabel target is remapped by name into the
+    // destination — dropped (and reported) when there's no match. moveFolder rides
+    // along unchanged (folders are user-scoped) and createdBy becomes the cloner.
+    .post("/:id/clone", zValidator("json", cloneRule), async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      const id = c.req.param("id");
+      const body = c.req.valid("json");
+      const src = await requireEntityAccess(db, user.id, rule, id, Perm.READ);
+      const targetMailbox = body.mailboxId ?? src.mailboxId;
+      await requirePerm(db, user.id, targetMailbox, Perm.MANAGE);
+
+      let actions = src.actions ?? [];
+      const strippedLabels: string[] = [];
+      if (targetMailbox !== src.mailboxId) {
+        const remap = await remapLabels(db, src.mailboxId, targetMailbox, actions);
+        actions = remap.actions;
+        strippedLabels.push(...remap.stripped);
+      }
+
+      const newId = crypto.randomUUID();
+      const name = (body.name ?? `${src.name} (copy)`).trim();
+      const priority = await nextPriority(db, targetMailbox);
+      await wrapUnique(
+        () =>
+          db.insert(rule).values({
+            id: newId,
+            mailboxId: targetMailbox,
+            createdBy: user.id,
+            name,
+            conditions: src.conditions,
+            conditionMode: src.conditionMode,
+            actions,
+            priority,
+            enabled: src.enabled,
+          }),
+        "a rule with that name already exists",
+      );
+      return c.json({ id: newId, strippedLabels } satisfies RuleCloneResultDto, 201);
     });
-    if (Object.keys(patch).length === 0) return c.json({ ok: true });
-    await wrapUnique(
-      () => db.update(rule).set(patch).where(eq(rule.id, id)),
-      "a rule with that name already exists",
-    );
-    return c.json({ ok: true });
-  });
-
-  r.delete("/:id", async (c) => {
-    const db = dbFromCtx(c);
-    const user = c.get("user")!;
-    const id = c.req.param("id");
-    await requireEntityAccess(db, user.id, rule, id, Perm.MANAGE);
-    await db.delete(rule).where(eq(rule.id, id));
-    return c.body(null, 204);
-  });
-
-  // Copy a rule, optionally into another mailbox. Labels are per-mailbox, so on a
-  // cross-mailbox clone each applyLabel target is remapped by name into the
-  // destination — dropped (and reported) when there's no match. moveFolder rides
-  // along unchanged (folders are user-scoped) and createdBy becomes the cloner.
-  r.post("/:id/clone", zValidator("json", cloneRule), async (c) => {
-    const db = dbFromCtx(c);
-    const user = c.get("user")!;
-    const id = c.req.param("id");
-    const body = c.req.valid("json");
-    const src = await requireEntityAccess(db, user.id, rule, id, Perm.READ);
-    const targetMailbox = body.mailboxId ?? src.mailboxId;
-    await requirePerm(db, user.id, targetMailbox, Perm.MANAGE);
-
-    let actions = src.actions ?? [];
-    const strippedLabels: string[] = [];
-    if (targetMailbox !== src.mailboxId) {
-      const remap = await remapLabels(db, src.mailboxId, targetMailbox, actions);
-      actions = remap.actions;
-      strippedLabels.push(...remap.stripped);
-    }
-
-    const newId = crypto.randomUUID();
-    const name = (body.name ?? `${src.name} (copy)`).trim();
-    const priority = await nextPriority(db, targetMailbox);
-    await wrapUnique(
-      () =>
-        db.insert(rule).values({
-          id: newId,
-          mailboxId: targetMailbox,
-          createdBy: user.id,
-          name,
-          conditions: src.conditions,
-          conditionMode: src.conditionMode,
-          actions,
-          priority,
-          enabled: src.enabled,
-        }),
-      "a rule with that name already exists",
-    );
-    return c.json({ id: newId, strippedLabels } satisfies RuleCloneResultDto, 201);
-  });
 
   return r;
 }

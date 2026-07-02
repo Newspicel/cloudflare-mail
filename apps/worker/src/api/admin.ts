@@ -24,8 +24,9 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
-import { collectMailboxBlobKeys, deleteBlobs } from "../mail/blobs.ts";
+import { randomToken } from "../lib/encoding.ts";
 import { authorizeMailboxCreate } from "../mailbox-access.ts";
+import { markMailboxPurge } from "../mailbox-purge.ts";
 import { requireAdmin, requireUser } from "../middleware.ts";
 import { mailboxNotDeletePending } from "../permissions.ts";
 import { sha256Hex } from "./svc.ts";
@@ -33,501 +34,494 @@ import { buildPatch, wrapUnique } from "./util.ts";
 
 // Admin-only mailbox & redirect management. Mounted at /api/admin.
 export function adminRoutes() {
-  const r = new Hono<AppBindings>();
-  r.use("*", requireUser, requireAdmin);
+  const r = new Hono<AppBindings>()
+    .use("*", requireUser, requireAdmin)
 
-  // ─── Mailboxes ────────────────────────────────────────────────────────────
+    // ─── Mailboxes ────────────────────────────────────────────────────────────
 
-  r.get("/mailboxes", async (c) => {
-    const db = dbFromCtx(c);
-    const rows = await db
-      .select({
-        id: mailbox.id,
-        localPart: mailbox.localPart,
-        displayName: mailbox.displayName,
-        type: mailbox.type,
-        domainName: domain.name,
-        expiresAt: mailbox.expiresAt,
-        createdAt: mailbox.createdAt,
-        ownerUserId: mailbox.ownerUserId,
-        ownerEmail: user.email,
-        ownerName: user.name,
-      })
-      .from(mailbox)
-      .innerJoin(domain, eq(mailbox.domainId, domain.id))
-      .innerJoin(user, eq(mailbox.ownerUserId, user.id))
-      // service mailboxes have their own section (GET /service); a mailbox being
-      // hard-deleted in the background is already gone from the admin's view.
-      .where(and(ne(mailbox.type, "service"), mailboxNotDeletePending))
-      .orderBy(asc(domain.name), asc(mailbox.localPart));
-    return c.json({
-      mailboxes: rows.map((m) => ({
-        id: m.id,
-        address: `${m.localPart}@${m.domainName}`,
-        displayName: m.displayName,
-        type: m.type,
-        expiresAt: m.expiresAt,
-        createdAt: m.createdAt,
-        ownerUserId: m.ownerUserId,
-        ownerEmail: m.ownerEmail,
-        ownerName: m.ownerName,
-      })),
-    });
-  });
-
-  r.post("/mailboxes", zValidator("json", adminCreateMailbox), async (c) => {
-    const db = dbFromCtx(c);
-    const me = c.get("user")!;
-    const body = c.req.valid("json");
-    if (body.type === "temp") {
-      throw new HTTPException(400, { message: "temp mailboxes are created via /api/temp" });
-    }
-    if (body.type === "service") {
-      throw new HTTPException(400, {
-        message: "service mailboxes are created via /api/admin/service",
+    .get("/mailboxes", async (c) => {
+      const db = dbFromCtx(c);
+      const rows = await db
+        .select({
+          id: mailbox.id,
+          localPart: mailbox.localPart,
+          displayName: mailbox.displayName,
+          type: mailbox.type,
+          domainName: domain.name,
+          expiresAt: mailbox.expiresAt,
+          createdAt: mailbox.createdAt,
+          ownerUserId: mailbox.ownerUserId,
+          ownerEmail: user.email,
+          ownerName: user.name,
+        })
+        .from(mailbox)
+        .innerJoin(domain, eq(mailbox.domainId, domain.id))
+        .innerJoin(user, eq(mailbox.ownerUserId, user.id))
+        // service mailboxes have their own section (GET /service); a mailbox being
+        // hard-deleted in the background is already gone from the admin's view.
+        .where(and(ne(mailbox.type, "service"), mailboxNotDeletePending))
+        .orderBy(asc(domain.name), asc(mailbox.localPart))
+        .limit(1000);
+      return c.json({
+        mailboxes: rows.map((m) => ({
+          id: m.id,
+          address: `${m.localPart}@${m.domainName}`,
+          displayName: m.displayName,
+          type: m.type,
+          expiresAt: m.expiresAt,
+          createdAt: m.createdAt,
+          ownerUserId: m.ownerUserId,
+          ownerEmail: m.ownerEmail,
+          ownerName: m.ownerName,
+        })),
       });
-    }
+    })
 
-    const owner = await db.query.user.findFirst({
-      where: eq(user.id, body.ownerUserId),
-      columns: { id: true },
-    });
-    if (!owner) throw new HTTPException(400, { message: "owner not found" });
+    .post("/mailboxes", zValidator("json", adminCreateMailbox), async (c) => {
+      const db = dbFromCtx(c);
+      const me = c.get("user")!;
+      const body = c.req.valid("json");
+      if (body.type === "temp") {
+        throw new HTTPException(400, { message: "temp mailboxes are created via /api/temp" });
+      }
+      if (body.type === "service") {
+        throw new HTTPException(400, {
+          message: "service mailboxes are created via /api/admin/service",
+        });
+      }
 
-    // Admin bypasses the per-user grant; domain.allowedKinds is still enforced.
-    await authorizeMailboxCreate(db, me, body.domainId, body.type);
-
-    const id = crypto.randomUUID();
-    await wrapUnique(
-      () =>
-        db.insert(mailbox).values({
-          id,
-          domainId: body.domainId,
-          localPart: body.localPart.toLowerCase(),
-          displayName: body.displayName ?? null,
-          type: body.type,
-          ownerUserId: body.ownerUserId,
-        }),
-      "address already in use",
-    );
-    return c.json({ id }, 201);
-  });
-
-  r.patch("/mailboxes/:id", zValidator("json", migrateMailbox), async (c) => {
-    const db = dbFromCtx(c);
-    const id = c.req.param("id");
-    const body = c.req.valid("json");
-
-    const mb = await db.query.mailbox.findFirst({
-      where: eq(mailbox.id, id),
-      columns: { id: true, type: true, ownerUserId: true },
-    });
-    if (!mb) throw new HTTPException(404, { message: "not found" });
-    if (mb.type === "temp")
-      throw new HTTPException(400, { message: "temp mailboxes cannot be migrated" });
-
-    const patch: { ownerUserId?: string; type?: "personal" | "group" } = {};
-
-    if (body.ownerUserId !== undefined && body.ownerUserId !== mb.ownerUserId) {
       const owner = await db.query.user.findFirst({
         where: eq(user.id, body.ownerUserId),
         columns: { id: true },
       });
       if (!owner) throw new HTTPException(400, { message: "owner not found" });
-      patch.ownerUserId = body.ownerUserId;
-    }
 
-    if (body.type !== undefined && body.type !== mb.type) {
-      // Only the personal⇄group pair is interchangeable; service is key-driven.
-      if (mb.type === "service")
-        throw new HTTPException(400, { message: "service mailboxes cannot change type" });
-      patch.type = body.type;
-    }
+      // Admin bypasses the per-user grant; domain.allowedKinds is still enforced.
+      await authorizeMailboxCreate(db, me, body.domainId, body.type);
 
-    if (patch.ownerUserId === undefined && patch.type === undefined) return c.json({ ok: true });
+      const id = crypto.randomUUID();
+      await wrapUnique(
+        () =>
+          db.insert(mailbox).values({
+            id,
+            domainId: body.domainId,
+            localPart: body.localPart.toLowerCase(),
+            displayName: body.displayName ?? null,
+            type: body.type,
+            ownerUserId: body.ownerUserId,
+          }),
+        "address already in use",
+      );
+      return c.json({ id }, 201);
+    })
 
-    // A personal mailbox is single-owner — shed shared members on the way down.
-    if (patch.type === "personal")
-      await db.delete(mailboxMember).where(eq(mailboxMember.mailboxId, id));
+    .patch("/mailboxes/:id", zValidator("json", migrateMailbox), async (c) => {
+      const db = dbFromCtx(c);
+      const id = c.req.param("id");
+      const body = c.req.valid("json");
 
-    await db.update(mailbox).set(patch).where(eq(mailbox.id, id));
-    return c.json({ ok: true });
-  });
+      const mb = await db.query.mailbox.findFirst({
+        where: eq(mailbox.id, id),
+        columns: { id: true, type: true, ownerUserId: true },
+      });
+      if (!mb) throw new HTTPException(404, { message: "not found" });
+      if (mb.type === "temp")
+        throw new HTTPException(400, { message: "temp mailboxes cannot be migrated" });
 
-  // Full per-mailbox settings, for any mailbox. Mirrors the owner-facing
-  // /api/mailboxes/:id/settings but admin-only — the spam filter level is an
-  // admin decision (see PATCH below), so it lives here rather than there.
-  r.get("/mailboxes/:id/settings", async (c) => {
-    const db = dbFromCtx(c);
-    const id = c.req.param("id");
-    const mb = await db.query.mailbox.findFirst({
-      where: eq(mailbox.id, id),
-      columns: {
-        id: true,
-        displayName: true,
-        signature: true,
-        replyTo: true,
-        type: true,
+      const patch: { ownerUserId?: string; type?: "personal" | "group" } = {};
+
+      if (body.ownerUserId !== undefined && body.ownerUserId !== mb.ownerUserId) {
+        const owner = await db.query.user.findFirst({
+          where: eq(user.id, body.ownerUserId),
+          columns: { id: true },
+        });
+        if (!owner) throw new HTTPException(400, { message: "owner not found" });
+        patch.ownerUserId = body.ownerUserId;
+      }
+
+      if (body.type !== undefined && body.type !== mb.type) {
+        // Only the personal⇄group pair is interchangeable; service is key-driven.
+        if (mb.type === "service")
+          throw new HTTPException(400, { message: "service mailboxes cannot change type" });
+        patch.type = body.type;
+      }
+
+      if (patch.ownerUserId === undefined && patch.type === undefined) return c.json({ ok: true });
+
+      // A personal mailbox is single-owner — shed shared members on the way down.
+      if (patch.type === "personal")
+        await db.delete(mailboxMember).where(eq(mailboxMember.mailboxId, id));
+
+      await db.update(mailbox).set(patch).where(eq(mailbox.id, id));
+      return c.json({ ok: true });
+    })
+
+    // Full per-mailbox settings, for any mailbox. Mirrors the owner-facing
+    // /api/mailboxes/:id/settings but admin-only — the spam filter level is an
+    // admin decision (see PATCH below), so it lives here rather than there.
+    .get("/mailboxes/:id/settings", async (c) => {
+      const db = dbFromCtx(c);
+      const id = c.req.param("id");
+      const mb = await db.query.mailbox.findFirst({
+        where: eq(mailbox.id, id),
+        columns: {
+          id: true,
+          displayName: true,
+          signature: true,
+          replyTo: true,
+          type: true,
+          spamFilter: true,
+          spamAiTokenCap: true,
+          aiFeatures: true,
+          aiTokenCap: true,
+        },
+      });
+      if (!mb) throw new HTTPException(404, { message: "not found" });
+      const usage = await db.query.mailboxSpamUsage.findFirst({
+        where: eq(mailboxSpamUsage.mailboxId, id),
+        columns: { period: true, calls: true, tokensIn: true, tokensOut: true },
+      });
+      const aiUsage = await db.query.mailboxAiUsage.findFirst({
+        where: eq(mailboxAiUsage.mailboxId, id),
+        columns: { period: true, calls: true, tokensIn: true, tokensOut: true },
+      });
+      return c.json({
+        id: mb.id,
+        type: mb.type,
+        displayName: mb.displayName,
+        signature: mb.signature,
+        replyTo: mb.replyTo,
+        spamFilter: mb.spamFilter,
+        spamAiTokenCap: mb.spamAiTokenCap,
+        spamUsage: usage
+          ? { period: usage.period, calls: usage.calls, tokens: usage.tokensIn + usage.tokensOut }
+          : null,
+        aiFeatures: mb.aiFeatures,
+        aiTokenCap: mb.aiTokenCap,
+        aiUsage: aiUsage
+          ? {
+              period: aiUsage.period,
+              calls: aiUsage.calls,
+              tokens: aiUsage.tokensIn + aiUsage.tokensOut,
+            }
+          : null,
+      });
+    })
+
+    .patch("/mailboxes/:id/settings", zValidator("json", updateMailboxSettings), async (c) => {
+      const db = dbFromCtx(c);
+      const id = c.req.param("id");
+      const body = c.req.valid("json");
+
+      const mb = await db.query.mailbox.findFirst({
+        where: eq(mailbox.id, id),
+        columns: { type: true },
+      });
+      if (!mb) throw new HTTPException(404, { message: "not found" });
+      if (mb.type === "temp")
+        throw new HTTPException(400, { message: "temp mailboxes are not editable" });
+
+      const patch = buildPatch<typeof mailbox.$inferInsert>(body, {
+        displayName: (v: string | null) => (v?.trim() ? v.trim() : null),
+        signature: (v: string | null) => (v?.trim() ? v : null),
+        replyTo: (v: string | null) => (v ? v : null),
         spamFilter: true,
         spamAiTokenCap: true,
         aiFeatures: true,
         aiTokenCap: true,
-      },
-    });
-    if (!mb) throw new HTTPException(404, { message: "not found" });
-    const usage = await db.query.mailboxSpamUsage.findFirst({
-      where: eq(mailboxSpamUsage.mailboxId, id),
-      columns: { period: true, calls: true, tokensIn: true, tokensOut: true },
-    });
-    const aiUsage = await db.query.mailboxAiUsage.findFirst({
-      where: eq(mailboxAiUsage.mailboxId, id),
-      columns: { period: true, calls: true, tokensIn: true, tokensOut: true },
-    });
-    return c.json({
-      id: mb.id,
-      type: mb.type,
-      displayName: mb.displayName,
-      signature: mb.signature,
-      replyTo: mb.replyTo,
-      spamFilter: mb.spamFilter,
-      spamAiTokenCap: mb.spamAiTokenCap,
-      spamUsage: usage
-        ? { period: usage.period, calls: usage.calls, tokens: usage.tokensIn + usage.tokensOut }
-        : null,
-      aiFeatures: mb.aiFeatures,
-      aiTokenCap: mb.aiTokenCap,
-      aiUsage: aiUsage
-        ? {
-            period: aiUsage.period,
-            calls: aiUsage.calls,
-            tokens: aiUsage.tokensIn + aiUsage.tokensOut,
-          }
-        : null,
-    });
-  });
+      });
+      if (Object.keys(patch).length === 0) return c.json({ ok: true });
 
-  r.patch("/mailboxes/:id/settings", zValidator("json", updateMailboxSettings), async (c) => {
-    const db = dbFromCtx(c);
-    const id = c.req.param("id");
-    const body = c.req.valid("json");
+      await db.update(mailbox).set(patch).where(eq(mailbox.id, id));
+      return c.json({ ok: true });
+    })
 
-    const mb = await db.query.mailbox.findFirst({
-      where: eq(mailbox.id, id),
-      columns: { type: true },
-    });
-    if (!mb) throw new HTTPException(404, { message: "not found" });
-    if (mb.type === "temp")
-      throw new HTTPException(400, { message: "temp mailboxes are not editable" });
+    .delete("/mailboxes/:id", zValidator("json", adminDeleteMailbox), async (c) => {
+      const db = dbFromCtx(c);
+      const id = c.req.param("id");
+      const body = c.req.valid("json");
 
-    const patch = buildPatch<typeof mailbox.$inferInsert>(body, {
-      displayName: (v: string | null) => (v?.trim() ? v.trim() : null),
-      signature: (v: string | null) => (v?.trim() ? v : null),
-      replyTo: (v: string | null) => (v ? v : null),
-      spamFilter: true,
-      spamAiTokenCap: true,
-      aiFeatures: true,
-      aiTokenCap: true,
-    });
-    if (Object.keys(patch).length === 0) return c.json({ ok: true });
+      const mb = await db.query.mailbox.findFirst({
+        where: eq(mailbox.id, id),
+        columns: { id: true, domainId: true, localPart: true },
+      });
+      if (!mb) throw new HTTPException(404, { message: "not found" });
 
-    await db.update(mailbox).set(patch).where(eq(mailbox.id, id));
-    return c.json({ ok: true });
-  });
-
-  r.delete("/mailboxes/:id", zValidator("json", adminDeleteMailbox), async (c) => {
-    const db = dbFromCtx(c);
-    const id = c.req.param("id");
-    const body = c.req.valid("json");
-
-    const mb = await db.query.mailbox.findFirst({
-      where: eq(mailbox.id, id),
-      columns: { id: true, domainId: true, localPart: true },
-    });
-    if (!mb) throw new HTTPException(404, { message: "not found" });
-
-    let target: { id: string; type: string } | undefined;
-    if (body.redirectToMailboxId) {
-      if (body.redirectToMailboxId === id) {
-        throw new HTTPException(400, { message: "cannot redirect a mailbox to itself" });
+      let target: { id: string; type: string } | undefined;
+      if (body.redirectToMailboxId) {
+        if (body.redirectToMailboxId === id) {
+          throw new HTTPException(400, { message: "cannot redirect a mailbox to itself" });
+        }
+        target = await db.query.mailbox.findFirst({
+          where: eq(mailbox.id, body.redirectToMailboxId),
+          columns: { id: true, type: true },
+        });
+        if (!target) throw new HTTPException(400, { message: "redirect target not found" });
+        if (target.type === "service") {
+          throw new HTTPException(400, { message: "service mailboxes cannot receive mail" });
+        }
       }
-      target = await db.query.mailbox.findFirst({
-        where: eq(mailbox.id, body.redirectToMailboxId),
+
+      // The redirect can claim the address immediately: receive routing skips a
+      // delete-pending mailbox (mailboxNotDeletePending), so its inbound resolves
+      // to the target while the cron drains the old threads in the background.
+      if (target) {
+        await db.insert(redirect).values({
+          id: crypto.randomUUID(),
+          domainId: mb.domainId,
+          localPart: mb.localPart,
+          targetMailboxId: target.id,
+        });
+      }
+      // Mark for background purge; the cron drains the threads, then drops the row.
+      await markMailboxPurge(db, id, "delete");
+      return c.body(null, 204);
+    })
+
+    .post("/mailboxes/:id/empty", async (c) => {
+      const db = dbFromCtx(c);
+      const id = c.req.param("id");
+
+      const mb = await db.query.mailbox.findFirst({
+        where: eq(mailbox.id, id),
+        columns: { id: true },
+      });
+      if (!mb) throw new HTTPException(404, { message: "not found" });
+
+      // Mark for background purge: the cron drains the threads (the mailbox stays).
+      // Its threads read as gone immediately (resolveAccess marks it `purging`).
+      await markMailboxPurge(db, id, "empty");
+      return c.body(null, 204);
+    })
+
+    // ─── Service mailboxes ──────────────────────────────────────────────────────
+    // Key-driven, no owner/members. The key is shown once on create/rotate and
+    // only its SHA-256 hash is stored.
+
+    .get("/service", async (c) => {
+      const db = dbFromCtx(c);
+      const rows = await db
+        .select({
+          id: mailbox.id,
+          localPart: mailbox.localPart,
+          displayName: mailbox.displayName,
+          domainName: domain.name,
+          mode: mailbox.serviceMode,
+          keyHash: mailbox.serviceKeyHash,
+          createdAt: mailbox.createdAt,
+        })
+        .from(mailbox)
+        .innerJoin(domain, eq(mailbox.domainId, domain.id))
+        .where(and(eq(mailbox.type, "service"), mailboxNotDeletePending))
+        .orderBy(asc(domain.name), asc(mailbox.localPart))
+        .limit(1000);
+
+      const ids = rows.map((row) => row.id);
+      const stats = ids.length
+        ? await db
+            .select({
+              mailboxId: message.mailboxId,
+              c: count(),
+              last: max(message.createdAt),
+            })
+            .from(message)
+            .where(inArray(message.mailboxId, ids))
+            .groupBy(message.mailboxId)
+        : [];
+      const statMap = new Map(stats.map((s) => [s.mailboxId, s]));
+
+      return c.json({
+        services: rows.map((row) => ({
+          id: row.id,
+          address: `${row.localPart}@${row.domainName}`,
+          displayName: row.displayName,
+          mode: row.mode,
+          hasKey: Boolean(row.keyHash),
+          messageCount: statMap.get(row.id)?.c ?? 0,
+          lastMessageAt: statMap.get(row.id)?.last ?? null,
+          createdAt: row.createdAt,
+        })),
+      });
+    })
+
+    .post("/service", zValidator("json", createServiceMailbox), async (c) => {
+      const db = dbFromCtx(c);
+      const me = c.get("user")!;
+      const body = c.req.valid("json");
+
+      // Admin bypasses the per-user grant; domain.allowedKinds is still enforced.
+      await authorizeMailboxCreate(db, me, body.domainId, "service");
+
+      const id = crypto.randomUUID();
+      const key = randomToken(32);
+      const keyHash = await sha256Hex(key);
+      await wrapUnique(
+        () =>
+          db.insert(mailbox).values({
+            id,
+            domainId: body.domainId,
+            localPart: body.localPart.toLowerCase(),
+            displayName: body.displayName ?? null,
+            type: "service",
+            ownerUserId: me.id,
+            serviceMode: body.mode,
+            serviceKeyHash: keyHash,
+            spamFilter: "off",
+          }),
+        "address already in use",
+      );
+      return c.json({ id, key }, 201);
+    })
+
+    .post("/service/:id/rotate", async (c) => {
+      const db = dbFromCtx(c);
+      const id = c.req.param("id");
+      const mb = await db.query.mailbox.findFirst({
+        where: and(eq(mailbox.id, id), eq(mailbox.type, "service")),
+        columns: { id: true },
+      });
+      if (!mb) throw new HTTPException(404, { message: "not found" });
+      const key = randomToken(32);
+      await db
+        .update(mailbox)
+        .set({ serviceKeyHash: await sha256Hex(key) })
+        .where(eq(mailbox.id, id));
+      return c.json({ key });
+    })
+
+    .patch("/service/:id", zValidator("json", updateServiceMailbox), async (c) => {
+      const db = dbFromCtx(c);
+      const id = c.req.param("id");
+      const body = c.req.valid("json");
+      const mb = await db.query.mailbox.findFirst({
+        where: and(eq(mailbox.id, id), eq(mailbox.type, "service")),
+        columns: { id: true },
+      });
+      if (!mb) throw new HTTPException(404, { message: "not found" });
+
+      const patch = buildPatch<typeof mailbox.$inferInsert>(body, {
+        displayName: (v: string | null) => (v?.trim() ? v.trim() : null),
+        mode: { to: "serviceMode" },
+      });
+      if (Object.keys(patch).length === 0) return c.json({ ok: true });
+
+      await db.update(mailbox).set(patch).where(eq(mailbox.id, id));
+      return c.json({ ok: true });
+    })
+
+    .delete("/service/:id", async (c) => {
+      const db = dbFromCtx(c);
+      const id = c.req.param("id");
+      const mb = await db.query.mailbox.findFirst({
+        where: and(eq(mailbox.id, id), eq(mailbox.type, "service")),
+        columns: { id: true },
+      });
+      if (!mb) throw new HTTPException(404, { message: "not found" });
+      // Same background purge as regular mailboxes — the cron drains and drops it.
+      await markMailboxPurge(db, id, "delete");
+      return c.body(null, 204);
+    })
+
+    // ─── Redirects ────────────────────────────────────────────────────────────
+
+    .get("/redirects", async (c) => {
+      const db = dbFromCtx(c);
+      const targetMb = aliasedTable(mailbox, "target_mb");
+      const targetDom = aliasedTable(domain, "target_dom");
+      const rows = await db
+        .select({
+          id: redirect.id,
+          localPart: redirect.localPart,
+          domainName: domain.name,
+          createdAt: redirect.createdAt,
+          targetMailboxId: redirect.targetMailboxId,
+          targetLocalPart: targetMb.localPart,
+          targetDomainName: targetDom.name,
+        })
+        .from(redirect)
+        .innerJoin(domain, eq(redirect.domainId, domain.id))
+        .innerJoin(targetMb, eq(redirect.targetMailboxId, targetMb.id))
+        .innerJoin(targetDom, eq(targetMb.domainId, targetDom.id))
+        .orderBy(desc(redirect.createdAt))
+        .limit(1000);
+      return c.json({
+        redirects: rows.map((row) => ({
+          id: row.id,
+          address: `${row.localPart}@${row.domainName}`,
+          targetMailboxId: row.targetMailboxId,
+          targetAddress: `${row.targetLocalPart}@${row.targetDomainName}`,
+          createdAt: row.createdAt,
+        })),
+      });
+    })
+
+    .post("/redirects", zValidator("json", createRedirect), async (c) => {
+      const db = dbFromCtx(c);
+      const body = c.req.valid("json");
+      const localPart = body.localPart.toLowerCase();
+
+      const target = await db.query.mailbox.findFirst({
+        where: eq(mailbox.id, body.targetMailboxId),
         columns: { id: true, type: true },
       });
       if (!target) throw new HTTPException(400, { message: "redirect target not found" });
       if (target.type === "service") {
         throw new HTTPException(400, { message: "service mailboxes cannot receive mail" });
       }
-    }
 
-    // The redirect can claim the address immediately: receive routing skips a
-    // delete-pending mailbox (mailboxNotDeletePending), so its inbound resolves
-    // to the target while the cron drains the old threads in the background.
-    if (target) {
-      await db.insert(redirect).values({
-        id: crypto.randomUUID(),
-        domainId: mb.domainId,
-        localPart: mb.localPart,
-        targetMailboxId: target.id,
+      // A real mailbox at this address always wins in receive.ts — refuse to
+      // create a redirect that can never fire. A delete-pending mailbox no longer
+      // wins (receive skips it), so it doesn't block the redirect.
+      const clash = await db.query.mailbox.findFirst({
+        where: and(
+          eq(mailbox.domainId, body.domainId),
+          eq(mailbox.localPart, localPart),
+          mailboxNotDeletePending,
+        ),
+        columns: { id: true },
       });
-    }
-    // Mark for background purge; the cron drains the threads, then drops the row.
-    await db.update(mailbox).set({ pendingPurge: "delete" }).where(eq(mailbox.id, id));
-    return c.body(null, 204);
-  });
+      if (clash) throw new HTTPException(409, { message: "a mailbox already owns this address" });
 
-  r.post("/mailboxes/:id/empty", async (c) => {
-    const db = dbFromCtx(c);
-    const id = c.req.param("id");
+      const id = crypto.randomUUID();
+      await db
+        .insert(redirect)
+        .values({ id, domainId: body.domainId, localPart, targetMailboxId: body.targetMailboxId })
+        .onConflictDoUpdate({
+          target: [redirect.domainId, redirect.localPart],
+          set: { targetMailboxId: body.targetMailboxId },
+        });
+      return c.json({ ok: true }, 201);
+    })
 
-    const mb = await db.query.mailbox.findFirst({
-      where: eq(mailbox.id, id),
-      columns: { id: true },
-    });
-    if (!mb) throw new HTTPException(404, { message: "not found" });
+    .patch("/redirects/:id", zValidator("json", updateRedirect), async (c) => {
+      const db = dbFromCtx(c);
+      const id = c.req.param("id");
+      const body = c.req.valid("json");
 
-    // Mark for background purge: the cron drains the threads (the mailbox stays).
-    // Its threads read as gone immediately (resolveAccess marks it `purging`).
-    await db.update(mailbox).set({ pendingPurge: "empty" }).where(eq(mailbox.id, id));
-    return c.body(null, 204);
-  });
-
-  // ─── Service mailboxes ──────────────────────────────────────────────────────
-  // Key-driven, no owner/members. The key is shown once on create/rotate and
-  // only its SHA-256 hash is stored.
-
-  r.get("/service", async (c) => {
-    const db = dbFromCtx(c);
-    const rows = await db
-      .select({
-        id: mailbox.id,
-        localPart: mailbox.localPart,
-        displayName: mailbox.displayName,
-        domainName: domain.name,
-        mode: mailbox.serviceMode,
-        keyHash: mailbox.serviceKeyHash,
-        createdAt: mailbox.createdAt,
-      })
-      .from(mailbox)
-      .innerJoin(domain, eq(mailbox.domainId, domain.id))
-      .where(eq(mailbox.type, "service"))
-      .orderBy(asc(domain.name), asc(mailbox.localPart));
-
-    const ids = rows.map((row) => row.id);
-    const stats = ids.length
-      ? await db
-          .select({
-            mailboxId: message.mailboxId,
-            c: count(),
-            last: max(message.createdAt),
-          })
-          .from(message)
-          .where(inArray(message.mailboxId, ids))
-          .groupBy(message.mailboxId)
-      : [];
-    const statMap = new Map(stats.map((s) => [s.mailboxId, s]));
-
-    return c.json({
-      services: rows.map((row) => ({
-        id: row.id,
-        address: `${row.localPart}@${row.domainName}`,
-        displayName: row.displayName,
-        mode: row.mode,
-        hasKey: Boolean(row.keyHash),
-        messageCount: statMap.get(row.id)?.c ?? 0,
-        lastMessageAt: statMap.get(row.id)?.last ?? null,
-        createdAt: row.createdAt,
-      })),
-    });
-  });
-
-  r.post("/service", zValidator("json", createServiceMailbox), async (c) => {
-    const db = dbFromCtx(c);
-    const me = c.get("user")!;
-    const body = c.req.valid("json");
-
-    // Admin bypasses the per-user grant; domain.allowedKinds is still enforced.
-    await authorizeMailboxCreate(db, me, body.domainId, "service");
-
-    const id = crypto.randomUUID();
-    const key = randomToken(32);
-    const keyHash = await sha256Hex(key);
-    await wrapUnique(
-      () =>
-        db.insert(mailbox).values({
-          id,
-          domainId: body.domainId,
-          localPart: body.localPart.toLowerCase(),
-          displayName: body.displayName ?? null,
-          type: "service",
-          ownerUserId: me.id,
-          serviceMode: body.mode,
-          serviceKeyHash: keyHash,
-          spamFilter: "off",
-        }),
-      "address already in use",
-    );
-    return c.json({ id, key }, 201);
-  });
-
-  r.post("/service/:id/rotate", async (c) => {
-    const db = dbFromCtx(c);
-    const id = c.req.param("id");
-    const mb = await db.query.mailbox.findFirst({
-      where: and(eq(mailbox.id, id), eq(mailbox.type, "service")),
-      columns: { id: true },
-    });
-    if (!mb) throw new HTTPException(404, { message: "not found" });
-    const key = randomToken(32);
-    await db
-      .update(mailbox)
-      .set({ serviceKeyHash: await sha256Hex(key) })
-      .where(eq(mailbox.id, id));
-    return c.json({ key });
-  });
-
-  r.patch("/service/:id", zValidator("json", updateServiceMailbox), async (c) => {
-    const db = dbFromCtx(c);
-    const id = c.req.param("id");
-    const body = c.req.valid("json");
-    const mb = await db.query.mailbox.findFirst({
-      where: and(eq(mailbox.id, id), eq(mailbox.type, "service")),
-      columns: { id: true },
-    });
-    if (!mb) throw new HTTPException(404, { message: "not found" });
-
-    const patch = buildPatch<typeof mailbox.$inferInsert>(body, {
-      displayName: (v: string | null) => (v?.trim() ? v.trim() : null),
-      mode: { to: "serviceMode" },
-    });
-    if (Object.keys(patch).length === 0) return c.json({ ok: true });
-
-    await db.update(mailbox).set(patch).where(eq(mailbox.id, id));
-    return c.json({ ok: true });
-  });
-
-  r.delete("/service/:id", async (c) => {
-    const db = dbFromCtx(c);
-    const id = c.req.param("id");
-    const mb = await db.query.mailbox.findFirst({
-      where: and(eq(mailbox.id, id), eq(mailbox.type, "service")),
-      columns: { id: true },
-    });
-    if (!mb) throw new HTTPException(404, { message: "not found" });
-    const keys = await collectMailboxBlobKeys(db, id);
-    await deleteBlobs(c.env, keys);
-    await db.delete(mailbox).where(eq(mailbox.id, id));
-    return c.body(null, 204);
-  });
-
-  // ─── Redirects ────────────────────────────────────────────────────────────
-
-  r.get("/redirects", async (c) => {
-    const db = dbFromCtx(c);
-    const targetMb = aliasedTable(mailbox, "target_mb");
-    const targetDom = aliasedTable(domain, "target_dom");
-    const rows = await db
-      .select({
-        id: redirect.id,
-        localPart: redirect.localPart,
-        domainName: domain.name,
-        createdAt: redirect.createdAt,
-        targetMailboxId: redirect.targetMailboxId,
-        targetLocalPart: targetMb.localPart,
-        targetDomainName: targetDom.name,
-      })
-      .from(redirect)
-      .innerJoin(domain, eq(redirect.domainId, domain.id))
-      .innerJoin(targetMb, eq(redirect.targetMailboxId, targetMb.id))
-      .innerJoin(targetDom, eq(targetMb.domainId, targetDom.id))
-      .orderBy(desc(redirect.createdAt));
-    return c.json({
-      redirects: rows.map((row) => ({
-        id: row.id,
-        address: `${row.localPart}@${row.domainName}`,
-        targetMailboxId: row.targetMailboxId,
-        targetAddress: `${row.targetLocalPart}@${row.targetDomainName}`,
-        createdAt: row.createdAt,
-      })),
-    });
-  });
-
-  r.post("/redirects", zValidator("json", createRedirect), async (c) => {
-    const db = dbFromCtx(c);
-    const body = c.req.valid("json");
-    const localPart = body.localPart.toLowerCase();
-
-    const target = await db.query.mailbox.findFirst({
-      where: eq(mailbox.id, body.targetMailboxId),
-      columns: { id: true, type: true },
-    });
-    if (!target) throw new HTTPException(400, { message: "redirect target not found" });
-    if (target.type === "service") {
-      throw new HTTPException(400, { message: "service mailboxes cannot receive mail" });
-    }
-
-    // A real mailbox at this address always wins in receive.ts — refuse to
-    // create a redirect that can never fire. A delete-pending mailbox no longer
-    // wins (receive skips it), so it doesn't block the redirect.
-    const clash = await db.query.mailbox.findFirst({
-      where: and(
-        eq(mailbox.domainId, body.domainId),
-        eq(mailbox.localPart, localPart),
-        mailboxNotDeletePending,
-      ),
-      columns: { id: true },
-    });
-    if (clash) throw new HTTPException(409, { message: "a mailbox already owns this address" });
-
-    const id = crypto.randomUUID();
-    await db
-      .insert(redirect)
-      .values({ id, domainId: body.domainId, localPart, targetMailboxId: body.targetMailboxId })
-      .onConflictDoUpdate({
-        target: [redirect.domainId, redirect.localPart],
-        set: { targetMailboxId: body.targetMailboxId },
+      const target = await db.query.mailbox.findFirst({
+        where: eq(mailbox.id, body.targetMailboxId),
+        columns: { id: true, type: true },
       });
-    return c.json({ ok: true }, 201);
-  });
+      if (!target) throw new HTTPException(400, { message: "redirect target not found" });
+      if (target.type === "service") {
+        throw new HTTPException(400, { message: "service mailboxes cannot receive mail" });
+      }
 
-  r.patch("/redirects/:id", zValidator("json", updateRedirect), async (c) => {
-    const db = dbFromCtx(c);
-    const id = c.req.param("id");
-    const body = c.req.valid("json");
+      const res = await db
+        .update(redirect)
+        .set({ targetMailboxId: target.id })
+        .where(eq(redirect.id, id));
+      if (res.meta.changes === 0) throw new HTTPException(404, { message: "not found" });
+      return c.json({ ok: true });
+    })
 
-    const target = await db.query.mailbox.findFirst({
-      where: eq(mailbox.id, body.targetMailboxId),
-      columns: { id: true, type: true },
+    .delete("/redirects/:id", async (c) => {
+      const db = dbFromCtx(c);
+      const id = c.req.param("id");
+      const res = await db.delete(redirect).where(eq(redirect.id, id));
+      if (res.meta.changes === 0) throw new HTTPException(404, { message: "not found" });
+      return c.body(null, 204);
     });
-    if (!target) throw new HTTPException(400, { message: "redirect target not found" });
-    if (target.type === "service") {
-      throw new HTTPException(400, { message: "service mailboxes cannot receive mail" });
-    }
-
-    const res = await db
-      .update(redirect)
-      .set({ targetMailboxId: target.id })
-      .where(eq(redirect.id, id));
-    if (res.meta.changes === 0) throw new HTTPException(404, { message: "not found" });
-    return c.json({ ok: true });
-  });
-
-  r.delete("/redirects/:id", async (c) => {
-    const db = dbFromCtx(c);
-    const id = c.req.param("id");
-    const res = await db.delete(redirect).where(eq(redirect.id, id));
-    if (res.meta.changes === 0) throw new HTTPException(404, { message: "not found" });
-    return c.body(null, 204);
-  });
 
   return r;
-}
-
-// URL-safe base64 token from `byteLen` random bytes (32 = 256 bits).
-function randomToken(byteLen: number): string {
-  const bytes = new Uint8Array(byteLen);
-  crypto.getRandomValues(bytes);
-  let s = "";
-  for (const b of bytes) s += String.fromCharCode(b);
-  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
