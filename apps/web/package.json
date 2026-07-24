@@ -21,7 +21,7 @@
     "better-auth": "1.6.20",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
-    "dompurify": "3.4.11",
+    "dompurify": "3.4.12",
     "fflate": "^0.8.3",
     "hono": "4.12.27",
     "lucide-react": "1.21.0",
