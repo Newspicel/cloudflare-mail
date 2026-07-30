@@ -163,6 +163,7 @@ function buildSearchParams(f: SearchFilterInput): string {
   if (f.direction) p.set("direction", f.direction);
   if (f.hasAttachment) p.set("hasAttachment", "true");
   if (f.folder && f.folder !== "any") p.set("folder", f.folder);
+  if (f.sort && f.sort !== "newest") p.set("sort", f.sort);
   if (f.mailboxId && f.mailboxId !== "all") p.set("mailboxId", f.mailboxId);
   if (f.page) p.set("page", String(f.page));
   if (f.limit) p.set("limit", String(f.limit));

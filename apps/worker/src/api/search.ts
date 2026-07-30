@@ -77,6 +77,14 @@ export function searchRoutes() {
       const limitPlus = f.limit + 1;
       const offset = f.page * f.limit;
 
+      const date = "coalesce(m.received_at, m.sent_at)";
+      const orderBy =
+        f.sort === "relevance" && match
+          ? `bm25(message_fts), ${date} DESC`
+          : f.sort === "oldest"
+            ? `${date} ASC`
+            : `${date} DESC`;
+
       let sql: string;
       if (match) {
         where.unshift("message_fts MATCH ?");
@@ -86,14 +94,14 @@ export function searchRoutes() {
                JOIN message m ON m.id = f.message_id
                JOIN thread t ON t.id = m.thread_id
               WHERE ${where.join(" AND ")}
-              ORDER BY bm25(message_fts), coalesce(m.received_at, m.sent_at) DESC
+              ORDER BY ${orderBy}
               LIMIT ? OFFSET ?`;
       } else {
         sql = `SELECT ${SELECT_COLS}, (${attachExists}) AS hasAttachments
                FROM message m
                JOIN thread t ON t.id = m.thread_id
               WHERE ${where.join(" AND ")}
-              ORDER BY coalesce(m.received_at, m.sent_at) DESC
+              ORDER BY ${orderBy}
               LIMIT ? OFFSET ?`;
       }
       binds.push(limitPlus, offset);

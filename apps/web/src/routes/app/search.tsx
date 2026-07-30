@@ -4,6 +4,7 @@ import { type UseQueryResult, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
   ArrowDownToLine,
+  ArrowUpDown,
   ArrowUpFromLine,
   ChevronsUpDown,
   Inbox,
@@ -69,6 +70,12 @@ const FOLDERS: {
   { value: "trash", label: "Trash", icon: Trash2 },
 ];
 
+const SORTS: { value: NonNullable<SearchFilters["sort"]>; label: string }[] = [
+  { value: "newest", label: "Newest first" },
+  { value: "oldest", label: "Oldest first" },
+  { value: "relevance", label: "Best match" },
+];
+
 const PAGE_SIZE = 25;
 const MAX_RESULTS = 100; // matches the server-side limit cap
 
@@ -111,6 +118,7 @@ function clean(s: Record<string, unknown>): SearchParams {
     s.folder === "trash"
   )
     out.folder = s.folder;
+  if (s.sort === "oldest" || s.sort === "relevance") out.sort = s.sort;
   const page = Number(s.page);
   if (Number.isInteger(page) && page > 0) out.page = page;
   return out;
@@ -290,13 +298,34 @@ function SearchPage() {
             />
           </div>
 
-          <MailboxScope
-            className="sm:ml-auto"
-            mailboxes={mailboxList}
-            selected={selectedMailboxIds}
-            onToggle={toggleMailbox}
-            onClear={() => setMailboxIds([])}
-          />
+          <div className="flex items-center gap-2 sm:ml-auto">
+            <Select
+              items={SORTS}
+              value={form.sort ?? "newest"}
+              onValueChange={(v) =>
+                set("sort", v === "newest" ? undefined : (v as SearchParams["sort"]))
+              }
+            >
+              <SelectTrigger aria-label="Sort results" className="h-7 w-auto gap-1.5 text-[12px]">
+                <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SORTS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <MailboxScope
+              mailboxes={mailboxList}
+              selected={selectedMailboxIds}
+              onToggle={toggleMailbox}
+              onClear={() => setMailboxIds([])}
+            />
+          </div>
         </div>
 
         {/* Active filter chips */}
