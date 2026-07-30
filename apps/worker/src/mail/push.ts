@@ -1,11 +1,11 @@
 import type { DB } from "@cfmail/db";
 import type { AiPriority } from "@cfmail/db/enums";
 import { mailboxNotify, pushSubscription } from "@cfmail/db/schema";
-import { buildPushHTTPRequest } from "@pushforge/builder";
 import { and, eq, inArray } from "drizzle-orm";
 import { getConfig, setConfig } from "../config.ts";
 import { bytesToB64url } from "../lib/encoding.ts";
 import { safeRedirectFetch } from "../ssrf.ts";
+import { buildPushRequest } from "./webpush.ts";
 
 const VAPID_PUBLIC = "vapid_public";
 const VAPID_PRIVATE = "vapid_private_jwk";
@@ -43,8 +43,7 @@ export async function getOrCreateVapid(db: DB): Promise<VapidKeys> {
 }
 
 // The encrypted payload a service worker renders. `threadId` is the stable tag
-// peers use to dismiss/coalesce a notification per thread. A `type` (not
-// `interface`) so it satisfies the builder's Jsonifiable index signature.
+// peers use to dismiss/coalesce a notification per thread.
 export type PushPayload = {
   title: string;
   body: string;
@@ -80,23 +79,23 @@ export async function pushToUsers(db: DB, userIds: string[], payload: PushPayloa
       .where(inArray(pushSubscription.userId, userIds));
     if (subs.length === 0) return;
 
-    const { privateJWK } = await getOrCreateVapid(db);
+    const { publicKey, privateJWK } = await getOrCreateVapid(db);
     const dead: string[] = [];
 
     await Promise.all(
       subs.map(async (sub) => {
         try {
-          const { endpoint, headers, body } = await buildPushHTTPRequest({
+          const { endpoint, headers, body } = await buildPushRequest({
             privateJWK,
+            publicKey,
             subscription: {
               endpoint: sub.endpoint,
               keys: { p256dh: sub.p256dh, auth: sub.auth },
             },
-            message: {
-              payload,
-              adminContact: ADMIN_CONTACT,
-              options: { ttl: 12 * 60 * 60, urgency: "high" },
-            },
+            payload,
+            ttl: 12 * 60 * 60,
+            urgency: "high",
+            adminContact: ADMIN_CONTACT,
           });
           // Endpoints are validated at registration, but re-guard each hop:
           // a push host that 302s elsewhere must not steer us at an internal
@@ -104,6 +103,12 @@ export async function pushToUsers(db: DB, userIds: string[], payload: PushPayloa
           const res = await safeRedirectFetch(new URL(endpoint), { method: "POST", headers, body });
           if ("blocked" in res) return;
           if (res.status === 404 || res.status === 410) dead.push(sub.id);
+          else if (!res.ok) {
+            // Surface rejections (bad VAPID, bad encoding, …) in `wrangler tail`
+            // — these were silently dropped before, hiding delivery failures.
+            const detail = (await res.text().catch(() => "")).slice(0, 200);
+            console.error("push rejected", res.status, new URL(endpoint).hostname, detail);
+          }
         } catch (err) {
           console.error("push send failed", err);
         }

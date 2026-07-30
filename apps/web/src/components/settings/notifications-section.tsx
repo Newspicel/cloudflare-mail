@@ -38,11 +38,18 @@ function stripId(c: NotifyConfig): NotifyTiers {
   return { high: c.high, normal: c.normal, low: c.low };
 }
 
+// iOS only delivers Web Push to a PWA installed on the Home Screen; in Safari
+// itself the push APIs don't exist, so `pushSupported()` is false there.
+const IS_IOS = typeof navigator !== "undefined" && /iPhone|iPad|iPod/.test(navigator.userAgent);
+
 export function NotificationsSection({ mailboxes }: { mailboxes: MailboxSummary[] }) {
   const qc = useQueryClient();
   const supported = pushSupported();
   const [deviceOn, setDeviceOn] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  // Service mailboxes are send-only — they never receive mail to notify on.
+  const receivable = mailboxes.filter((m) => m.type !== "service");
 
   useEffect(() => {
     isPushEnabled()
@@ -60,6 +67,17 @@ export function NotificationsSection({ mailboxes }: { mailboxes: MailboxSummary[
       } else {
         await enablePush();
         setDeviceOn(true);
+        // An account with zero mailbox configs would notify on nothing —
+        // default every mailbox on so enabling a first device just works.
+        const { configs } = await unwrap(rpc.push.mailboxes.$get());
+        if (configs.length === 0 && receivable.length > 0) {
+          await Promise.all(
+            receivable.map((m) =>
+              unwrap(rpc.push.mailboxes[":id"].$put({ param: { id: m.id }, json: DEFAULT_TIERS })),
+            ),
+          );
+          qc.invalidateQueries({ queryKey: ["push-mailboxes"] });
+        }
         toast.success("Notifications enabled on this device");
       }
     } catch (e) {
@@ -82,9 +100,6 @@ export function NotificationsSection({ mailboxes }: { mailboxes: MailboxSummary[
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
-  // Service mailboxes are send-only — they never receive mail to notify on.
-  const receivable = mailboxes.filter((m) => m.type !== "service");
-
   return (
     <Section
       id="notifications"
@@ -99,7 +114,9 @@ export function NotificationsSection({ mailboxes }: { mailboxes: MailboxSummary[
               ? deviceOn
                 ? "Receiving notifications"
                 : "Not enabled"
-              : "Not supported in this browser"}
+              : IS_IOS
+                ? "On iPhone, install the app first: Share → Add to Home Screen, then enable notifications from there"
+                : "Not supported in this browser"}
           </div>
         </div>
         <Button variant="primary" onClick={toggleDevice} disabled={!supported || busy}>
