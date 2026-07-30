@@ -555,6 +555,11 @@ export type SearchIn = z.infer<typeof SearchIn>;
 export const SearchFolder = z.enum(["any", "inbox", "sent", "marked", "spam", "trash"]);
 export type SearchFolder = z.infer<typeof SearchFolder>;
 
+// "relevance" (bm25) only applies to text searches; metadata-only queries fall
+// back to newest.
+export const SearchSort = z.enum(["newest", "oldest", "relevance"]);
+export type SearchSort = z.infer<typeof SearchSort>;
+
 // Query params arrive as strings; coerce/normalize them here so the worker and
 // the web client agree on the exact filter contract.
 const boolParam = z.preprocess(
@@ -579,6 +584,7 @@ export const searchFilters = z.object({
   direction: MessageDirection.optional(),
   hasAttachment: boolParam,
   folder: SearchFolder.optional().default("any"),
+  sort: SearchSort.optional().default("newest"),
   // Blank / "all" → every readable mailbox; a comma-separated list of ids → just those.
   mailboxId: z.string().trim().max(2048).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional().default(25),
