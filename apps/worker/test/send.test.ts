@@ -1,4 +1,4 @@
-import { draft, message, thread } from "@cfmail/db/schema";
+import { attachment, draft, message, thread } from "@cfmail/db/schema";
 import { Flag } from "@cfmail/shared/flags";
 import type { SendMessageInput } from "@cfmail/shared/schemas";
 import { eq } from "drizzle-orm";
@@ -29,6 +29,18 @@ async function sentBlobKeys(): Promise<string[]> {
   return listed.objects.map((o) => o.key);
 }
 
+async function attBlobKeys(): Promise<string[]> {
+  const listed = await e.BLOBS.list({ prefix: "att/" });
+  return listed.objects.map((o) => o.key);
+}
+
+// A composer upload, in the caller's own `draft/<userId>/` namespace.
+async function putDraftBlob(filename: string, body: string, contentType: string): Promise<string> {
+  const key = `draft/${OWNER_ID}/${crypto.randomUUID()}-${filename}`;
+  await e.BLOBS.put(key, body, { httpMetadata: { contentType } });
+  return key;
+}
+
 function input(overrides: Partial<SendMessageInput> = {}): SendMessageInput {
   return {
     mailboxId: MAILBOX_ID,
@@ -43,7 +55,7 @@ beforeAll(applyMigrationsOnce);
 beforeEach(async () => {
   await resetDb();
   await seedBase(db());
-  const stale = await sentBlobKeys();
+  const stale = [...(await sentBlobKeys()), ...(await attBlobKeys())];
   await Promise.all(stale.map((key) => e.BLOBS.delete(key)));
 });
 
@@ -76,6 +88,33 @@ describe("sendFromMailbox — success", () => {
     const row = await db().query.message.findFirst({ where: eq(message.id, res.messageId) });
     expect(row?.messageIdHdr).toBe("<platform-mid>");
   });
+
+  it("records the attachments on the Sent copy, with the bytes in its own namespace", async () => {
+    const key = await putDraftBlob("report.pdf", "%PDF-1.4 fake", "application/pdf");
+    const res = await sendFromMailbox(
+      envWith(emailOk()),
+      db(),
+      OWNER_ID,
+      input({
+        attachments: [{ r2Key: key, filename: "report.pdf", contentType: "application/pdf" }],
+      }),
+    );
+
+    const rows = await db().query.attachment.findMany({
+      where: eq(attachment.messageId, res.messageId),
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      filename: "report.pdf",
+      contentType: "application/pdf",
+      inline: false,
+      r2Key: `att/${res.messageId}/0-report.pdf`,
+    });
+    // Copied, not referenced: deleting the draft must not empty the Sent copy.
+    const stored = await e.BLOBS.get(rows[0]!.r2Key);
+    expect(await stored?.text()).toBe("%PDF-1.4 fake");
+    expect(rows[0]!.r2Key.startsWith("draft/")).toBe(false);
+  });
 });
 
 describe("sendFromMailbox — delivery failure cleanup", () => {
@@ -90,6 +129,23 @@ describe("sendFromMailbox — delivery failure cleanup", () => {
     expect(await db().query.message.findMany()).toHaveLength(0);
     expect(await db().query.thread.findMany()).toHaveLength(0);
     expect(await sentBlobKeys()).toHaveLength(0);
+  });
+
+  it("drops the archived attachment rows and blobs too", async () => {
+    const key = await putDraftBlob("note.txt", "hi", "text/plain");
+    await expect(
+      sendFromMailbox(
+        envWith(emailFail()),
+        db(),
+        OWNER_ID,
+        input({
+          attachments: [{ r2Key: key, filename: "note.txt", contentType: "text/plain" }],
+        }),
+      ),
+    ).rejects.toMatchObject({ status: 502 });
+
+    expect(await db().query.attachment.findMany()).toHaveLength(0);
+    expect(await attBlobKeys()).toHaveLength(0);
   });
 
   it("keeps a pre-existing thread (and its messages) when a reply's delivery fails", async () => {

@@ -115,6 +115,41 @@ describe("POST /send — delivery", () => {
     expect(blobs.objects).toHaveLength(0);
   });
 
+  it("lists the attachments on the Sent copy and serves their bytes", async () => {
+    const key = `draft/${OWNER_ID}/${crypto.randomUUID()}-shot.png`;
+    await e.BLOBS.put(key, "png-bytes", { httpMetadata: { contentType: "image/png" } });
+    const res = await requestWithEnv(
+      asOwner(),
+      "POST",
+      "/send",
+      {
+        ...SEND_BODY,
+        attachments: [{ r2Key: key, filename: "shot.png", contentType: "image/png" }],
+      },
+      envWithEmail(async () => ({ messageId: "platform-mid" })),
+    );
+    expect(res.status).toBe(201);
+    const { messageId } = (await res.json()) as { messageId: string };
+
+    const body = (await (await request(asOwner(), "GET", `/${messageId}/body`)).json()) as {
+      attachments: { id: string; filename: string; contentType: string; sizeBytes: number }[];
+    };
+    expect(body.attachments).toHaveLength(1);
+    expect(body.attachments[0]).toMatchObject({
+      filename: "shot.png",
+      contentType: "image/png",
+      sizeBytes: 9,
+    });
+
+    const raw = await request(
+      asOwner(),
+      "GET",
+      `/${messageId}/attachments/${body.attachments[0]!.id}/raw`,
+    );
+    expect(raw.status).toBe(200);
+    expect(await raw.text()).toBe("png-bytes");
+  });
+
   it("429s once the per-user send window is exhausted", async () => {
     await db()
       .insert(rateLimitCounter)

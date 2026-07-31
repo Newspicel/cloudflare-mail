@@ -1,7 +1,8 @@
 import { Flag, hasFlag } from "@cfmail/shared/flags";
 import type { AttachmentDto } from "@cfmail/shared/responses";
 import { useQuery } from "@tanstack/react-query";
-import { Download, Forward, Paperclip, Reply, ReplyAll, Star } from "lucide-react";
+import { Download, FileText, Forward, Image, Paperclip, Reply, ReplyAll, Star } from "lucide-react";
+import { useState } from "react";
 import { CodeBanner } from "@/components/code-banner.tsx";
 import { openCompose } from "@/components/compose-dock.tsx";
 import { EmailFrame } from "@/components/email-frame.tsx";
@@ -17,6 +18,7 @@ import type { MessageRow } from "@/lib/queries.ts";
 import { messageBodyQuery } from "@/lib/queries.ts";
 import { sanitizeEmailHtml } from "@/lib/sanitize-email.ts";
 import { formatDateTime } from "@/lib/time.ts";
+import { AttachmentPreview, attachmentUrl, isPreviewable } from "./attachment-preview.tsx";
 import { PgpBanner, SpamBanner, UnsubscribeBanner } from "./banners.tsx";
 import { CalendarBanner } from "./calendar-banner.tsx";
 import { SenderLock } from "./sender-lock.tsx";
@@ -82,9 +84,10 @@ function formatBytes(bytes: number): string {
   return `${v < 10 ? v.toFixed(1) : Math.round(v)} ${units[i]}`;
 }
 
-// Real (non-inline) attachments, shown below the body with a download link.
-// Inline `cid:` parts are embedded in the HTML and rewritten by the body
-// endpoint, so they're filtered out here to avoid duplicating them.
+// Real (non-inline) attachments, shown below the body. Images and PDFs open in
+// the in-app viewer; anything else is download-only. Inline `cid:` parts are
+// embedded in the HTML and rewritten by the body endpoint, so they're filtered
+// out here to avoid duplicating them.
 function MessageAttachments({
   messageId,
   attachments,
@@ -94,27 +97,66 @@ function MessageAttachments({
   attachments: AttachmentDto[];
   hasHtml: boolean;
 }) {
+  const [preview, setPreview] = useState<string | null>(null);
   const visible = attachments.filter((a) => !(hasHtml && a.inline && a.contentId));
   if (visible.length === 0) return null;
+  const chip =
+    "flex min-w-0 items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-muted";
   return (
     <div className="flex flex-wrap gap-2 border-t bg-muted/30 px-4 py-3">
-      {visible.map((att) => (
-        <a
-          key={att.id}
-          href={`/api/messages/${messageId}/attachments/${att.id}/raw?download`}
-          download={att.filename}
-          className="group flex max-w-full items-center gap-2.5 rounded-lg border bg-background px-3 py-2 text-left shadow-black/[0.02] shadow-sm transition-colors hover:border-primary/40 hover:bg-muted"
-        >
-          <Paperclip className="size-4 shrink-0 text-muted-foreground" />
-          <span className="min-w-0">
-            <span className="block truncate font-medium text-[12px]">{att.filename}</span>
-            <span className="block text-[11px] text-muted-foreground">
-              {formatBytes(att.sizeBytes)}
+      {visible.map((att) => {
+        const viewable = isPreviewable(att.contentType);
+        const Icon = viewable
+          ? att.contentType.startsWith("image/")
+            ? Image
+            : FileText
+          : Paperclip;
+        const label = (
+          <>
+            <Icon className="size-4 shrink-0 text-muted-foreground" />
+            <span className="min-w-0">
+              <span className="block truncate font-medium text-[12px]">{att.filename}</span>
+              <span className="block text-[11px] text-muted-foreground">
+                {formatBytes(att.sizeBytes)}
+              </span>
             </span>
-          </span>
-          <Download className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
-        </a>
-      ))}
+          </>
+        );
+        return (
+          <div
+            key={att.id}
+            className="group flex max-w-full items-stretch overflow-hidden rounded-lg border bg-background shadow-black/[0.02] shadow-sm transition-colors hover:border-primary/40"
+          >
+            {viewable ? (
+              <button type="button" onClick={() => setPreview(att.id)} className={chip}>
+                {label}
+              </button>
+            ) : (
+              <a
+                href={attachmentUrl(messageId, att.id, true)}
+                download={att.filename}
+                className={chip}
+              >
+                {label}
+              </a>
+            )}
+            <a
+              href={attachmentUrl(messageId, att.id, true)}
+              download={att.filename}
+              aria-label={`Download ${att.filename}`}
+              className="grid shrink-0 place-items-center border-l px-2.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <Download className="size-4" />
+            </a>
+          </div>
+        );
+      })}
+      <AttachmentPreview
+        messageId={messageId}
+        attachments={visible}
+        openId={preview}
+        onOpenChange={setPreview}
+      />
     </div>
   );
 }
