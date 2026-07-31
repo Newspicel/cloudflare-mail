@@ -1,6 +1,14 @@
 import { EmailMessage } from "cloudflare:email";
 import type { DB } from "@cfmail/db";
-import { contactKey, domain, mailbox, message, reminder, thread } from "@cfmail/db/schema";
+import {
+  attachment,
+  contactKey,
+  domain,
+  mailbox,
+  message,
+  reminder,
+  thread,
+} from "@cfmail/db/schema";
 import { Flag } from "@cfmail/shared/flags";
 import type { SendMessageInput } from "@cfmail/shared/schemas";
 import { and, count, eq, inArray } from "drizzle-orm";
@@ -75,7 +83,7 @@ export async function sendFromMailbox(
     html = `${baseHtml}${quote.html}`;
   }
 
-  const attachmentBytes = await Promise.all(
+  const attachmentBytes: AttachmentBytes[] = await Promise.all(
     (input.attachments ?? []).map(async (att) => {
       const obj = await env.BLOBS.get(att.r2Key);
       if (!obj) throw new HTTPException(400, { message: `attachment missing: ${att.r2Key}` });
@@ -164,6 +172,12 @@ export async function sendFromMailbox(
   });
 
   const rawKey = `raw/${mb.id}/sent/${messageId}.eml`;
+  // Same `att/<messageId>/...` layout the receive path writes (invariant 6), so
+  // every reader — body endpoint, delete cleanup — treats sent and received
+  // attachments identically.
+  const attKeys = attachmentBytes.map(
+    (a, idx) => `att/${messageId}/${idx}-${sanitizeFilename(a.filename)}`,
+  );
   const bodyIndex = bodyForIndex(text, html);
 
   // Persist BEFORE delivering. The reverse order could deliver mail and then
@@ -201,6 +215,10 @@ export async function sendFromMailbox(
 
   let returnedMessageId: string | undefined;
   try {
+    // The Sent copy needs its own attachment rows, or the message renders with no
+    // attachments and its inline `cid:` images stay broken.
+    await persistSentAttachments(env, db, messageId, attachmentBytes, attKeys);
+
     if (!pgpMail) {
       const res = await env.EMAIL.send({
         from: fromField,
@@ -241,7 +259,7 @@ export async function sendFromMailbox(
   } catch (err) {
     // Delivery failed — undo the just-persisted record so the caller's retry
     // can't leave duplicate Sent entries, then surface the failure.
-    await cleanupFailedSend(env, db, { messageId, rawKey, threadId });
+    await cleanupFailedSend(env, db, { messageId, rawKey, threadId, attKeys });
     const detail = err instanceof Error ? err.message : String(err);
     throw new HTTPException(502, { message: `send failed: ${detail}` });
   }
@@ -297,6 +315,48 @@ export async function sendFromMailbox(
   return pgpWarning ? { messageId, threadId, pgpWarning } : { messageId, threadId };
 }
 
+interface AttachmentBytes {
+  filename: string;
+  contentType: string;
+  data: Uint8Array;
+  inline?: boolean;
+  contentId?: string;
+}
+
+// Copy the composed attachments into the message's own R2 namespace and record
+// them. The composer's upload lives under `draft/<userId>/` and is deleted with
+// the draft, so the bytes are copied rather than referenced.
+async function persistSentAttachments(
+  env: Env,
+  db: DB,
+  messageId: string,
+  atts: AttachmentBytes[],
+  keys: string[],
+): Promise<void> {
+  if (!atts.length) return;
+  await Promise.all(
+    atts.map((att, idx) =>
+      env.BLOBS.put(keys[idx]!, att.data, { httpMetadata: { contentType: att.contentType } }),
+    ),
+  );
+  await db.insert(attachment).values(
+    atts.map((att, idx) => ({
+      id: crypto.randomUUID(),
+      messageId,
+      filename: att.filename,
+      contentType: att.contentType,
+      sizeBytes: att.data.byteLength,
+      r2Key: keys[idx]!,
+      inline: att.inline ?? false,
+      contentId: att.contentId ?? null,
+    })),
+  );
+}
+
+function sanitizeFilename(name: string): string {
+  return name.replace(/[^a-z0-9._-]+/gi, "_").slice(0, 128);
+}
+
 interface PgpSendArgs {
   mailboxId: string;
   pgpMode: "off" | "sign" | "sign_encrypt";
@@ -310,13 +370,7 @@ interface PgpSendArgs {
   input: SendMessageInput;
   text: string | undefined;
   html: string | undefined;
-  attachmentBytes: {
-    filename: string;
-    contentType: string;
-    data: Uint8Array;
-    inline?: boolean;
-    contentId?: string;
-  }[];
+  attachmentBytes: AttachmentBytes[];
   allRecipients: { name?: string; address: string }[];
   messageIdHdr: string;
   date: Date;
@@ -330,17 +384,17 @@ interface PgpMail {
 }
 
 // Undo the persisted record of a send whose delivery then failed: drop the
-// message row and its raw blob, and a thread left with no messages (one freshly
-// created for this send) goes too. Best-effort — cleanup must not mask the
-// delivery error the caller is about to surface.
+// message row (its attachment rows cascade) and the blobs it wrote, and a thread
+// left with no messages (one freshly created for this send) goes too. Best-effort
+// — cleanup must not mask the delivery error the caller is about to surface.
 async function cleanupFailedSend(
   env: Env,
   db: DB,
-  ids: { messageId: string; rawKey: string; threadId: string },
+  ids: { messageId: string; rawKey: string; threadId: string; attKeys: string[] },
 ): Promise<void> {
   try {
     await db.delete(message).where(eq(message.id, ids.messageId));
-    await env.BLOBS.delete(ids.rawKey);
+    await Promise.all([ids.rawKey, ...ids.attKeys].map((k) => env.BLOBS.delete(k)));
     const rows = await db
       .select({ c: count() })
       .from(message)
