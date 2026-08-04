@@ -23,7 +23,7 @@
     "@hono/zod-validator": "0.8.0",
     "better-auth": "1.6.20",
     "drizzle-orm": "0.45.2",
-    "hono": "4.12.27",
+    "hono": "4.12.34",
     "mimetext": "3.0.28",
     "openpgp": "^6.3.1",
     "postal-mime": "2.7.4",
