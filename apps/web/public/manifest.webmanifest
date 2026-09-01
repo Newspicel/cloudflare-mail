@@ -5,6 +5,12 @@
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "protocol_handlers": [
+    {
+      "protocol": "mailto",
+      "url": "/compose?mailto=%s"
+    }
+  ],
   "background_color": "#0a0a0a",
   "theme_color": "#f97316",
   "icons": [

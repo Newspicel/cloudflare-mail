@@ -1,5 +1,6 @@
 import { useLocation } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
+import { useMailtoLinks } from "@/lib/use-mailto-links.ts";
 import { AppShortcuts } from "./app-shortcuts.tsx";
 import { ComposeDock } from "./compose-dock.tsx";
 import { Sidebar } from "./sidebar.tsx";
@@ -8,6 +9,7 @@ import { TopBar } from "./top-bar.tsx";
 export function AppShell({ children }: { children: ReactNode }) {
   const [navOpen, setNavOpen] = useState(false);
   const location = useLocation();
+  useMailtoLinks();
 
   // Close the mobile drawer on navigation.
   // biome-ignore lint/correctness/useExhaustiveDependencies: close on every path change

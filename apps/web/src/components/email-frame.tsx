@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/cn.ts";
+import { handleMailtoClick } from "@/lib/use-mailto-links.ts";
 import { Skeleton } from "./ui/skeleton.tsx";
 
 // Untrusted email HTML is rendered inside a sandboxed iframe rather than inline
@@ -87,6 +88,10 @@ export function EmailFrame({ html, className }: { html: string; className?: stri
     const root = d?.documentElement;
     const body = d?.body;
     if (!root || !body) return;
+    // `mailto:` links belong to the app's composer, not the OS mail client. The
+    // listener rides on the frame's own document — replaced on every load, so
+    // it can't stack up — and beats the sanitizer's target="_blank".
+    d.addEventListener("click", handleMailtoClick);
     // Grow the frame to the full content so the card lengthens instead of the
     // body scrolling inside it. `documentElement.scrollHeight` can under-report
     // by a few px (margin collapse), leaving a sliver scrollbar — take the max

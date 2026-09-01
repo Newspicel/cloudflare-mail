@@ -30,6 +30,8 @@ import { AttachmentList } from "./compose/attachment-list.tsx";
 import {
   type ComposeState,
   closeCompose,
+  composeSeedKey,
+  composeWindowUrl,
   registerComposeQueryClient,
   useComposeState,
 } from "./compose/compose-store.ts";
@@ -80,7 +82,7 @@ export function ComposeDock() {
   // Remount when the target changes so the form re-initializes cleanly.
   return (
     <ComposeForm
-      key={s.draft?.id ?? s.replyToMessage?.id ?? s.forwardMessage?.id ?? "new"}
+      key={s.draft?.id ?? s.replyToMessage?.id ?? s.forwardMessage?.id ?? composeSeedKey(s)}
       state={s}
     />
   );
@@ -153,7 +155,8 @@ export function ComposeForm({
       );
       return { items, input: "" };
     }
-    if (s.initialTo) return { items: [{ address: s.initialTo }], input: "" };
+    if (s.initialTo?.length)
+      return { items: s.initialTo.map((address) => ({ address })), input: "" };
     return { items: [], input: "" };
   });
   const [cc, setCc] = useState<RecipientsValue>(() => {
@@ -163,14 +166,21 @@ export function ComposeForm({
       for (const a of to.items) exclude.add(a.address.toLowerCase());
       return { items: uniqueRecipients(rep.ccAddrs ?? [], exclude), input: "" };
     }
+    if (s.initialCc?.length)
+      return { items: s.initialCc.map((address) => ({ address })), input: "" };
     return { items: [], input: "" };
   });
   const [bcc, setBcc] = useState<RecipientsValue>(() => ({
-    items: d?.bccAddrs ?? [],
+    items: d?.bccAddrs ?? s.initialBcc?.map((address) => ({ address })) ?? [],
     input: "",
   }));
   const [showCc, setShowCc] = useState(
-    Boolean((d?.ccAddrs?.length ?? 0) || (d?.bccAddrs?.length ?? 0) || cc.items.length),
+    Boolean(
+      (d?.ccAddrs?.length ?? 0) ||
+        (d?.bccAddrs?.length ?? 0) ||
+        cc.items.length ||
+        bcc.items.length,
+    ),
   );
   const [showQuote, setShowQuote] = useState(false);
   const [subject, setSubject] = useState(
@@ -180,7 +190,7 @@ export function ComposeForm({
         ? prefixSubject(rep.subject, "Re")
         : fwd
           ? prefixSubject(fwd.subject, "Fwd")
-          : "",
+          : (s.initialSubject ?? ""),
   );
   // Body editor format. Default is a plain-text email; it only becomes an HTML
   // mail once rich formatting is actually used (or markdown is rendered).
@@ -455,7 +465,7 @@ export function ComposeForm({
       try {
         const id = await ensureDraftSaved();
         if (id) url += `?draft=${encodeURIComponent(id)}`;
-        else if (s.initialTo) url += `?to=${encodeURIComponent(s.initialTo)}`;
+        else url = composeWindowUrl(s);
       } catch {
         // Fall back to a blank composer rather than leaving a dead window.
       }
