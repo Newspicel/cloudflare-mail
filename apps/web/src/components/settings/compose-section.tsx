@@ -1,5 +1,7 @@
 import type { UserPrefs } from "@cfmail/shared";
+import { toast } from "sonner";
 import { Row, Section, Segmented } from "@/components/settings-ui.tsx";
+import { Button } from "@/components/ui/button.tsx";
 import { Switch } from "@/components/ui/switch.tsx";
 import { useUserPrefs } from "@/lib/prefs.ts";
 
@@ -8,6 +10,18 @@ const MODE_OPTIONS = [
   ["markdown", "Markdown"],
   ["html", "Rich text"],
 ] as const;
+
+// Ask the browser to route system `mailto:` links here. Chrome/Firefox answer
+// with their own confirmation prompt; Safari has no API for it (the row hides).
+// Links clicked *inside* cfmail never need this — they're intercepted in-app.
+function registerMailtoHandler() {
+  try {
+    navigator.registerProtocolHandler("mailto", `${location.origin}/compose?mailto=%s`);
+    toast.success("Confirm the prompt to send mailto: links to cfmail");
+  } catch {
+    toast.error("Your browser wouldn't register cfmail as the mail handler");
+  }
+}
 
 export function ComposeSection() {
   const { prefs, setPrefs, saving } = useUserPrefs();
@@ -44,6 +58,16 @@ export function ComposeSection() {
             onCheckedChange={(checked) => setPrefs({ replyAllDefault: checked })}
           />
         </Row>
+        {"registerProtocolHandler" in navigator && (
+          <Row
+            label="Handle mailto: links"
+            hint="Open mailto: links from other apps and sites in cfmail."
+          >
+            <Button variant="outline" size="sm" onClick={registerMailtoHandler}>
+              Set as default
+            </Button>
+          </Row>
+        )}
       </div>
     </Section>
   );
