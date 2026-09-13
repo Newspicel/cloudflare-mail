@@ -2,17 +2,20 @@
 // opened a mail (the sender sees Cloudflare's IP), but the beacon still fires,
 // so the sender still learns *that* and *when* — and some beacons (HubSpot's
 // open-duration pixel) deliberately hang to time the read. This pass runs
-// before proxying and removes the request entirely. Two detectors:
+// before proxying and removes the request entirely. Three detectors:
 //
 //  1. Community tracker lists, fetched daily by the cron and kept in
-//     `system_config` (zero-config; nothing is hardcoded here):
-//       - Trocker (https://github.com/trockerapp/trocker, Apache-2.0): URL
-//         substrings + Chrome match patterns for open trackers.
-//       - Ugly Email (https://github.com/OneClickLab/ugly-email-trackers):
-//         one `NAME@@=REGEX` per line.
+//     `system_config` (zero-config), chosen for maintenance cadence:
+//       - MailTrackerBlocker (github.com/apparition47/MailTrackerBlocker,
+//         BSD-3): ~320 vendors as regex fragments, in its ObjC source.
+//       - EasyPrivacy's email-tracker section (github.com/easylist/easylist,
+//         GPLv3 / CC BY-SA 3.0): ~300 Adblock-syntax rules from the EasyList
+//         maintainers.
 //     Each is matched against the full image URL, so a vendor pixel on a
 //     customer-branded CNAME is caught as long as its path shape is listed.
-//  2. A shape heuristic: a remote image laid out as 1×1, zero-sized or hidden
+//  2. LOCAL_RULES below: shapes we have met in the wild that neither list
+//     carries yet. Small on purpose — upstream is where these should end up.
+//  3. A shape heuristic: a remote image laid out as 1×1, zero-sized or hidden
 //     is invisible by construction, so its only purpose is the request. This
 //     needs no list and catches the vendors the lists miss.
 //
@@ -50,65 +53,113 @@ export interface TrackerRules {
   substrings: string[];
   regexes: RegExp[];
 }
-export const NO_TRACKER_RULES: TrackerRules = { substrings: [], regexes: [] };
+
+// ─── Our own findings ───────────────────────────────────────────────────────
+
+// Checked against both upstream lists on 2026-09-13. Each entry names what it
+// is so it can be removed once the vendor lands upstream.
+const LOCAL_RULES: RuleSet = {
+  substrings: [
+    "eventtracking.hubapi.com/", // HubSpot open-duration beacon (self-redirecting)
+  ],
+  regexes: [
+    "/__ptq\\.gif", // HubSpot analytics pixel
+  ],
+};
+
+// Upstream over-blocks we undo: content CDNs that share a domain with a
+// vendor's beacon host. A URL matching one of these is never a tracker.
+const LOCAL_ALLOW: RegExp[] = [
+  /createsend\d*\.com\/ei\//i, // Campaign Monitor hosted newsletter images
+];
 
 // ─── Upstream list parsers ──────────────────────────────────────────────────
+
+// A source whose parse yields fewer rules than this is treated as broken (the
+// upstream file format moved), so a silent parser drift never empties a list.
+const MIN_RULES_PER_SOURCE = 20;
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
 }
 
-// Chrome extension match pattern (`*://*.host/path*`) → anchored regex source.
-function matchPatternToRegex(p: string): string {
-  return `^${p.split("*").map(escapeRegex).join(".*")}$`;
-}
-
 /**
- * Trocker ships its list as a JS module: `openTrackers = [{ name, domains:
- * [...], patterns: [...] }, …]; return openTrackers`. `domains` are URL
- * substrings, `patterns` Chrome match patterns. Only the open-tracker block is
- * read; click trackers rewrite links, which is a different feature.
+ * MailTrackerBlocker keeps its list as an Objective-C dictionary literal:
+ * `@"Vendor": @[ @"regex", @"regex" ],` inside `getTrackerDict`. Values are
+ * ICU regexes matched case-insensitively — every current one is valid JS too.
+ * Keys are followed by `:`, values by `,` or `]`, which is how the two are told
+ * apart; commented-out lines are dropped first.
  */
-export function parseTrockerLists(js: string): RuleSet | null {
-  const start = js.indexOf("openTrackers = [");
-  const end = start === -1 ? -1 : js.indexOf("return openTrackers", start);
-  if (start === -1 || end === -1) return null;
-  const block = js.slice(start, end);
-  const substrings = new Set<string>();
-  const regexes = new Set<string>();
-  for (const m of block.matchAll(/\b(domains|patterns)\s*:\s*\[([^\]]*)\]/g)) {
-    const items = [...m[2]!.matchAll(/'([^']+)'/g)].map((x) => x[1]!);
-    for (const item of items) {
-      if (m[1] === "domains") substrings.add(item);
-      else regexes.add(matchPatternToRegex(item));
-    }
+export function parseMailTrackerBlocker(objc: string): RuleSet | null {
+  const start = objc.indexOf("getTrackerDict {");
+  if (start === -1) return null;
+  const body = objc
+    .slice(start)
+    .split("\n")
+    .filter((line) => !/^\s*\/\//.test(line))
+    .join("\n");
+  const regexes: string[] = [];
+  for (const m of body.matchAll(/@"((?:[^"\\]|\\.)*)"\s*(?:\/\/[^\n]*\n\s*)?(?=[,\]])/g)) {
+    // Undo ObjC string escaping: `\\` → `\`, `\"` → `"`.
+    const pattern = m[1]!.replace(/\\(["\\])/g, "$1");
+    if (pattern) regexes.push(pattern);
   }
-  if (substrings.size === 0 && regexes.size === 0) return null;
-  return { substrings: [...substrings], regexes: [...regexes] };
+  return regexes.length >= MIN_RULES_PER_SOURCE ? { substrings: [], regexes } : null;
 }
 
-/** Ugly Email: one `NAME@@=REGEX` per line. */
-export function parseUglyEmailList(txt: string): RuleSet | null {
-  const regexes: string[] = [];
-  for (const line of txt.split(/\r?\n/)) {
-    const i = line.indexOf("@@=");
-    if (i === -1) continue;
-    const rx = line.slice(i + 3).trim();
-    if (rx) regexes.push(rx);
+// Adblock filter → regex source. The email section only uses plain patterns
+// with `*` wildcards, the odd `^` separator and `$image`/`$third-party`
+// options; anchors are handled for completeness.
+function abpToRegex(rule: string): string {
+  let p = rule;
+  let domainAnchor = false;
+  let startAnchor = false;
+  let endAnchor = false;
+  if (p.startsWith("||")) {
+    domainAnchor = true;
+    p = p.slice(2);
+  } else if (p.startsWith("|")) {
+    startAnchor = true;
+    p = p.slice(1);
   }
-  return regexes.length ? { substrings: [], regexes } : null;
+  if (p.endsWith("|")) {
+    endAnchor = true;
+    p = p.slice(0, -1);
+  }
+  let re = p
+    .split("*")
+    .map((seg) => seg.split("^").map(escapeRegex).join("(?:[^\\w.%-]|$)"))
+    .join(".*");
+  if (domainAnchor) re = `^[a-z][a-z0-9+.-]*:\\/\\/(?:[^\\/?#]*\\.)?${re}`;
+  if (startAnchor) re = `^${re}`;
+  if (endAnchor) re = `${re}$`;
+  return re;
+}
+
+/** EasyPrivacy email trackers: one Adblock rule per line; `!` comments. */
+export function parseEasyPrivacy(txt: string): RuleSet | null {
+  const regexes: string[] = [];
+  for (const raw of txt.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith("!") || line.startsWith("[") || line.startsWith("@@")) continue;
+    if (line.includes("##") || line.includes("#@#")) continue; // element hiding
+    const dollar = line.lastIndexOf("$");
+    const pattern = dollar === -1 ? line : line.slice(0, dollar);
+    if (pattern) regexes.push(abpToRegex(pattern));
+  }
+  return regexes.length >= MIN_RULES_PER_SOURCE ? { substrings: [], regexes } : null;
 }
 
 const SOURCES: { name: string; url: string; parse: (text: string) => RuleSet | null }[] = [
   {
-    name: "trocker",
-    url: "https://raw.githubusercontent.com/trockerapp/trocker/HEAD/chrome/lists.js",
-    parse: parseTrockerLists,
+    name: "mailtrackerblocker",
+    url: "https://raw.githubusercontent.com/apparition47/MailTrackerBlocker/HEAD/Source/MTBBlockedMessage.m",
+    parse: parseMailTrackerBlocker,
   },
   {
-    name: "uglyemail",
-    url: "https://raw.githubusercontent.com/OneClickLab/ugly-email-trackers/HEAD/list.txt",
-    parse: parseUglyEmailList,
+    name: "easyprivacy",
+    url: "https://raw.githubusercontent.com/easylist/easylist/HEAD/easyprivacy/easyprivacy_general_emailtrackers.txt",
+    parse: parseEasyPrivacy,
   },
 ];
 
@@ -138,6 +189,10 @@ export async function refreshTrackerList(
   const stored = (await readStored(db))?.list ?? null;
   if (stored && stored.nextRefreshAt > now.getTime()) return;
   const sources: Record<string, SourceRules> = { ...stored?.sources };
+  // A source that was removed from SOURCES must not linger in storage.
+  for (const name of Object.keys(sources)) {
+    if (!SOURCES.some((s) => s.name === name)) delete sources[name];
+  }
   let allOk = true;
   await Promise.all(
     SOURCES.map(async (src) => {
@@ -192,12 +247,13 @@ export function compileRules(sets: Iterable<RuleSet>): TrackerRules {
 // The list changes at most daily; compile once per distinct stored value.
 let compiled: { raw: string; rules: TrackerRules } | null = null;
 
-/** Current matchers — empty until the cron's first fetch has landed. */
+/** Current matchers: LOCAL_RULES plus whatever the cron has fetched so far. */
 export async function getTrackerRules(db: DB): Promise<TrackerRules> {
   const stored = await readStored(db);
-  if (!stored) return NO_TRACKER_RULES;
-  if (compiled?.raw !== stored.raw) {
-    compiled = { raw: stored.raw, rules: compileRules(Object.values(stored.list.sources)) };
+  const raw = stored?.raw ?? "";
+  if (compiled?.raw !== raw) {
+    const sets = [LOCAL_RULES, ...Object.values(stored?.list.sources ?? {})];
+    compiled = { raw, rules: compileRules(sets) };
   }
   return compiled.rules;
 }
@@ -208,6 +264,7 @@ export async function getTrackerRules(db: DB): Promise<TrackerRules> {
 export function isTrackerUrl(raw: string, rules: TrackerRules): boolean {
   const url = raw.trim();
   if (!/^https?:\/\//i.test(url) || url.length > MAX_URL_TEST_LEN) return false;
+  if (LOCAL_ALLOW.some((rx) => rx.test(url))) return false;
   const lower = url.toLowerCase();
   if (rules.substrings.some((s) => lower.includes(s))) return true;
   return rules.regexes.some((rx) => rx.test(url));
