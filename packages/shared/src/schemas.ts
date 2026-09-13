@@ -442,6 +442,18 @@ export const setProtectedDomains = z.object({
   domains: z.array(domainName).max(500),
 });
 
+// Admin: the Spamhaus DQS query key used for IP and domain reputation lookups.
+// Empty clears it, which turns every lookup off.
+export const setDqsKey = z.object({
+  key: z.union([
+    z.literal(""),
+    z
+      .string()
+      .trim()
+      .regex(/^[a-z0-9]{8,64}$/i),
+  ]),
+});
+
 // Any reader: check which of a set of recipient addresses are blocked, to warn
 // before composing/sending. Loose strings so partial/odd input never 400s.
 export const checkBlockRecipients = z.object({

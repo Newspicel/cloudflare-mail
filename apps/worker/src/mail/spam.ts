@@ -2,7 +2,14 @@ import type { DB } from "@cfmail/db";
 import { mailboxSpamUsage } from "@cfmail/db/schema";
 import { sql } from "drizzle-orm";
 import type { Env } from "../env.ts";
-import { dohQuery } from "./dns.ts";
+import {
+  type DomainListKind,
+  getDqsKey,
+  type IpListKind,
+  lookupDomain,
+  lookupIp,
+  registrableDomain,
+} from "./dnsbl.ts";
 import type { ParsedEmail } from "./mime.ts";
 
 export type SpamLevel = "off" | "auth" | "standard" | "ai";
@@ -34,8 +41,8 @@ export interface EvaluateInput {
 const AI_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
 
 // Score thresholds. A reliable auth failure alone (+5) reaches SPAM; softer
-// content/IP signals can only ever push a message into the gray zone, so they
-// are never the sole reason to file as spam.
+// content and reputation signals can only ever push a message into the gray
+// zone, so they are never the sole reason to file as spam.
 const SUSPICIOUS_AT = 2;
 const SPAM_AT = 5;
 
@@ -71,16 +78,30 @@ export async function evaluateSpam(
 ): Promise<SpamEvaluation> {
   const { parsed, level } = input;
   const auth = parseAuthResults(parsed);
-
-  // Fully authenticated mail (DMARC pass implies an aligned, passing SPF or
-  // DKIM) is trusted — skip every further check to avoid false positives and
-  // cost.
-  if (auth.dmarc === "pass") {
-    return { verdict: "clean", score: 0, reasons: [], auth, folderSpam: false };
-  }
-
   const reasons: string[] = [];
   let score = 0;
+
+  // Spamhaus DQS, when an admin has configured a query key. Without one every
+  // lookup is skipped rather than attempted: the free public zones answer
+  // "query via public/open resolver" for everything a Worker asks them.
+  const dqsKey = level === "auth" ? null : await getDqsKey(db);
+
+  // Domain reputation runs even for fully authenticated mail — publishing valid
+  // SPF/DKIM/DMARC on a throwaway domain is free, and catching those is exactly
+  // what DBL and ZRD are for.
+  if (dqsKey) {
+    const dom = await scoreDomains(dqsKey, parsed, input.fromEnvelope);
+    score += dom.score;
+    reasons.push(...dom.reasons);
+  }
+
+  // Fully authenticated mail (DMARC pass implies an aligned, passing SPF or
+  // DKIM) is otherwise trusted — skip the auth, content, IP and AI checks to
+  // avoid false positives and cost.
+  if (auth.dmarc === "pass") {
+    const trusted = scoreToVerdict(score);
+    return { verdict: trusted, score, reasons, auth, folderSpam: trusted === "spam" };
+  }
 
   // ─── Authentication signal (all levels) ──────────────────────────────────
   if (auth.dmarc === "fail") {
@@ -100,18 +121,18 @@ export async function evaluateSpam(
     reasons.push("The sender domain has no DMARC policy.");
   }
 
-  // ─── Content heuristics + IP blocklist (standard / ai) ────────────────────
+  // ─── Content heuristics + IP reputation (standard / ai) ───────────────────
   if (level !== "auth") {
     const heur = scoreHeuristics(parsed);
     score += heur.score;
     reasons.push(...heur.reasons);
 
-    const ip = extractOriginIp(parsed);
-    if (ip) {
-      const listed = await checkDnsbl(ip);
-      if (listed) {
-        score += 2;
-        reasons.push(`The sending IP (${ip}) is on a spam blocklist.`);
+    const ip = extractRelayIp(parsed);
+    if (dqsKey && ip) {
+      const listing = await lookupIp(dqsKey, ip);
+      if (listing) {
+        score += IP_WEIGHTS[listing.kind];
+        reasons.push(`The sending IP (${ip}) is listed by Spamhaus as ${IP_LABELS[listing.kind]}.`);
       }
     }
   }
@@ -216,17 +237,129 @@ function stripHtml(html: string): string {
   return html.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ");
 }
 
-// ─── DNSBL (Spamhaus) — best-effort soft signal ─────────────────────────────
+// ─── Spamhaus reputation (DQS) ───────────────────────────────────────────────
 
-function extractOriginIp(parsed: ParsedEmail): string | null {
-  // Walk Received headers bottom-up (postal-mime preserves order top-down, so
-  // the originating relay is last) and take the first public IPv4 we find.
-  const received = (parsed.headers ?? [])
-    .filter((h) => h.key === "received")
-    .map((h) => h.value)
-    .toReversed();
+// Weights are deliberately capped below SPAM_AT: a reputation hit on its own
+// only moves a message into the gray zone (where the AI level takes a second
+// look), and files as spam once a second signal — failed auth, spam phrasing —
+// agrees with it.
+const IP_WEIGHTS: Record<IpListKind, number> = {
+  drop: 4,
+  sbl: 4,
+  css: 4,
+  bcl: 4,
+  xbl: 4,
+  // A residential/dynamic address is only wrong for *direct* delivery, and the
+  // relay we extract can be a hop further out than we think, so PBL stays soft.
+  pbl: 2,
+};
+
+const IP_LABELS: Record<IpListKind, string> = {
+  drop: "part of a hijacked or criminal-controlled network",
+  sbl: "a known spam source",
+  css: "a detected spam source",
+  bcl: "a botnet controller",
+  xbl: "a compromised or exploited host",
+  pbl: "an address that should not be delivering mail directly",
+};
+
+const DOMAIN_WEIGHTS: Record<DomainListKind, number> = {
+  phish: 4,
+  malware: 4,
+  botnet: 4,
+  spam: 4,
+  abused: 2,
+  new: 2,
+};
+
+const DOMAIN_LABELS: Record<DomainListKind, string> = {
+  phish: "a phishing domain",
+  malware: "a malware domain",
+  botnet: "a botnet command-and-control domain",
+  spam: "a low-reputation domain",
+  abused: "a legitimate domain currently being abused",
+  new: "a brand-new domain",
+};
+
+// Body links are checked too — phishing usually keeps a clean-looking sender and
+// puts the listed domain in the link. They score lower than the sender domain
+// (a newsletter can legitimately link to an abused shortener) and are capped
+// both in how many are looked up and in what they can contribute.
+const MAX_LINK_DOMAINS = 3;
+const LINK_WEIGHT_FACTOR = 0.5;
+const LINK_SCORE_CAP = 3;
+
+async function scoreDomains(
+  key: string,
+  parsed: ParsedEmail,
+  fromEnvelope: string,
+): Promise<{ score: number; reasons: string[] }> {
+  const senders = unique([domainOf(fromEnvelope), domainOf(parsed.from?.address)]);
+  const links = extractLinkDomains(parsed)
+    .filter((d) => !senders.includes(d))
+    .slice(0, MAX_LINK_DOMAINS);
+
+  const [senderHits, linkHits] = await Promise.all([
+    Promise.all(senders.map((d) => lookupDomain(key, d))),
+    Promise.all(links.map((d) => lookupDomain(key, d))),
+  ]);
+
+  const reasons: string[] = [];
+  let score = 0;
+  for (const hit of senderHits) {
+    if (!hit) continue;
+    score += DOMAIN_WEIGHTS[hit.kind];
+    reasons.push(
+      hit.kind === "new"
+        ? `The sender domain (${hit.domain}) was first seen ${hit.ageHours} hours ago.`
+        : `The sender domain (${hit.domain}) is listed by Spamhaus as ${DOMAIN_LABELS[hit.kind]}.`,
+    );
+  }
+
+  let linkScore = 0;
+  for (const hit of linkHits) {
+    if (!hit) continue;
+    linkScore += DOMAIN_WEIGHTS[hit.kind] * LINK_WEIGHT_FACTOR;
+    reasons.push(
+      hit.kind === "new"
+        ? `This message links to ${hit.domain}, a domain first seen ${hit.ageHours} hours ago.`
+        : `This message links to ${hit.domain}, listed by Spamhaus as ${DOMAIN_LABELS[hit.kind]}.`,
+    );
+  }
+  return { score: score + Math.round(Math.min(linkScore, LINK_SCORE_CAP)), reasons };
+}
+
+function domainOf(address: string | undefined): string | null {
+  const at = (address ?? "").lastIndexOf("@");
+  return at === -1 ? null : registrableDomain(address!.slice(at + 1));
+}
+
+const LINK_RE = /\bhttps?:\/\/([^\s"'<>)\]]+)/gi;
+
+function extractLinkDomains(parsed: ParsedEmail): string[] {
+  const body = `${parsed.text ?? ""}\n${parsed.html ?? ""}`;
+  const out: (string | null)[] = [];
+  for (const m of body.matchAll(LINK_RE)) {
+    // Strip path/query/fragment, userinfo and port down to the bare host.
+    const host = m[1]!.split(/[/?#]/)[0]!.split("@").at(-1)!.split(":")[0]!;
+    out.push(registrableDomain(host));
+  }
+  return unique(out);
+}
+
+function unique(values: (string | null)[]): string[] {
+  return [...new Set(values.filter((v): v is string => v !== null))];
+}
+
+// The IP that delivered the message to Cloudflare's MX — the *topmost* Received
+// header, which is the one our own inbound side added and therefore the only one
+// a sender can't forge. (Walking bottom-up would find the original submitting
+// client instead, which for provider-relayed mail is a residential address that
+// PBL rightly lists but that says nothing about this message.)
+function extractRelayIp(parsed: ParsedEmail): string | null {
+  const received = (parsed.headers ?? []).filter((h) => h.key === "received");
   for (const line of received) {
-    const m = line.match(/\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/);
+    const m = line.value.match(/\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/);
     if (m && isPublicIp(m[1]!)) return m[1]!;
   }
   return null;
@@ -240,17 +373,6 @@ function isPublicIp(ip: string): boolean {
   if (p[0] === 172 && p[1]! >= 16 && p[1]! <= 31) return false;
   if (p[0] === 169 && p[1] === 254) return false;
   return true;
-}
-
-async function checkDnsbl(ip: string): Promise<boolean> {
-  try {
-    const reversed = ip.split(".").toReversed().join(".");
-    // A listed IP resolves to a 127.0.0.0/8 address.
-    const answers = await dohQuery(`${reversed}.zen.spamhaus.org`, "A");
-    return answers.some((a) => a.startsWith("127."));
-  } catch {
-    return false;
-  }
 }
 
 // ─── Workers AI classification (gray zone) ──────────────────────────────────

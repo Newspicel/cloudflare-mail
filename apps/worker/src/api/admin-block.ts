@@ -1,5 +1,5 @@
 import { blocklist, blockRequest, user } from "@cfmail/db/schema";
-import { createBlockEntry, setProtectedDomains } from "@cfmail/shared/schemas";
+import { createBlockEntry, setDqsKey, setProtectedDomains } from "@cfmail/shared/schemas";
 import { zValidator } from "@hono/zod-validator";
 import { aliasedTable, desc, eq } from "drizzle-orm";
 import { Hono } from "hono";
@@ -12,6 +12,7 @@ import {
   isProtectedDomain,
   setProtectedDomains as persistProtectedDomains,
 } from "../mail/blocklist.ts";
+import { getDqsKey, setDqsKey as persistDqsKey, verifyDqsKey } from "../mail/dnsbl.ts";
 import { requireAdmin, requireUser } from "../middleware.ts";
 
 // Admin-only blocklist + block-request review. Mounted at /api/admin/block.
@@ -159,7 +160,33 @@ export function adminBlockRoutes() {
       const db = dbFromCtx(c);
       await persistProtectedDomains(db, c.req.valid("json").domains);
       return c.json({ domains: await getProtectedDomains(db) });
+    })
+
+    // ─── Spamhaus DQS key ────────────────────────────────────────────────────────
+
+    // The key itself never leaves the Worker — the UI only needs to know whether
+    // one is set, and enough of it to recognise which.
+    .get("/dqs", async (c) => {
+      const db = dbFromCtx(c);
+      return c.json({ dqs: keyStatus(await getDqsKey(db)) });
+    })
+
+    .put("/dqs", zValidator("json", setDqsKey), async (c) => {
+      const db = dbFromCtx(c);
+      const key = c.req.valid("json").key.trim();
+      if (key) {
+        // Verify against Spamhaus' test points before storing, so a typo or an
+        // inactive key fails here instead of silently disabling every lookup.
+        const check = await verifyDqsKey(key);
+        if (!check.ok) throw new HTTPException(400, { message: check.error ?? "invalid DQS key" });
+      }
+      await persistDqsKey(db, key);
+      return c.json({ dqs: keyStatus(await getDqsKey(db)) });
     });
 
   return r;
+}
+
+function keyStatus(key: string | null): { configured: boolean; hint: string | null } {
+  return { configured: key !== null, hint: key ? `${key.slice(0, 4)}…${key.slice(-4)}` : null };
 }

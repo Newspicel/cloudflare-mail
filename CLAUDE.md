@@ -7,7 +7,7 @@ Guidance for AI assistants. Only rules and intent you *can't* recover by reading
 - **Stack/versions** → `package.json` (root + per-app)
 - **Data model** → `packages/db/src/schema.ts`
 - **API** → `apps/worker/src/api/*`
-- **Mail pipelines** → `apps/worker/src/mail/{receive,send,mime,threads,spam,pgp,push}.ts`
+- **Mail pipelines** → `apps/worker/src/mail/{receive,send,mime,threads,spam,dnsbl,pgp,push}.ts`
 - **IMAP** → `apps/worker/src/imap/*` (`protocol` wire, `session` state machine, `store` mail semantics)
 - **RBAC** → `apps/worker/src/permissions.ts`
 - **Deploy/bindings** → `apps/worker/wrangler.jsonc`
@@ -24,7 +24,8 @@ Guidance for AI assistants. Only rules and intent you *can't* recover by reading
 7. **Gateway PGP is not end-to-end.** The Worker holds the mailbox keypair so it can decrypt for search/spam/threading. Never reject mail on PGP failure; never return private keys from the API.
 8. **Mail never hard-fails on best-effort steps** — spam scoring, PGP, and push must not block delivery.
 9. **`HTTPException` lives in `api/` only.** Everything below it throws `AppError` (`errors.ts`) with a transport-neutral code, so one failure can be a JSON 4xx and a tagged IMAP `NO`. Transports translate; nothing else does.
-10. **IMAP folders are derived, never stored.** `store.ts` computes membership from thread/message state on every load; `imap_folder`/`imap_uid` own only the UID space. A message that leaves a folder and returns gets a *new, higher* UID — never reuse one, and never let a mail pipeline write IMAP tables.
+10. **Reputation lookups are advisory.** Spamhaus DQS (`mail/dnsbl.ts`) only runs when an admin has stored a query key; every lookup is best-effort and no single listing may score at or above `SPAM_AT` — a blocklist hit alone reaches the gray zone, never the Spam folder. Public DNSBL zones don't work here at all (a Worker resolves via DoH, i.e. a public resolver).
+11. **IMAP folders are derived, never stored.** `store.ts` computes membership from thread/message state on every load; `imap_folder`/`imap_uid` own only the UID space. A message that leaves a folder and returns gets a *new, higher* UID — never reuse one, and never let a mail pipeline write IMAP tables.
 
 ## Migrations (the one workflow you can't infer)
 

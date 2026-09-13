@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Section, Select } from "@/components/admin/shared.tsx";
+import { Mono, Section, Select } from "@/components/admin/shared.tsx";
 import { TokenField } from "@/components/token-field.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { useConfirm, useConfirmHelpers } from "@/components/ui/confirm.tsx";
@@ -40,6 +40,7 @@ export function BlockingSection() {
       <BlockRequestsPanel />
       <BlocklistPanel />
       <ProtectedDomainsPanel />
+      <SpamhausPanel />
     </div>
   );
 }
@@ -329,6 +330,86 @@ function ProtectedDomainsPanel() {
         </Button>
         <Button variant="primary" disabled={!dirty || save.isPending} onClick={() => save.mutate()}>
           Save
+        </Button>
+      </div>
+    </Section>
+  );
+}
+
+function SpamhausPanel() {
+  const qc = useQueryClient();
+  const { data } = useQuery({
+    queryKey: ["admin-dqs"],
+    queryFn: () => unwrap(rpc.admin.block.dqs.$get()),
+  });
+  const confirm = useConfirm();
+  const [draft, setDraft] = useState("");
+  const status = data?.dqs;
+
+  const save = useMutation({
+    mutationFn: (key: string) => unwrap(rpc.admin.block.dqs.$put({ json: { key } })),
+    onSuccess: (_res, key) => {
+      setDraft("");
+      qc.invalidateQueries({ queryKey: ["admin-dqs"] });
+      toast.success(key ? "Key verified and saved" : "Key removed");
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
+  return (
+    <Section
+      title="Spamhaus DQS"
+      description={
+        <>
+          Query key for reputation lookups — IP Data (SBL/XBL/PBL, plus AuthBL on IMAP logins) and
+          Content Data (DBL + ZRD) on sender and link domains. Without a key these lookups are
+          skipped: the free public zones refuse queries from a Worker's resolver. Get one at{" "}
+          <a
+            href="https://portal.spamhaus.com/dqs/"
+            target="_blank"
+            rel="noreferrer noopener"
+            className="underline underline-offset-2 hover:text-foreground"
+          >
+            portal.spamhaus.com
+          </a>
+          .
+        </>
+      }
+    >
+      {status?.configured && (
+        <p className="mb-2 flex items-center gap-1.5 text-[12px] text-muted-foreground">
+          <Check className="size-3.5 shrink-0 text-primary" />
+          Active — <Mono>{status.hint}</Mono>
+        </p>
+      )}
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <Input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          type="password"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder={status?.configured ? "Replace key…" : "Query key"}
+          aria-label="Spamhaus DQS query key"
+          className="flex-1"
+        />
+        {status?.configured && (
+          <Button
+            variant="outline"
+            disabled={save.isPending}
+            onClick={async () => {
+              if (await confirm({ title: "Remove the Spamhaus key?" })) save.mutate("");
+            }}
+          >
+            Remove
+          </Button>
+        )}
+        <Button
+          variant="primary"
+          disabled={!draft.trim() || save.isPending}
+          onClick={() => save.mutate(draft.trim())}
+        >
+          {save.isPending ? "Verifying…" : "Save"}
         </Button>
       </div>
     </Section>
