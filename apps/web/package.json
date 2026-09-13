@@ -23,7 +23,7 @@
     "clsx": "2.1.1",
     "dompurify": "3.4.11",
     "fflate": "^0.8.3",
-    "hono": "4.12.27",
+    "hono": "4.12.34",
     "lucide-react": "1.21.0",
     "marked": "18.0.5",
     "piexifjs": "^1.0.6",
