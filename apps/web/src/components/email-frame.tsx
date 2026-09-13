@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/cn.ts";
+import { adaptTextContrast, parseCssColor } from "@/lib/contrast.ts";
 import { handleMailtoClick } from "@/lib/use-mailto-links.ts";
 import { Skeleton } from "./ui/skeleton.tsx";
 
@@ -92,6 +93,13 @@ export function EmailFrame({ html, className }: { html: string; className?: stri
     // listener rides on the frame's own document — replaced on every load, so
     // it can't stack up — and beats the sanitizer's target="_blank".
     d.addEventListener("click", handleMailtoClick);
+    // Mail styles its text for the sender's default (white) page and rarely
+    // paints its own background, so on the dark theme `#333` copy would sit on
+    // our dark card. Re-tint any text that can't be read against what's
+    // actually behind it — see contrast.ts. Runs before the first measure since
+    // it only touches colors, never layout.
+    const canvasBg = parseCssColor(colors.bg);
+    if (canvasBg) adaptTextContrast(d, canvasBg);
     // Grow the frame to the full content so the card lengthens instead of the
     // body scrolling inside it. `documentElement.scrollHeight` can under-report
     // by a few px (margin collapse), leaving a sliver scrollbar — take the max
