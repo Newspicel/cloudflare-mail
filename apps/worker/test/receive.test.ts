@@ -6,12 +6,13 @@ import {
   mailbox,
   mailboxMember,
   message,
+  systemConfig,
   thread,
   user,
 } from "@cfmail/db/schema";
 import { Perm } from "@cfmail/shared/permissions";
 import { eq } from "drizzle-orm";
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/env.ts";
 import { handleInbound } from "../src/mail/receive.ts";
 
@@ -363,5 +364,70 @@ describe("handleInbound — spam filtering (default standard level)", () => {
 
     const th = (await db.query.thread.findMany({ where: eq(thread.mailboxId, MAILBOX_ID) }))[0]!;
     expect(th.spam).toBe(false);
+  });
+});
+
+describe("handleInbound — Spamhaus DQS", () => {
+  const KEY = "testkey123456789";
+
+  async function enableDqs(listings: Record<string, string[]>): Promise<void> {
+    await db
+      .insert(systemConfig)
+      .values({ key: "spamhaus_dqs_key", value: KEY, updatedAt: new Date() })
+      .onConflictDoUpdate({ target: systemConfig.key, set: { value: KEY } });
+    vi.stubGlobal("fetch", async (input: string | URL) => {
+      const name = new URL(String(input)).searchParams.get("name") ?? "";
+      const subject = name.split(`.${KEY}.`)[0] ?? "";
+      const zone = name.split(`.${KEY}.`)[1]?.split(".dq.")[0] ?? "";
+      const codes = listings[`${subject}/${zone}`] ?? [];
+      return Response.json({
+        Status: codes.length ? 0 : 3,
+        Answer: codes.map((data) => ({ name, type: 1, TTL: 60, data })),
+      });
+    });
+  }
+
+  afterEach(async () => {
+    vi.unstubAllGlobals();
+    await e.DB.prepare("DELETE FROM system_config WHERE key = 'spamhaus_dqs_key'").run();
+  });
+
+  // dmarc=pass by default: domain reputation still runs, the IP check doesn't,
+  // so the ZEN case passes "none" to exercise it.
+  const listedMail = (from: string, dmarc = "pass") =>
+    stubInbound({
+      from,
+      to: ADDRESS,
+      raw:
+        `Received: from evil.test (unknown [199.168.89.90]) by mx.cloudflare.net\r\n` +
+        `Authentication-Results: mx; spf=pass; dkim=pass; dmarc=${dmarc}\r\n` +
+        `From: <${from}>\r\nTo: <${ADDRESS}>\r\nSubject: hi\r\n\r\nbody\r\n`,
+    });
+
+  it("rejects a DBL-listed sender without storing the message", async () => {
+    await enableDqs({ "dbl-dqs.blt.spamhaus.net/dbl": ["127.0.1.2"] });
+    const msg = listedMail("test@dbl-dqs.blt.spamhaus.net");
+    await handleInbound(msg, e);
+    expect(msg.rejected).toMatch(/dbl-dqs\.blt\.spamhaus\.net is listed by Spamhaus \(DBL\)/);
+    expect(await db.query.message.findMany({ where: eq(message.mailboxId, MAILBOX_ID) })).toEqual(
+      [],
+    );
+  });
+
+  it("rejects a ZEN-listed connecting host", async () => {
+    await enableDqs({ "90.89.168.199/zen": ["127.0.0.2"] });
+    const msg = listedMail("someone@clean.test", "none");
+    await handleInbound(msg, e);
+    expect(msg.rejected).toMatch(/199\.168\.89\.90 is listed by Spamhaus \(SBL\)/);
+  });
+
+  it("delivers mail that is listed nowhere", async () => {
+    await enableDqs({});
+    const msg = listedMail("someone@clean.test");
+    await handleInbound(msg, e);
+    expect(msg.rejected).toBeUndefined();
+    expect(
+      await db.query.message.findMany({ where: eq(message.mailboxId, MAILBOX_ID) }),
+    ).toHaveLength(1);
   });
 });

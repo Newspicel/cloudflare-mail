@@ -157,6 +157,7 @@ describe("ingestRaw — spam=null (import never files or scores)", () => {
       reasons: ["dmarc=fail"],
       auth: { spf: "fail", dkim: "fail", dmarc: "fail" },
       folderSpam: true,
+      reject: null,
     };
     await ingestRaw(e, db, importOpts({ spam }));
     const th = (await db.query.thread.findMany({ where: eq(thread.mailboxId, MAILBOX_ID) }))[0]!;

@@ -245,6 +245,14 @@ export async function handleInbound(
     });
   }
 
+  // Spamhaus says to refuse listed sources outright rather than file them, so a
+  // listing that reaches the reject threshold bounces here — before the message
+  // is stored, and with the listing named so a legitimate sender can delist.
+  if (spam?.reject) {
+    msg.setReject(spam.reject);
+    return;
+  }
+
   // User rules: match the parsed message against this mailbox's filters. A
   // hardBlock SMTP-rejects before anything is stored; other actions feed into
   // the insert (flags/spam) and are applied to the message/thread after it.

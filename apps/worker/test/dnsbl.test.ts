@@ -3,6 +3,7 @@ import {
   lookupAuthBl,
   lookupDomain,
   lookupIp,
+  lookupNames,
   registrableDomain,
   verifyDqsKey,
 } from "../src/mail/dnsbl.ts";
@@ -128,6 +129,26 @@ describe("verifyDqsKey", () => {
       ok: false,
       error: "this key has no Content Data (DBL + ZRD) access",
     });
+  });
+});
+
+describe("lookupNames", () => {
+  it("expands a hostname to itself plus the domain under it", () => {
+    expect(lookupNames("dbl-dqs.blt.spamhaus.net")).toEqual([
+      "dbl-dqs.blt.spamhaus.net",
+      "spamhaus.net",
+    ]);
+    expect(lookupNames("shop.example.co.uk")).toEqual(["shop.example.co.uk", "example.co.uk"]);
+  });
+
+  it("returns a single name when the host is already the domain", () => {
+    expect(lookupNames("Example.com.")).toEqual(["example.com"]);
+    expect(lookupNames("example.co.uk")).toEqual(["example.co.uk"]);
+  });
+
+  it("returns nothing for a host that cannot be listed", () => {
+    expect(lookupNames("192.0.2.1")).toEqual([]);
+    expect(lookupNames("localhost")).toEqual([]);
   });
 });
 

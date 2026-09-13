@@ -3,12 +3,14 @@ import { mailboxSpamUsage } from "@cfmail/db/schema";
 import { sql } from "drizzle-orm";
 import type { Env } from "../env.ts";
 import {
+  type DomainListing,
   type DomainListKind,
   getDqsKey,
+  type IpListing,
   type IpListKind,
   lookupDomain,
   lookupIp,
-  registrableDomain,
+  lookupNames,
 } from "./dnsbl.ts";
 import type { ParsedEmail } from "./mime.ts";
 
@@ -28,6 +30,9 @@ export interface SpamEvaluation {
   auth: AuthResult;
   // Whether a newly-created thread should be filed under Spam.
   folderSpam: boolean;
+  // Set when the message must be SMTP-rejected instead of delivered, per
+  // Spamhaus' own usage guidance. The string is the reason the sender sees.
+  reject: string | null;
 }
 
 export interface EvaluateInput {
@@ -93,6 +98,7 @@ export async function evaluateSpam(
     const dom = await scoreDomains(dqsKey, parsed, input.fromEnvelope);
     score += dom.score;
     reasons.push(...dom.reasons);
+    if (dom.reject) return blocked(score, reasons, auth, dom.reject);
   }
 
   // Fully authenticated mail (DMARC pass implies an aligned, passing SPF or
@@ -100,7 +106,7 @@ export async function evaluateSpam(
   // avoid false positives and cost.
   if (auth.dmarc === "pass") {
     const trusted = scoreToVerdict(score);
-    return { verdict: trusted, score, reasons, auth, folderSpam: trusted === "spam" };
+    return { verdict: trusted, score, reasons, auth, folderSpam: trusted === "spam", reject: null };
   }
 
   // ─── Authentication signal (all levels) ──────────────────────────────────
@@ -127,12 +133,16 @@ export async function evaluateSpam(
     score += heur.score;
     reasons.push(...heur.reasons);
 
-    const ip = extractRelayIp(parsed);
-    if (dqsKey && ip) {
-      const listing = await lookupIp(dqsKey, ip);
+    const relay = extractRelayIp(parsed);
+    if (dqsKey && relay) {
+      const listing = await lookupIp(dqsKey, relay.ip);
       if (listing) {
         score += IP_WEIGHTS[listing.kind];
-        reasons.push(`The sending IP (${ip}) is listed by Spamhaus as ${IP_LABELS[listing.kind]}.`);
+        reasons.push(
+          `The sending IP (${relay.ip}) is listed by Spamhaus as ${IP_LABELS[listing.kind]}.`,
+        );
+        const reject = ipReject(relay, listing);
+        if (reject) return blocked(score, reasons, auth, reject);
       }
     }
   }
@@ -151,7 +161,16 @@ export async function evaluateSpam(
     }
   }
 
-  return { verdict, score, reasons, auth, folderSpam: verdict === "spam" };
+  return { verdict, score, reasons, auth, folderSpam: verdict === "spam", reject: null };
+}
+
+function blocked(
+  score: number,
+  reasons: string[],
+  auth: AuthResult,
+  reject: string,
+): SpamEvaluation {
+  return { verdict: "spam", score, reasons, auth, folderSpam: true, reject };
 }
 
 function scoreToVerdict(score: number): SpamVerdict {
@@ -272,6 +291,40 @@ const DOMAIN_WEIGHTS: Record<DomainListKind, number> = {
   new: 2,
 };
 
+// ─── What Spamhaus says to refuse at the MTA ─────────────────────────────────
+//
+// ZEN exists to be blocked on at connection time, and an outright DBL or ZRD
+// listing of a name the sending side asserts (envelope/header From, EHLO) is
+// grounds for a 550 too. Two exceptions stay advisory: the abused-legit DBL
+// codes (a real domain caught hosting someone else's spam) and anything found
+// in the body, which says nothing about who is delivering the message.
+const CHECK_URL = "https://check.spamhaus.org/listed/?searchterm=";
+
+const IP_ZONES: Record<IpListKind, string> = {
+  drop: "SBL DROP",
+  sbl: "SBL",
+  css: "SBL CSS",
+  bcl: "BCL",
+  xbl: "XBL",
+  pbl: "PBL",
+};
+
+function ipReject(relay: RelayIp, listing: IpListing): string | null {
+  // PBL only means "this address shouldn't be talking to an MX directly", so it
+  // is a reason to refuse only when the address *is* the host that reached us.
+  if (listing.kind === "pbl" && !relay.connecting) return null;
+  return rejectReason(relay.ip, IP_ZONES[listing.kind]);
+}
+
+function domainReject(hit: DomainListing, source: NameSource): string | null {
+  if (source === "link" || hit.kind === "abused") return null;
+  return rejectReason(hit.domain, hit.kind === "new" ? "ZRD" : "DBL");
+}
+
+function rejectReason(subject: string, zone: string): string {
+  return `${subject} is listed by Spamhaus (${zone}) — ${CHECK_URL}${subject}`;
+}
+
 const DOMAIN_LABELS: Record<DomainListKind, string> = {
   phish: "a phishing domain",
   malware: "a malware domain",
@@ -282,85 +335,124 @@ const DOMAIN_LABELS: Record<DomainListKind, string> = {
 };
 
 // Body links are checked too — phishing usually keeps a clean-looking sender and
-// puts the listed domain in the link. They score lower than the sender domain
+// puts the listed domain in the link. They score lower than the sender side
 // (a newsletter can legitimately link to an abused shortener) and are capped
-// both in how many are looked up and in what they can contribute.
-const MAX_LINK_DOMAINS = 3;
+// both in how many names are looked up and in what they can contribute.
+const MAX_SENDER_NAMES = 5;
+const MAX_LINK_NAMES = 4;
 const LINK_WEIGHT_FACTOR = 0.5;
 const LINK_SCORE_CAP = 3;
+
+type NameSource = "sender" | "ehlo" | "link";
+
+interface Candidate {
+  name: string;
+  source: NameSource;
+}
 
 async function scoreDomains(
   key: string,
   parsed: ParsedEmail,
   fromEnvelope: string,
-): Promise<{ score: number; reasons: string[] }> {
-  const senders = unique([domainOf(fromEnvelope), domainOf(parsed.from?.address)]);
-  const links = extractLinkDomains(parsed)
-    .filter((d) => !senders.includes(d))
-    .slice(0, MAX_LINK_DOMAINS);
+): Promise<{ score: number; reasons: string[]; reject: string | null }> {
+  const senderSide = candidates([
+    [hostOf(fromEnvelope), "sender"],
+    [hostOf(parsed.from?.address), "sender"],
+    // The name the relay gave in EHLO: a throwaway or listed hostname there is
+    // a signal in its own right, and the only one some spam carries.
+    [ehloHost(parsed), "ehlo"],
+  ]).slice(0, MAX_SENDER_NAMES);
 
-  const [senderHits, linkHits] = await Promise.all([
-    Promise.all(senders.map((d) => lookupDomain(key, d))),
-    Promise.all(links.map((d) => lookupDomain(key, d))),
-  ]);
+  const links = candidates(extractLinkHosts(parsed).map((h) => [h, "link"] as const))
+    .filter((c) => !senderSide.some((s) => s.name === c.name))
+    .slice(0, MAX_LINK_NAMES);
+
+  const all = [...senderSide, ...links];
+  const hits = await Promise.all(all.map((c) => lookupDomain(key, c.name)));
 
   const reasons: string[] = [];
   let score = 0;
-  for (const hit of senderHits) {
-    if (!hit) continue;
-    score += DOMAIN_WEIGHTS[hit.kind];
-    reasons.push(
-      hit.kind === "new"
-        ? `The sender domain (${hit.domain}) was first seen ${hit.ageHours} hours ago.`
-        : `The sender domain (${hit.domain}) is listed by Spamhaus as ${DOMAIN_LABELS[hit.kind]}.`,
-    );
-  }
-
   let linkScore = 0;
-  for (const hit of linkHits) {
+  let reject: string | null = null;
+  for (const [i, hit] of hits.entries()) {
     if (!hit) continue;
-    linkScore += DOMAIN_WEIGHTS[hit.kind] * LINK_WEIGHT_FACTOR;
-    reasons.push(
-      hit.kind === "new"
-        ? `This message links to ${hit.domain}, a domain first seen ${hit.ageHours} hours ago.`
-        : `This message links to ${hit.domain}, listed by Spamhaus as ${DOMAIN_LABELS[hit.kind]}.`,
-    );
+    const { source } = all[i]!;
+    const weight = DOMAIN_WEIGHTS[hit.kind];
+    if (source === "link") linkScore += weight * LINK_WEIGHT_FACTOR;
+    else score += weight;
+    reasons.push(describe(hit, source));
+    reject ??= domainReject(hit, source);
   }
-  return { score: score + Math.round(Math.min(linkScore, LINK_SCORE_CAP)), reasons };
+  return { score: score + Math.round(Math.min(linkScore, LINK_SCORE_CAP)), reasons, reject };
 }
 
-function domainOf(address: string | undefined): string | null {
+function describe(hit: DomainListing, source: NameSource): string {
+  const listed =
+    hit.kind === "new"
+      ? `first seen ${hit.ageHours} hours ago`
+      : `listed by Spamhaus as ${DOMAIN_LABELS[hit.kind]}`;
+  if (source === "link") return `This message links to ${hit.domain}, ${listed}.`;
+  if (source === "ehlo") return `The sending server identified itself as ${hit.domain}, ${listed}.`;
+  return `The sender domain (${hit.domain}) is ${listed}.`;
+}
+
+// Each host expands to itself plus the domain it sits under, deduped in order —
+// Spamhaus lists subdomains as well as registered domains.
+function candidates(hosts: readonly (readonly [string | null, NameSource])[]): Candidate[] {
+  const seen = new Set<string>();
+  const out: Candidate[] = [];
+  for (const [host, source] of hosts) {
+    for (const name of host ? lookupNames(host) : []) {
+      if (seen.has(name)) continue;
+      seen.add(name);
+      out.push({ name, source });
+    }
+  }
+  return out;
+}
+
+function hostOf(address: string | undefined): string | null {
   const at = (address ?? "").lastIndexOf("@");
-  return at === -1 ? null : registrableDomain(address!.slice(at + 1));
+  return at === -1 ? null : address!.slice(at + 1);
+}
+
+// "Received: from <ehlo> (<rdns> [ip]) by …" — the topmost header, i.e. the one
+// our own inbound side wrote, so the EHLO name in it is the one we were given.
+function ehloHost(parsed: ParsedEmail): string | null {
+  const top = (parsed.headers ?? []).find((h) => h.key === "received")?.value ?? "";
+  return top.match(/^\s*from\s+([a-z0-9][a-z0-9.-]*\.[a-z]{2,})/i)?.[1] ?? null;
 }
 
 const LINK_RE = /\bhttps?:\/\/([^\s"'<>)\]]+)/gi;
 
-function extractLinkDomains(parsed: ParsedEmail): string[] {
+function extractLinkHosts(parsed: ParsedEmail): string[] {
   const body = `${parsed.text ?? ""}\n${parsed.html ?? ""}`;
-  const out: (string | null)[] = [];
+  const out: string[] = [];
   for (const m of body.matchAll(LINK_RE)) {
     // Strip path/query/fragment, userinfo and port down to the bare host.
-    const host = m[1]!.split(/[/?#]/)[0]!.split("@").at(-1)!.split(":")[0]!;
-    out.push(registrableDomain(host));
+    out.push(m[1]!.split(/[/?#]/)[0]!.split("@").at(-1)!.split(":")[0]!);
   }
-  return unique(out);
+  return out;
 }
 
-function unique(values: (string | null)[]): string[] {
-  return [...new Set(values.filter((v): v is string => v !== null))];
+interface RelayIp {
+  ip: string;
+  /** The IP came from the hop that reached our MX, not from further out. */
+  connecting: boolean;
 }
 
 // The IP that delivered the message to Cloudflare's MX — the *topmost* Received
 // header, which is the one our own inbound side added and therefore the only one
 // a sender can't forge. (Walking bottom-up would find the original submitting
 // client instead, which for provider-relayed mail is a residential address that
-// PBL rightly lists but that says nothing about this message.)
-function extractRelayIp(parsed: ParsedEmail): string | null {
+// PBL rightly lists but that says nothing about this message.) When the top hop
+// names no public address we keep looking down the chain, but what we find there
+// is no longer the connecting host.
+function extractRelayIp(parsed: ParsedEmail): RelayIp | null {
   const received = (parsed.headers ?? []).filter((h) => h.key === "received");
-  for (const line of received) {
+  for (const [i, line] of received.entries()) {
     const m = line.value.match(/\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/);
-    if (m && isPublicIp(m[1]!)) return m[1]!;
+    if (m && isPublicIp(m[1]!)) return { ip: m[1]!, connecting: i === 0 };
   }
   return null;
 }
