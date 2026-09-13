@@ -207,13 +207,19 @@ describe("GET /:id/body — server-side sanitization", () => {
   });
 
   it("strips tracking beacons before proxying and reports the count", async () => {
-    // Seed the fetched list the cron would have stored.
-    const uglyEmail = "SendGrid@@=\\/wf\\/open\\?upn=\n";
+    // Seed the fetched list the cron would have stored (EasyPrivacy shape,
+    // padded past the per-source sanity threshold; the other source 404s).
+    const easyPrivacy = [
+      "/wf/open?upn=$image",
+      ...Array.from({ length: 20 }, (_, i) => `.v${i}.example/open/$image`),
+    ].join("\n");
     await refreshTrackerList(
       db(),
       new Date(),
       (async (input: RequestInfo | URL) =>
-        new Response(String(input).includes("trocker") ? "openTrackers = [];" : uglyEmail)) as unknown as typeof fetch,
+        String(input).includes("easylist")
+          ? new Response(easyPrivacy)
+          : new Response("gone", { status: 404 })) as unknown as typeof fetch,
     );
     const id = await seedHtmlMessage(
       `<p>News</p>` +
