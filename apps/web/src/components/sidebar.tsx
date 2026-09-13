@@ -205,7 +205,7 @@ function SidebarBody({ onClose }: { onClose?: () => void }) {
                         )}
                       >
                         <span className={cn("truncate", m.unread > 0 && "font-medium")}>
-                          {m.displayName ?? m.address}
+                          {m.address}
                         </span>
                         <span
                           className={cn(
