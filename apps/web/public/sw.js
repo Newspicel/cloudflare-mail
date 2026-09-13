@@ -76,7 +76,7 @@ async function syncAppBadge() {
 }
 
 // Incoming push: show a notification. Payload is JSON
-// {title, body, url, threadId, level}. level "important" renders an
+// {title, body, url, threadId, mailboxId, level}. level "important" renders an
 // attention-grabbing notification (sticky, vibrates, ❗ prefix).
 self.addEventListener("push", (event) => {
   let data = {};
@@ -98,20 +98,34 @@ self.addEventListener("push", (event) => {
         requireInteraction: important,
         renotify: important,
         vibrate: important ? [200, 100, 200] : undefined,
-        data: { url: data.url || "/", threadId: data.threadId, level: data.level },
+        data: {
+          url: data.url || "/",
+          threadId: data.threadId,
+          mailboxId: data.mailboxId,
+          level: data.level,
+        },
       })
       .then(syncAppBadge),
   );
 });
 
-// Page asks us to dismiss a thread's notification (it was read on this or
-// another device) — close any matching notification and refresh the badge.
+// Page asks us to dismiss notifications that were read on this or another
+// device — one thread's (by tag) or a whole mailbox's ("mark all as read") —
+// then refresh the badge.
 self.addEventListener("message", (event) => {
   const msg = event.data;
-  if (msg?.type !== "dismiss-thread" || !msg.threadId) return;
+  let pending;
+  if (msg?.type === "dismiss-thread" && msg.threadId) {
+    pending = self.registration.getNotifications({ tag: msg.threadId });
+  } else if (msg?.type === "dismiss-mailbox" && msg.mailboxId) {
+    pending = self.registration
+      .getNotifications()
+      .then((ns) => ns.filter((n) => n.data?.mailboxId === msg.mailboxId));
+  } else {
+    return;
+  }
   event.waitUntil(
-    self.registration
-      .getNotifications({ tag: msg.threadId })
+    pending
       .then((ns) => {
         for (const n of ns) n.close();
       })

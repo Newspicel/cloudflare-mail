@@ -13,9 +13,9 @@ export const Route = createFileRoute("/app/m/$mailboxId/")({
 
 function MailboxIndex() {
   const { mailboxId } = Route.useParams();
-  const { view } = Route.useSearch();
+  const { view, unread } = Route.useSearch();
   const isDrafts = view === "drafts";
-  const feed = useThreadFeed(mailboxId, view, !isDrafts);
+  const feed = useThreadFeed(mailboxId, view, !isDrafts, unread);
   const drafts = useDraftFeed(mailboxId, isDrafts);
   const { data: mailboxesData } = useQuery(mailboxesQuery);
   const mailbox = mailboxesData?.mailboxes.find((m) => m.id === mailboxId);
@@ -28,6 +28,7 @@ function MailboxIndex() {
             <DraftList
               mailboxId={mailboxId}
               view={view}
+              unread={unread}
               drafts={drafts.items}
               loading={drafts.loading}
               hasMore={drafts.hasMore}
@@ -38,6 +39,7 @@ function MailboxIndex() {
             <ThreadList
               mailboxId={mailboxId}
               view={view}
+              unread={unread}
               threads={feed.items}
               loading={feed.loading}
               hasMore={feed.hasMore}

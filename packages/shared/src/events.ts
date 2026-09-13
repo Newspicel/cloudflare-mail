@@ -28,6 +28,13 @@ export const hubEvent = z.discriminatedUnion("type", [
     threadId: z.string(),
     read: z.boolean(),
   }),
+  // Every unread thread in a view of the mailbox was marked read at once. The
+  // set isn't enumerated (it can be thousands), so peers refetch the mailbox and
+  // dismiss its push notifications wholesale; IMAP sessions re-reconcile.
+  z.object({
+    type: z.literal("mailbox_read"),
+    mailboxId: z.string(),
+  }),
   z.object({
     type: z.literal("mailbox_expired"),
     mailboxId: z.string(),

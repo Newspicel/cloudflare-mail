@@ -5,7 +5,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { rpc, unwrap } from "@/lib/api.ts";
 import { invalidateThreadChange } from "@/lib/invalidate.ts";
-import { type MessageRow, parseMailView, threadQuery } from "@/lib/queries.ts";
+import { listSearch, type MessageRow, parseMailView, threadQuery } from "@/lib/queries.ts";
 import { useKeyboardShortcuts } from "@/lib/shortcuts.ts";
 import { useThreadFeed } from "@/lib/use-feeds.ts";
 import { openCompose } from "./compose-dock.tsx";
@@ -14,13 +14,15 @@ import { ShortcutsDialog } from "./shortcuts-dialog.tsx";
 export function AppShortcuts() {
   const params = useParams({ strict: false }) as { mailboxId?: string; threadId?: string };
   const { mailboxId, threadId } = params;
-  const search = useSearch({ strict: false }) as { view?: unknown };
+  const search = useSearch({ strict: false }) as { view?: unknown; unread?: unknown };
   const view = parseMailView(search.view);
+  const unread = search.unread === true;
+  const listTo = listSearch(view, unread);
   const nav = useNavigate();
   const qc = useQueryClient();
   const [helpOpen, setHelpOpen] = useState(false);
 
-  const feed = useThreadFeed(mailboxId ?? "", view);
+  const feed = useThreadFeed(mailboxId ?? "", view, true, unread);
 
   // eslint-disable-next-line react-doctor/query-mutation-missing-invalidation -- onSuccess refreshes via invalidateThreadChange
   const setThreadState = useMutation({
@@ -50,7 +52,7 @@ export function AppShortcuts() {
         },
       },
     );
-    if (mailboxId) nav({ to: "/app/m/$mailboxId", params: { mailboxId }, search: { view } });
+    if (mailboxId) nav({ to: "/app/m/$mailboxId", params: { mailboxId }, search: listTo });
   };
 
   const navigateThread = (delta: number) => {
@@ -69,7 +71,7 @@ export function AppShortcuts() {
     nav({
       to: "/app/m/$mailboxId/t/$threadId",
       params: { mailboxId, threadId: target.id },
-      search: { view },
+      search: listTo,
     });
   };
 

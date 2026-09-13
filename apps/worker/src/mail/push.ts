@@ -43,12 +43,15 @@ export async function getOrCreateVapid(db: DB): Promise<VapidKeys> {
 }
 
 // The encrypted payload a service worker renders. `threadId` is the stable tag
-// peers use to dismiss/coalesce a notification per thread.
+// peers use to dismiss/coalesce a notification per thread. `mailboxId` marks
+// new-mail alerts so a mailbox-wide "mark all as read" can sweep them; reminders
+// omit it and stay put — they aren't unread mail.
 export type PushPayload = {
   title: string;
   body: string;
   url: string;
   threadId: string;
+  mailboxId?: string;
   // Resolved notification style the SW renders. "important" is sticky/vibrates.
   level?: "normal" | "important";
 };
@@ -151,7 +154,13 @@ export async function notifyMailbox(db: DB, n: MailNotification): Promise<void> 
       byStyle[style].push(r.userId);
     }
 
-    const payload = { title: n.title, body: n.body, url: n.url, threadId: n.threadId };
+    const payload = {
+      title: n.title,
+      body: n.body,
+      url: n.url,
+      threadId: n.threadId,
+      mailboxId: n.mailboxId,
+    };
     await Promise.all(
       (["normal", "important"] as const)
         .filter((style) => byStyle[style].length > 0)

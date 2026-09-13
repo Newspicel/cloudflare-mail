@@ -1,7 +1,7 @@
 import type { DB } from "@cfmail/db";
 import { mailbox, mailboxMember } from "@cfmail/db/schema";
 import { ALL_PERMS, has, type PermBit } from "@cfmail/shared/permissions";
-import { and, eq, isNull, ne, or } from "drizzle-orm";
+import { and, eq, isNull, ne, or, sql } from "drizzle-orm";
 import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core";
 import { AppError } from "./errors.ts";
 
@@ -58,12 +58,19 @@ export async function resolveAccess(
 // combined "All" view; service mailboxes are key-driven and never user-facing.
 // `combinedView` additionally drops mailboxes opted out of All Mail — pass it
 // for the All Mail list/counts, not for surfaces the user filed into by hand
-// (custom folders), which stay complete.
+// (custom folders), which stay complete. `perm` raises the bar from READ to a
+// stronger bit for bulk mutations over the combined view (owners always pass).
 export async function accessibleMailboxIds(
   db: DB,
   userId: string,
-  opts?: { combinedView?: boolean },
+  opts?: { combinedView?: boolean; perm?: PermBit },
 ): Promise<string[]> {
+  const memberWith = opts?.perm
+    ? and(
+        eq(mailboxMember.userId, userId),
+        sql`(${mailboxMember.perms} & ${opts.perm}) = ${opts.perm}`,
+      )
+    : eq(mailboxMember.userId, userId);
   const rows = await db
     .selectDistinct({ id: mailbox.id })
     .from(mailbox)
@@ -73,7 +80,7 @@ export async function accessibleMailboxIds(
     )
     .where(
       and(
-        or(eq(mailbox.ownerUserId, userId), eq(mailboxMember.userId, userId)),
+        or(eq(mailbox.ownerUserId, userId), memberWith),
         ne(mailbox.type, "service"),
         mailboxNotPurging,
         opts?.combinedView ? eq(mailbox.excludeFromAll, false) : undefined,

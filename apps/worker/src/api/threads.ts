@@ -2,7 +2,7 @@ import { contactKey, draft, message, thread, threadFolder, threadSummary } from 
 import { Flag } from "@cfmail/shared/flags";
 import { Perm } from "@cfmail/shared/permissions";
 import type { FolderCountsResponseDto, ThreadSummaryDto } from "@cfmail/shared/responses";
-import { updateThread } from "@cfmail/shared/schemas";
+import { markAllRead, updateThread } from "@cfmail/shared/schemas";
 import { zValidator } from "@hono/zod-validator";
 import { and, asc, count, desc, eq, gt, inArray, or, type SQL, sql } from "drizzle-orm";
 import { Hono } from "hono";
@@ -51,35 +51,15 @@ export function threadsRoutes() {
       const limit = Math.min(Number(c.req.query("limit") ?? 50), 200);
       const view = c.req.query("view") ?? "inbox";
       const cursor = decodeCursor(c.req.query("cursor"));
+      // `unread=1` narrows any view to threads still holding unread inbound mail.
+      const unreadOnly = c.req.query("unread") === "1";
 
-      // Threads not in trash/spam and not filed into a custom folder by this user
-      // — the basis for the active inbox/sent/marked views (filed = "moved away").
-      const active = and(eq(thread.trashed, false), eq(thread.spam, false), notFiledBy(user.id));
-
-      let filter: SQL | undefined;
-      switch (view) {
-        case "trash":
-          // Whole-thread trash, plus live threads holding an individually-deleted
-          // message (those surface in Trash for just that message).
-          filter = trashFilter;
-          break;
-        case "spam":
-          filter = and(eq(thread.spam, true), eq(thread.trashed, false));
-          break;
-        case "all":
-          filter = undefined;
-          break;
-        case "sent":
-          filter = and(active, hasMessage(and(eq(message.direction, "out"), LIVE_MSG)));
-          break;
-        case "marked":
-          filter = and(active, hasMessage(and(STARRED_MSG, LIVE_MSG)));
-          break;
-        default:
-          filter = and(active, hasMessage(and(eq(message.direction, "in"), LIVE_MSG)));
-      }
-
-      const where = and(scope, filter, cursorBefore(cursor, thread.lastMsgAt, thread.id));
+      const where = and(
+        scope,
+        viewFilter(view, user.id),
+        unreadOnly ? UNREAD_THREAD : undefined,
+        cursorBefore(cursor, thread.lastMsgAt, thread.id),
+      );
       const rows = await db
         .select()
         .from(thread)
@@ -128,7 +108,7 @@ export function threadsRoutes() {
       // Every folder badge is a count over the same `thread` rows, so fold them
       // into one scan with conditional sums instead of nine separate COUNT(*)
       // round-trips. Each correlated EXISTS is evaluated once per row in that pass.
-      const unread = gt(thread.unreadCount, 0);
+      const unread = UNREAD_THREAD;
       const inLive = hasMessage(and(eq(message.direction, "in"), LIVE_MSG));
       const aggP = db
         .select({
@@ -163,6 +143,56 @@ export function threadsRoutes() {
           all: { total: n(agg?.all), unread: 0 },
         },
       } satisfies FolderCountsResponseDto);
+    })
+
+    // Mark every unread thread in one view of a mailbox read. Gated on WRITE like
+    // the per-thread PATCH: read state is shared by everyone on the mailbox.
+    .post("/read-all", zValidator("json", markAllRead), async (c) => {
+      const db = dbFromCtx(c);
+      const user = c.get("user")!;
+      const { mailboxId, view } = c.req.valid("json");
+
+      let ids: string[];
+      if (mailboxId === ALL_MAILBOXES) {
+        ids = await accessibleMailboxIds(db, user.id, { combinedView: true, perm: Perm.WRITE });
+      } else {
+        const access = await requirePerm(db, user.id, mailboxId, Perm.WRITE);
+        ids = access.purging ? [] : [mailboxId];
+      }
+      if (ids.length === 0) return c.json({ threads: 0 });
+
+      const target = and(inArray(thread.mailboxId, ids), viewFilter(view, user.id), UNREAD_THREAD);
+      const targetIds = db.select({ id: thread.id }).from(thread).where(target);
+      // Flip SEEN on every unseen inbound message of the targeted threads in one
+      // statement — no id round-trip, the view can hold thousands of threads —
+      // then let each thread recount itself so a message landing between the two
+      // writes isn't clobbered to zero (mirrors the IMAP store's flag path).
+      await db
+        .update(message)
+        .set({ flags: sql`${message.flags} | ${Flag.SEEN}` })
+        .where(
+          and(
+            inArray(message.mailboxId, ids),
+            eq(message.direction, "in"),
+            sql`(${message.flags} & ${Flag.SEEN}) = 0`,
+            inArray(message.threadId, targetIds),
+          ),
+        );
+      const rows = await db
+        .update(thread)
+        .set({ unreadCount: UNREAD_RECOUNT })
+        .where(target)
+        .returning({ mailboxId: thread.mailboxId });
+
+      // One coarse event per touched mailbox: peers refetch and drop the
+      // mailbox's push notifications, IMAP IDLE sessions re-reconcile.
+      const touched = [...new Set(rows.map((row) => row.mailboxId))];
+      await Promise.all(
+        touched.map((id) =>
+          broadcastToUsers(c.env, [user.id], { type: "mailbox_read", mailboxId: id }),
+        ),
+      );
+      return c.json({ threads: rows.length });
     })
 
     .get("/:id", async (c) => {
@@ -355,6 +385,35 @@ function emptyCounts(): FolderCountsResponseDto["counts"] {
     all: zero,
   };
 }
+
+// Which threads a list view shows, shared by the list and bulk routes so the
+// two never disagree about what "the inbox" is. Unknown views read as inbox.
+function viewFilter(view: string, userId: string): SQL | undefined {
+  // Threads not in trash/spam and not filed into a custom folder by this user
+  // — the basis for the active inbox/sent/marked views (filed = "moved away").
+  const active = and(eq(thread.trashed, false), eq(thread.spam, false), notFiledBy(userId));
+  switch (view) {
+    case "trash":
+      // Whole-thread trash, plus live threads holding an individually-deleted
+      // message (those surface in Trash for just that message).
+      return trashFilter;
+    case "spam":
+      return and(eq(thread.spam, true), eq(thread.trashed, false));
+    case "all":
+      return undefined;
+    case "sent":
+      return and(active, hasMessage(and(eq(message.direction, "out"), LIVE_MSG)));
+    case "marked":
+      return and(active, hasMessage(and(STARRED_MSG, LIVE_MSG)));
+    default:
+      return and(active, hasMessage(and(eq(message.direction, "in"), LIVE_MSG)));
+  }
+}
+
+// A thread with unread inbound mail (the cached badge already excludes trashed
+// messages), and the recount expression that refreshes that cache in place.
+const UNREAD_THREAD = gt(thread.unreadCount, 0);
+const UNREAD_RECOUNT = sql`(select count(*) from ${message} m where m.thread_id = ${thread.id} and m.direction = 'in' and (m.flags & ${Flag.SEEN}) = 0 and (m.flags & ${Flag.TRASH}) = 0)`;
 
 // Correlated EXISTS over a thread's messages (sent/starred live on rows, not
 // the thread) — lets the sent/marked folders filter by message-level state.

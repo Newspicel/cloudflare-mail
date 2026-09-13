@@ -67,6 +67,22 @@ async function seedMsgThread(
   return { threadId, messageId };
 }
 
+async function unreadOf(threadId: string): Promise<number> {
+  const row = await db().query.thread.findFirst({
+    where: eq(thread.id, threadId),
+    columns: { unreadCount: true },
+  });
+  return row?.unreadCount ?? -1;
+}
+
+async function seenFlags(threadId: string): Promise<boolean[]> {
+  const rows = await db()
+    .select({ flags: message.flags })
+    .from(message)
+    .where(eq(message.threadId, threadId));
+  return rows.map((r) => (r.flags & Flag.SEEN) !== 0);
+}
+
 beforeAll(applyMigrationsOnce);
 beforeEach(async () => {
   await resetDb();
@@ -96,6 +112,24 @@ describe("threads list", () => {
     const body = (await res.json()) as { threads: { id: string }[]; nextCursor: string | null };
     expect(body.threads.map((t) => t.id)).toEqual([threadId]);
     expect(body.nextCursor).toBeNull();
+  });
+
+  it("narrows any view to unread threads with unread=1", async () => {
+    const a = await seedMsgThread(db(), { direction: "in", unreadCount: 1 });
+    const b = await seedMsgThread(db(), { direction: "in", unreadCount: 2 });
+    const read = await seedMsgThread(db(), { direction: "in", flags: Flag.SEEN });
+
+    const all = await request(asOwner(), "GET", `/?mailboxId=${MAILBOX_ID}&view=inbox`);
+    const allBody = (await all.json()) as { threads: { id: string }[] };
+    expect(allBody.threads.map((t) => t.id).toSorted()).toEqual(
+      [a.threadId, b.threadId, read.threadId].toSorted(),
+    );
+
+    const res = await request(asOwner(), "GET", `/?mailboxId=${MAILBOX_ID}&view=inbox&unread=1`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { threads: { id: string; unreadCount: number }[] };
+    expect(body.threads.map((t) => t.id).toSorted()).toEqual([a.threadId, b.threadId].toSorted());
+    for (const t of body.threads) expect(t.unreadCount).toBeGreaterThan(0);
   });
 
   it("hides a thread filed into a folder from the inbox view", async () => {
@@ -365,6 +399,123 @@ describe("thread mutations", () => {
     const { threadId } = await seedMsgThread(db(), { direction: "in" });
     const res = await request(asMember(), "PATCH", `/${threadId}`, { trashed: true });
     expect(res.status).toBe(200);
+  });
+});
+
+describe("mark all read", () => {
+  it("marks every unread inbox thread read and leaves other views alone", async () => {
+    const a = await seedMsgThread(db(), { direction: "in", unreadCount: 1 });
+    const b = await seedMsgThread(db(), { direction: "in", unreadCount: 1 });
+    const spam = await seedMsgThread(db(), { direction: "in", unreadCount: 1, spam: true });
+    const trashed = await seedMsgThread(db(), { direction: "in", unreadCount: 1, trashed: true });
+    const elsewhere = await seedMsgThread(db(), {
+      direction: "in",
+      unreadCount: 1,
+      mailboxId: OTHER_MAILBOX_ID,
+    });
+
+    const res = await request(asOwner(), "POST", "/read-all", {
+      mailboxId: MAILBOX_ID,
+      view: "inbox",
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ threads: 2 });
+
+    for (const { threadId } of [a, b]) {
+      expect(await unreadOf(threadId)).toBe(0);
+      expect(await seenFlags(threadId)).toEqual([true]);
+    }
+    for (const { threadId } of [spam, trashed, elsewhere]) {
+      expect(await unreadOf(threadId)).toBe(1);
+      expect(await seenFlags(threadId)).toEqual([false]);
+    }
+
+    // A second pass finds nothing left to flip.
+    const again = await request(asOwner(), "POST", "/read-all", {
+      mailboxId: MAILBOX_ID,
+      view: "inbox",
+    });
+    expect(await again.json()).toEqual({ threads: 0 });
+  });
+
+  it("scopes to the requested view", async () => {
+    const inbox = await seedMsgThread(db(), { direction: "in", unreadCount: 1 });
+    const spam = await seedMsgThread(db(), { direction: "in", unreadCount: 1, spam: true });
+
+    const res = await request(asOwner(), "POST", "/read-all", {
+      mailboxId: MAILBOX_ID,
+      view: "spam",
+    });
+    expect(await res.json()).toEqual({ threads: 1 });
+    expect(await unreadOf(spam.threadId)).toBe(0);
+    expect(await unreadOf(inbox.threadId)).toBe(1);
+  });
+
+  it("only flips inbound messages", async () => {
+    const { threadId } = await seedMsgThread(db(), { direction: "in", unreadCount: 1 });
+    await db().insert(message).values({
+      id: "m-out",
+      mailboxId: MAILBOX_ID,
+      threadId,
+      direction: "out",
+      fromAddr: "team@example.com",
+      flags: Flag.SENT,
+    });
+
+    await request(asOwner(), "POST", "/read-all", { mailboxId: MAILBOX_ID, view: "inbox" });
+    const rows = await db()
+      .select({ id: message.id, flags: message.flags })
+      .from(message)
+      .where(eq(message.threadId, threadId));
+    expect(rows.find((r) => r.id === "m-out")?.flags).toBe(Flag.SENT);
+    expect(rows.filter((r) => r.id !== "m-out").every((r) => r.flags & Flag.SEEN)).toBe(true);
+  });
+
+  it("forbids a member without WRITE (403)", async () => {
+    await grantMember(db(), Perm.READ);
+    await seedMsgThread(db(), { direction: "in", unreadCount: 1 });
+    const res = await request(asMember(), "POST", "/read-all", {
+      mailboxId: MAILBOX_ID,
+      view: "inbox",
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("lets a member with WRITE mark all read", async () => {
+    await grantMember(db(), Perm.READ | Perm.WRITE);
+    const { threadId } = await seedMsgThread(db(), { direction: "in", unreadCount: 1 });
+    const res = await request(asMember(), "POST", "/read-all", {
+      mailboxId: MAILBOX_ID,
+      view: "inbox",
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ threads: 1 });
+    expect(await unreadOf(threadId)).toBe(0);
+  });
+
+  it("spans only writable mailboxes in the combined 'all' mailbox", async () => {
+    await grantMember(db(), Perm.READ, MAILBOX_ID);
+    await grantMember(db(), Perm.READ | Perm.WRITE, OTHER_MAILBOX_ID);
+    const readable = await seedMsgThread(db(), { direction: "in", unreadCount: 1 });
+    const writable = await seedMsgThread(db(), {
+      direction: "in",
+      unreadCount: 1,
+      mailboxId: OTHER_MAILBOX_ID,
+    });
+
+    const res = await request(asMember(), "POST", "/read-all", { mailboxId: "all", view: "inbox" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ threads: 1 });
+    expect(await unreadOf(writable.threadId)).toBe(0);
+    expect(await unreadOf(readable.threadId)).toBe(1);
+  });
+
+  it("rejects an unknown view via the validator", async () => {
+    const res = await request(asOwner(), "POST", "/read-all", {
+      mailboxId: MAILBOX_ID,
+      view: "bogus",
+    });
+    expect(res.status).toBe(400);
   });
 });
 

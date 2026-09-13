@@ -21,7 +21,7 @@ import {
   removeThreadsFromLists,
 } from "@/lib/invalidate.ts";
 import { useUserPrefs } from "@/lib/prefs.ts";
-import type { MailView, MessageRow, ThreadRow } from "@/lib/queries.ts";
+import { listSearch, type MailView, type MessageRow, type ThreadRow } from "@/lib/queries.ts";
 import { keys } from "@/lib/query-keys.ts";
 import { useThreadListMutation } from "@/lib/thread-mutations.ts";
 import { LabelsMenu } from "./labels-menu.tsx";
@@ -38,6 +38,8 @@ interface Props {
   thread: ThreadRow;
   messages: MessageRow[];
   view?: MailView;
+  /** The list's unread-only filter, carried through when navigating back to it. */
+  unread?: boolean;
   readOnly?: boolean;
   // Set when the thread is being viewed inside a custom folder, enabling the
   // "move back to mailbox" action in the move-to-folder menu.
@@ -48,10 +50,12 @@ export function MessageView({
   thread,
   messages,
   view = "inbox",
+  unread,
   readOnly = false,
   folderId,
 }: Props) {
   const nav = useNavigate();
+  const backSearch = listSearch(view, unread);
   const qc = useQueryClient();
   const { confirmDelete } = useConfirmHelpers();
 
@@ -98,7 +102,7 @@ export function MessageView({
         nav({
           to: "/app/m/$mailboxId",
           params: { mailboxId: thread.mailboxId },
-          search: { view },
+          search: backSearch,
         });
       } else {
         removeMessageFromThread(qc, thread.id, id);
@@ -188,7 +192,7 @@ export function MessageView({
         nav({
           to: "/app/m/$mailboxId",
           params: { mailboxId: thread.mailboxId },
-          search: { view },
+          search: backSearch,
         });
       },
     });
@@ -202,7 +206,7 @@ export function MessageView({
         nav({
           to: "/app/m/$mailboxId",
           params: { mailboxId: thread.mailboxId },
-          search: { view },
+          search: backSearch,
         });
       },
     });
@@ -376,7 +380,7 @@ export function MessageView({
                 nav({
                   to: "/app/m/$mailboxId",
                   params: { mailboxId: thread.mailboxId },
-                  search: { view },
+                  search: backSearch,
                 });
               }}
             />

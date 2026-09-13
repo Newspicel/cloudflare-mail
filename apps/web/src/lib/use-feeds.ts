@@ -45,10 +45,15 @@ function useFeed<T, P>(q: InfiniteResult<P>, pick: (page: P) => T[]): Feed<T> {
   };
 }
 
-export function useThreadFeed(mailboxId: string, view: MailView, enabled = true): Feed<ThreadRow> {
+export function useThreadFeed(
+  mailboxId: string,
+  view: MailView,
+  enabled = true,
+  unread = false,
+): Feed<ThreadRow> {
   // eslint-disable-next-line react-doctor/query-destructure-result -- whole result handed to useFeed, which reads several fields
   const q = useInfiniteQuery({
-    ...threadsQuery(mailboxId, view),
+    ...threadsQuery(mailboxId, view, unread),
     enabled: enabled && Boolean(mailboxId),
   });
   return useFeed(q, pickThreads);

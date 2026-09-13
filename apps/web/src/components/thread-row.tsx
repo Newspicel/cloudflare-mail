@@ -6,6 +6,7 @@ import { useLayoutEffect, useRef } from "react";
 import { cn } from "@/lib/cn.ts";
 import { useDateTimeFmt, useUserPrefs } from "@/lib/prefs.ts";
 import {
+  listSearch,
   type MailView,
   type MessageLabel,
   messageBodyQuery,
@@ -52,7 +53,7 @@ const CATEGORY_CLASS: Record<string, string> = {
 
 // Where the row links to; both list flavors share one row body.
 type RowLink =
-  | { kind: "mailbox"; mailboxId: string; view: MailView }
+  | { kind: "mailbox"; mailboxId: string; view: MailView; unread?: boolean }
   | { kind: "folder"; folderId: string };
 
 interface Props {
@@ -260,7 +261,7 @@ export function ThreadRowView({
           <Link
             to="/app/m/$mailboxId/t/$threadId"
             params={{ mailboxId: link.mailboxId, threadId: thread.id }}
-            search={{ view: link.view }}
+            search={listSearch(link.view, link.unread)}
             draggable={false}
             className={linkClassName}
             {...hoverProps}

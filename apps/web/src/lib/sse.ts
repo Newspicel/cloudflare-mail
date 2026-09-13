@@ -9,7 +9,7 @@ import {
   createThreadChangeCoalescer,
   patchThreadsInLists,
 } from "./invalidate.ts";
-import { dismissThreadNotification } from "./push.ts";
+import { dismissMailboxNotifications, dismissThreadNotification } from "./push.ts";
 import { type MailboxSummary, mailboxesQuery } from "./queries.ts";
 import { keys } from "./query-keys.ts";
 
@@ -63,6 +63,7 @@ const EVENT_TYPES = [
   "message_sent",
   "thread_updated",
   "thread_read",
+  "mailbox_read",
   "mailbox_expired",
   "mailbox_changed",
   "scheduled_send_failed",
@@ -130,6 +131,15 @@ export function connectStream(qc: QueryClient, navigate?: Navigate): () => void 
           folders: true,
         });
         if (evt.read) dismissThreadNotification(evt.threadId);
+        break;
+      }
+      case "mailbox_read": {
+        // A whole view was marked read on another device. The affected set
+        // isn't enumerated, so refetch lists/counts (open thread included —
+        // its cards show read state) and clear the mailbox's notifications.
+        coalescer.push({ mailboxId: evt.mailboxId, counts: true, folders: true });
+        qc.invalidateQueries({ queryKey: ["thread"] });
+        dismissMailboxNotifications(evt.mailboxId);
         break;
       }
       case "mailbox_expired": {
