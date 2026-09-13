@@ -171,15 +171,61 @@ describe("evaluateSpam — Spamhaus DQS", () => {
     expect(r.reasons.join(" ")).not.toMatch(/Spamhaus/);
   });
 
-  it("scores a DBL-listed sender domain even when DMARC passes", async () => {
+  it("refuses a DBL-listed sender domain even when DMARC passes", async () => {
     stubDoh({ "elsewhere.com/dbl": ["127.0.1.4"] });
     const r = await evalStandard(
       parsed({ authResults: "mx; spf=pass; dkim=pass; dmarc=pass" }),
       dbWithDqsKey(DQS_KEY),
     );
-    expect(r.score).toBe(4);
-    expect(r.verdict).toBe("suspicious");
+    expect(r.verdict).toBe("spam");
     expect(r.reasons.join(" ")).toMatch(/sender domain \(elsewhere\.com\) is listed.*phishing/i);
+    expect(r.reject).toBe(
+      "elsewhere.com is listed by Spamhaus (DBL) — " +
+        "https://check.spamhaus.org/listed/?searchterm=elsewhere.com",
+    );
+  });
+
+  it("scores but does not refuse an abused-legit domain or a listed link", async () => {
+    stubDoh({ "elsewhere.com/dbl": ["127.0.1.103"], "spammy.example/dbl": ["127.0.1.2"] });
+    const r = await evalStandard(
+      parsed({
+        authResults: "mx; spf=pass; dkim=pass; dmarc=pass",
+        html: '<a href="https://spammy.example/x">click</a>',
+      }),
+      dbWithDqsKey(DQS_KEY),
+    );
+    expect(r.reject).toBeNull();
+    expect(r.score).toBe(4); // 2 abused-legit sender + 2 (half-weight) link
+    expect(r.verdict).toBe("suspicious");
+  });
+
+  it("refuses a ZEN-listed connecting host", async () => {
+    stubDoh({ "90.89.168.199/zen": ["127.0.0.10"] });
+    const r = await evalStandard(
+      parsed({
+        authResults: "mx; spf=pass; dkim=none; dmarc=none",
+        received: ["from pbl-dqs.blt.spamhaus.net (unknown [199.168.89.90]) by mx.cloudflare.net"],
+      }),
+      dbWithDqsKey(DQS_KEY),
+    );
+    expect(r.reject).toMatch(/199\.168\.89\.90 is listed by Spamhaus \(PBL\)/);
+  });
+
+  it("scores but does not refuse a PBL hit on a hop that did not reach us", async () => {
+    stubDoh({ "9.9.9.9/zen": ["127.0.0.11"] });
+    const r = await evalStandard(
+      parsed({
+        authResults: "mx; spf=pass; dkim=none; dmarc=none",
+        received: [
+          "from relay.example (relay.example) by mx.cloudflare.net", // no IP on the top hop
+          "from laptop (laptop [9.9.9.9]) by relay.example",
+        ],
+      }),
+      dbWithDqsKey(DQS_KEY),
+    );
+    expect(r.reject).toBeNull();
+    expect(r.score).toBe(4); // 2 no-DMARC + 2 PBL
+    expect(r.verdict).toBe("suspicious");
   });
 
   it("leaves authenticated mail from unlisted domains clean", async () => {
@@ -261,6 +307,39 @@ describe("evaluateSpam — Spamhaus DQS", () => {
       dbWithDqsKey(DQS_KEY),
     );
     expect(r).toMatchObject({ verdict: "clean", score: 0 });
+  });
+
+  // The Spamhaus Blocklist Tester lists the full test hostname, never the
+  // registered domain it sits under.
+  it("checks the full sender hostname, not just the domain under it", async () => {
+    const asked = stubDoh({ "dbl-dqs.blt.spamhaus.net/dbl": ["127.0.1.2"] });
+    const r = await evalStandard(
+      parsed({
+        authResults: "mx; spf=pass; dkim=pass; dmarc=pass",
+        from: "test@dbl-dqs.blt.spamhaus.net",
+      }),
+      dbWithDqsKey(DQS_KEY),
+    );
+    expect(asked()).toContain(`dbl-dqs.blt.spamhaus.net.${DQS_KEY}.dbl.dq.spamhaus.net`);
+    expect(asked()).toContain(`spamhaus.net.${DQS_KEY}.dbl.dq.spamhaus.net`);
+    expect(r.reasons.join(" ")).toMatch(/sender domain \(dbl-dqs\.blt\.spamhaus\.net\)/);
+    expect(r.reject).toMatch(/dbl-dqs\.blt\.spamhaus\.net is listed by Spamhaus \(DBL\)/);
+  });
+
+  it("checks the EHLO name the relay gave", async () => {
+    stubDoh({ "zrd-dqs.blt.spamhaus.net/zrd": ["127.0.2.2"] });
+    const r = await evalStandard(
+      parsed({
+        authResults: "mx; spf=pass; dkim=pass; dmarc=pass",
+        from: "test@unlisted.blt.spamhaus.net",
+        received: ["from zrd-dqs.blt.spamhaus.net (unknown [199.168.89.101]) by mx.cloudflare.net"],
+      }),
+      dbWithDqsKey(DQS_KEY),
+    );
+    expect(r.reasons.join(" ")).toMatch(
+      /identified itself as zrd-dqs\.blt\.spamhaus\.net, first seen 2 hours ago/,
+    );
+    expect(r.reject).toMatch(/zrd-dqs\.blt\.spamhaus\.net is listed by Spamhaus \(ZRD\)/);
   });
 
   it("makes no DQS query at the auth level", async () => {

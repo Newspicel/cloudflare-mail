@@ -168,7 +168,7 @@ That's the whole deploy. The `deploy` script applies pending migrations (`@cfmai
    - **Domains** tab → add the email domains you'll use, and tick which mailbox kinds each allows (`personal`, `group`, `service`, `temp`). The DNS-health badges and DNS records you need are shown inline.
    - **Users** tab → invite teammates (email link) or create accounts directly. Per-user, per-domain mailbox-kind grants live here.
    - Set the **Transactional email** from-address (must be on a verified Email Sending domain) so password reset and invite emails can go out.
-   - Optional, **Blocking** tab → paste a [Spamhaus DQS](https://portal.spamhaus.com/dqs/) query key to switch on IP and domain reputation lookups (ZEN, DBL, ZRD, and AuthBL on IMAP logins). The key is verified against Spamhaus' test points before it is stored. Without one those lookups are skipped — the free public zones refuse queries that arrive via a Worker's DoH resolver.
+   - Optional, **Blocking** tab → paste a [Spamhaus DQS](https://portal.spamhaus.com/dqs/) query key to switch on reputation lookups: ZEN on the connecting host, DBL + ZRD on the sender, EHLO and link domains, AuthBL on IMAP logins. Listed senders are refused at SMTP with the listing named; softer signals only raise the spam score. The key is verified against Spamhaus' test points before it is stored. Without one these lookups are skipped — the free public zones refuse queries that arrive via a Worker's DoH resolver.
 4. In Cloudflare: enable **Email Routing** per zone, route catch-all → this Worker, and verify the zone under **Email Sending**.
 
 ### 6. IMAP access (optional)

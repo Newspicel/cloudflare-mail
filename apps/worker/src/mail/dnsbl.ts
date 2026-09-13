@@ -251,14 +251,35 @@ const MULTI_LABEL_SUFFIXES = new Set([
   "org.uk",
 ]);
 
-/** Folds a hostname to the domain Spamhaus would list, or null if unusable. */
-export function registrableDomain(host: string): string | null {
+/** Lowercases and validates a hostname, or null if it can't be a listed name. */
+export function normalizeHost(host: string): string | null {
   const h = host.trim().toLowerCase().replace(/\.+$/, "");
   if (!h || h.length > 253 || !/^[a-z0-9.-]+$/.test(h)) return null;
   const labels = h.split(".");
   if (labels.length < 2 || labels.some((l) => l === "")) return null;
   if (/^\d+$/.test(labels.at(-1)!)) return null; // IPv4 literal
+  return h;
+}
+
+/** Folds a hostname to the domain Spamhaus would list, or null if unusable. */
+export function registrableDomain(host: string): string | null {
+  const h = normalizeHost(host);
+  if (!h) return null;
+  const labels = h.split(".");
   const base = labels.slice(-2).join(".");
   if (labels.length > 2 && MULTI_LABEL_SUFFIXES.has(base)) return labels.slice(-3).join(".");
   return base;
+}
+
+/**
+ * The names to query for one hostname: the hostname itself and, when different,
+ * the domain it sits under. DBL and ZRD list both — `dbl-dqs.blt.spamhaus.net`
+ * is listed while `spamhaus.net` is not — so folding to the registrable domain
+ * alone silently misses every listing that names a subdomain.
+ */
+export function lookupNames(host: string): string[] {
+  const full = normalizeHost(host);
+  if (!full) return [];
+  const base = registrableDomain(full);
+  return base && base !== full ? [full, base] : [full];
 }
