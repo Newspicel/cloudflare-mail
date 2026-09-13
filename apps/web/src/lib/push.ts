@@ -18,13 +18,20 @@ function urlBase64ToUint8Array(base64: string): Uint8Array {
   return out;
 }
 
-// Ask the service worker to close this thread's notification (read elsewhere).
+// Ask the service worker to close notifications that were read elsewhere —
+// one thread's, or every one a mailbox raised ("mark all as read").
 // Best-effort: no-op when the SW isn't controlling the page yet.
 export function dismissThreadNotification(threadId: string): void {
+  postToWorker({ type: "dismiss-thread", threadId });
+}
+
+export function dismissMailboxNotifications(mailboxId: string): void {
+  postToWorker({ type: "dismiss-mailbox", mailboxId });
+}
+
+function postToWorker(msg: { type: string; threadId?: string; mailboxId?: string }): void {
   if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
-  navigator.serviceWorker.ready
-    .then((reg) => reg.active?.postMessage({ type: "dismiss-thread", threadId }))
-    .catch(() => {});
+  navigator.serviceWorker.ready.then((reg) => reg.active?.postMessage(msg)).catch(() => {});
 }
 
 // True when this device already has an active push subscription.

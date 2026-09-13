@@ -14,7 +14,11 @@ export const keys = {
   contacts: () => ["contacts"] as const,
   /** Prefix matching every thread view + folder counts for a mailbox. */
   threadsRoot: (mailboxId: string) => ["threads", mailboxId] as const,
-  threads: (mailboxId: string, view: MailView) => ["threads", mailboxId, view] as const,
+  /** A view's list; the unread-only variant nests under it so view-level invalidation covers both. */
+  threads: (mailboxId: string, view: MailView, unread = false) =>
+    unread
+      ? (["threads", mailboxId, view, "unread"] as const)
+      : (["threads", mailboxId, view] as const),
   folderCounts: (mailboxId: string) => ["threads", mailboxId, "counts"] as const,
   thread: (threadId: string) => ["thread", threadId] as const,
   messageBody: (messageId: string) => ["message-body", messageId] as const,

@@ -10,7 +10,7 @@ import {
   Star,
   Trash2,
 } from "lucide-react";
-import { folderCountsQuery, MAIL_VIEWS, type MailView } from "@/lib/queries.ts";
+import { folderCountsQuery, listSearch, MAIL_VIEWS, type MailView } from "@/lib/queries.ts";
 import { Tabs, TabsIndicator, TabsList, TabsTab } from "./ui/tabs.tsx";
 import { Tooltip } from "./ui/tooltip.tsx";
 import { UnreadBadge } from "./ui.tsx";
@@ -25,7 +25,16 @@ export const FOLDER_META: Record<MailView, { label: string; icon: LucideIcon; em
   all: { label: "All Mail", icon: Mails, empty: "No mail." },
 };
 
-export function FolderTabs({ mailboxId, view }: { mailboxId: string; view: MailView }) {
+export function FolderTabs({
+  mailboxId,
+  view,
+  unread,
+}: {
+  mailboxId: string;
+  view: MailView;
+  /** Unread-only filter is a mode of the list, so switching tabs keeps it. */
+  unread?: boolean;
+}) {
   const { data } = useQuery(folderCountsQuery(mailboxId));
   return (
     <Tabs value={view} className="flex-1">
@@ -33,19 +42,25 @@ export function FolderTabs({ mailboxId, view }: { mailboxId: string; view: MailV
         {MAIL_VIEWS.map((v) => {
           const m = FOLDER_META[v];
           // Only surface a badge for unread mail — totals stay out of the tab bar.
-          const unread = data?.counts[v]?.unread ?? 0;
-          const label = unread > 0 ? `${m.label} · ${unread} unread` : m.label;
+          const unreadCount = data?.counts[v]?.unread ?? 0;
+          const label = unreadCount > 0 ? `${m.label} · ${unreadCount} unread` : m.label;
           return (
             <Tooltip key={v} label={label}>
               <TabsTab
                 value={v}
                 aria-label={label}
                 className="relative flex-1 px-0"
-                render={<Link to="/app/m/$mailboxId" params={{ mailboxId }} search={{ view: v }} />}
+                render={
+                  <Link
+                    to="/app/m/$mailboxId"
+                    params={{ mailboxId }}
+                    search={listSearch(v, unread)}
+                  />
+                }
               >
                 <m.icon />
                 <UnreadBadge
-                  count={unread}
+                  count={unreadCount}
                   className="-top-1 -right-1 absolute h-3.5 min-w-3.5 font-medium text-[9px]"
                 />
               </TabsTab>

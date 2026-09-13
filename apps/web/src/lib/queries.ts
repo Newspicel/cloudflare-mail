@@ -14,6 +14,7 @@ import type {
   SearchResultDto,
   ThreadDto,
 } from "@cfmail/shared";
+import { MAIL_VIEWS } from "@cfmail/shared/schemas";
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { rpc, unwrap } from "./api.ts";
 import { keys } from "./query-keys.ts";
@@ -67,25 +68,42 @@ export const contactsQuery = queryOptions({
 // name; real ids are UUIDs so it never collides.
 export const ALL_MAILBOXES = "all";
 
-export const MAIL_VIEWS: MailView[] = ["inbox", "drafts", "sent", "marked", "spam", "trash", "all"];
+export { MAIL_VIEWS };
 
 export function parseMailView(value: unknown): MailView {
   return MAIL_VIEWS.includes(value as MailView) ? (value as MailView) : "inbox";
+}
+
+// Search params of the mailbox list routes. `unread` narrows the list to
+// threads with unread mail; it's omitted (never `false`) when off so links and
+// URLs stay clean and one `listSearch` shape serves every navigation.
+export interface MailListSearch {
+  view: MailView;
+  unread?: true;
+}
+
+export function listSearch(view: MailView, unread?: boolean): MailListSearch {
+  return unread ? { view, unread: true } : { view };
+}
+
+export function parseMailListSearch(search: Record<string, unknown>): MailListSearch {
+  return listSearch(parseMailView(search.view), search.unread === true);
 }
 
 // Page size for the infinite thread lists. The worker caps at 200; 50 keeps the
 // first paint light while still filling a tall viewport in one fetch.
 const THREAD_PAGE = 50;
 
-export const threadsQuery = (mailboxId: string, view: MailView = "inbox") =>
+export const threadsQuery = (mailboxId: string, view: MailView = "inbox", unread = false) =>
   infiniteQueryOptions({
-    queryKey: keys.threads(mailboxId, view),
+    queryKey: keys.threads(mailboxId, view, unread),
     queryFn: ({ pageParam }) =>
       unwrap(
         rpc.threads.$get({
           query: {
             mailboxId,
             view,
+            unread: unread ? "1" : undefined,
             limit: String(THREAD_PAGE),
             cursor: pageParam ?? undefined,
           },

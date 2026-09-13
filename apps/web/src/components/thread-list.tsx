@@ -1,8 +1,11 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import {
   ArchiveRestore,
+  EllipsisVertical,
   Flag,
   Inbox,
+  ListFilter,
   Loader2,
   Mail,
   MailOpen,
@@ -15,8 +18,9 @@ import { type CSSProperties, useRef, useState } from "react";
 import { toast } from "sonner";
 import { rpc, unwrap } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
-import { patchThreadsInLists, removeThreadsFromLists } from "@/lib/invalidate.ts";
+import { markListRead, patchThreadsInLists, removeThreadsFromLists } from "@/lib/invalidate.ts";
 import {
+  listSearch,
   type MailView,
   type MessageLabel,
   type ThreadRow,
@@ -39,15 +43,24 @@ import {
   RowContextMenu,
 } from "./thread-context-menu.tsx";
 import { type RowSwipe, ThreadRowView } from "./thread-row.tsx";
+import { Button } from "./ui/button.tsx";
 import { Checkbox } from "./ui/checkbox.tsx";
 import { useConfirmHelpers } from "./ui/confirm.tsx";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu.tsx";
 import { IconButton } from "./ui/icon-button.tsx";
-import { TooltipProvider } from "./ui/tooltip.tsx";
+import { Tooltip, TooltipProvider } from "./ui/tooltip.tsx";
 import { EmptyState, ThreadListSkeleton } from "./ui.tsx";
 
 interface Props {
   mailboxId: string;
   view: MailView;
+  /** Unread-only filter (a search param, so it survives reloads and thread opens). */
+  unread?: boolean;
   threads: ThreadRow[];
   loading?: boolean;
   selectedThreadId?: string;
@@ -60,6 +73,7 @@ interface Props {
 export function ThreadList({
   mailboxId,
   view,
+  unread = false,
   threads,
   loading,
   selectedThreadId,
@@ -71,8 +85,23 @@ export function ThreadList({
   const meta = FOLDER_META[view];
   const { confirmDelete } = useConfirmHelpers();
   const queryClient = useQueryClient();
+  const nav = useNavigate();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const selecting = selected.size > 0;
+
+  // Flip the filter in place: stay on the open thread when there is one.
+  const setUnread = (next: boolean) => {
+    const search = listSearch(view, next);
+    if (selectedThreadId) {
+      nav({
+        to: "/app/m/$mailboxId/t/$threadId",
+        params: { mailboxId, threadId: selectedThreadId },
+        search,
+      });
+    } else {
+      nav({ to: "/app/m/$mailboxId", params: { mailboxId }, search });
+    }
+  };
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const onRefresh = () => queryClient.invalidateQueries({ queryKey: keys.threadsRoot(mailboxId) });
@@ -80,7 +109,7 @@ export function ThreadList({
   const pull = usePullToRefresh(scrollRef, onRefresh, ready);
   const virtualizer = useListVirtualizer(scrollRef, threads.length, {
     infinite: { hasMore, loadingMore, loadMore: () => loadMore?.() },
-    cacheKey: `m:${mailboxId}:${view}`,
+    cacheKey: `m:${mailboxId}:${view}${unread ? ":unread" : ""}`,
   });
   const vItems = virtualizer.getVirtualItems();
   const remeasure = (i: number, el: HTMLLIElement) => virtualizer.resizeItem(i, el.offsetHeight);
@@ -123,6 +152,24 @@ export function ThreadList({
     optimistic: (ids, qc) => removeThreadsFromLists(qc, mailboxId, ids),
     onApply: () => setSelected(new Set()),
   });
+
+  // Whole-view "mark all as read": one server call scoped like the list itself.
+  const readAll = useThreadListMutation<void, { threads: number }>({
+    mailboxId,
+    mutationFn: () => unwrap(rpc.threads["read-all"].$post({ json: { mailboxId, view } })),
+    optimistic: (_v, qc) => markListRead(qc, mailboxId, view),
+  });
+
+  function markAllRead() {
+    readAll.mutate(undefined, {
+      onSuccess: ({ threads: n }) =>
+        toast.success(
+          n === 0
+            ? "Nothing unread"
+            : `Marked ${n} ${n === 1 ? "conversation" : "conversations"} as read`,
+        ),
+    });
+  }
 
   async function deleteSelected() {
     // Only whole-thread-trashed threads can be bulk-purged. Threads surfaced in
@@ -233,15 +280,60 @@ export function ThreadList({
             </div>
           </div>
         ) : (
-          <div className="flex h-11 shrink-0 items-center gap-2 border-b px-2">
-            <FolderTabs mailboxId={mailboxId} view={view} />
+          <div className="flex h-11 shrink-0 items-center gap-1 border-b px-2">
+            <FolderTabs mailboxId={mailboxId} view={view} unread={unread} />
+            <Tooltip label={unread ? "Show all conversations" : "Show unread only"}>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Unread only"
+                aria-pressed={unread}
+                className={cn(
+                  "shrink-0",
+                  unread && "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary",
+                )}
+                onClick={() => setUnread(!unread)}
+              >
+                <ListFilter />
+              </Button>
+            </Tooltip>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <IconButton
+                    icon={EllipsisVertical}
+                    label="More"
+                    size="icon-sm"
+                    className="shrink-0"
+                  />
+                }
+              />
+              <DropdownMenuContent>
+                <DropdownMenuItem disabled={readAll.isPending} onClick={markAllRead}>
+                  <MailOpen /> Mark all in {meta.label} as read
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         )}
         {expiresAt && <ExpiryBanner expiresAt={expiresAt} />}
         {loading ? (
           <ThreadListSkeleton />
         ) : threads.length === 0 ? (
-          <EmptyState icon={meta.icon} title={meta.empty} className="m-auto" />
+          unread ? (
+            <EmptyState
+              icon={MailOpen}
+              title="No unread conversations."
+              className="m-auto"
+              action={
+                <Button variant="outline" size="sm" onClick={() => setUnread(false)}>
+                  Show all
+                </Button>
+              }
+            />
+          ) : (
+            <EmptyState icon={meta.icon} title={meta.empty} className="m-auto" />
+          )
         ) : (
           <div ref={scrollRef} className="relative flex-1 overflow-y-auto">
             {(pull.distance > 0 || pull.refreshing) && (
@@ -274,6 +366,7 @@ export function ThreadList({
                     style={rowStyle(vi.start)}
                     mailboxId={mailboxId}
                     view={view}
+                    unread={unread}
                     thread={t}
                     labels={labelsByThread?.[t.id]}
                     active={t.id === selectedThreadId}
@@ -311,6 +404,7 @@ function rowStyle(start: number): CSSProperties {
 function ThreadRowItem({
   mailboxId,
   view,
+  unread: unreadOnly,
   thread,
   labels,
   active,
@@ -325,6 +419,7 @@ function ThreadRowItem({
 }: {
   mailboxId: string;
   view: MailView;
+  unread: boolean;
   thread: ThreadRow;
   labels?: MessageLabel[];
   active: boolean;
@@ -486,7 +581,7 @@ function ThreadRowItem({
         <ThreadRowView
           swipe={swipe}
           thread={thread}
-          link={{ kind: "mailbox", mailboxId, view }}
+          link={{ kind: "mailbox", mailboxId, view, unread: unreadOnly }}
           active={active}
           selected={selected}
           labels={labels}

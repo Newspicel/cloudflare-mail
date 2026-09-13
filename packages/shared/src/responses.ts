@@ -28,6 +28,7 @@ import type {
   rule,
   thread,
 } from "@cfmail/db/schema";
+import type { MAIL_VIEWS } from "./schemas.ts";
 
 // Re-exported so the web app gets the rule JSON shapes without importing @cfmail/db.
 export type { RuleAction, RuleCondition };
@@ -264,7 +265,7 @@ export interface ThreadSummaryDto {
   bullets: string[];
 }
 
-export type MailView = "inbox" | "drafts" | "sent" | "marked" | "spam" | "trash" | "all";
+export type MailView = (typeof MAIL_VIEWS)[number];
 export type FolderCountsDto = Record<MailView, { total: number; unread: number }>;
 
 // ─── Response envelopes (used by handlers via `satisfies`) ──────────────────

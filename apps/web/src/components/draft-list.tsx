@@ -19,6 +19,7 @@ import { EmptyState, ThreadListSkeleton } from "./ui.tsx";
 interface Props {
   mailboxId: string;
   view: MailView;
+  unread?: boolean;
   drafts: DraftRow[];
   loading?: boolean;
   hasMore?: boolean;
@@ -40,6 +41,7 @@ function rowStyle(start: number): CSSProperties {
 export function DraftList({
   mailboxId,
   view,
+  unread,
   drafts,
   loading,
   hasMore = false,
@@ -96,7 +98,7 @@ export function DraftList({
     <TooltipProvider delay={400}>
       <div className="flex h-full flex-col bg-card">
         <div className="flex h-11 shrink-0 items-center gap-2 border-b px-2">
-          <FolderTabs mailboxId={mailboxId} view={view} />
+          <FolderTabs mailboxId={mailboxId} view={view} unread={unread} />
         </div>
         {loading ? (
           <ThreadListSkeleton />

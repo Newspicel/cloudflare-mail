@@ -14,8 +14,8 @@ export const Route = createFileRoute("/app/m/$mailboxId/t/$threadId")({
 
 function ThreadPage() {
   const { mailboxId, threadId } = Route.useParams();
-  const { view } = Route.useSearch();
-  const feed = useThreadFeed(mailboxId, view);
+  const { view, unread } = Route.useSearch();
+  const feed = useThreadFeed(mailboxId, view, true, unread);
   const { data: threadData } = useQuery(threadQuery(threadId));
   const { data: mailboxesData } = useQuery(mailboxesQuery);
   const mailbox = mailboxesData?.mailboxes.find((m) => m.id === mailboxId);
@@ -26,6 +26,7 @@ function ThreadPage() {
         <ThreadList
           mailboxId={mailboxId}
           view={view}
+          unread={unread}
           threads={feed.items}
           loading={feed.loading}
           hasMore={feed.hasMore}
@@ -37,7 +38,12 @@ function ThreadPage() {
       </aside>
       <section className="flex flex-1 flex-col overflow-hidden">
         {threadData ? (
-          <MessageView thread={threadData.thread} messages={threadData.messages} view={view} />
+          <MessageView
+            thread={threadData.thread}
+            messages={threadData.messages}
+            view={view}
+            unread={unread}
+          />
         ) : (
           <MessageSkeleton />
         )}

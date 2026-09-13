@@ -1,4 +1,4 @@
-import type { MailboxSummaryDto, MessageDto, ThreadDto } from "@cfmail/shared";
+import type { MailboxSummaryDto, MailView, MessageDto, ThreadDto } from "@cfmail/shared";
 import type { QueryClient } from "@tanstack/react-query";
 import { keys } from "./query-keys.ts";
 
@@ -154,6 +154,20 @@ export function patchThreadsInLists(
           threads.map((t) => (idSet.has(t.id) ? { ...t, ...patch } : t)),
         )
       : old,
+  );
+}
+
+/**
+ * "Mark all as read" over one view: every cached row of the plain list reads as
+ * read, and the unread-only variant of the same view empties. Settle refetches
+ * the truth (the server only touched threads the view actually showed).
+ */
+export function markListRead(qc: QueryClient, mailboxId: string, view: MailView): void {
+  qc.setQueryData(keys.threads(mailboxId, view), (old) =>
+    old ? mapThreadCache(old, (threads) => threads.map((t) => ({ ...t, unreadCount: 0 }))) : old,
+  );
+  qc.setQueryData(keys.threads(mailboxId, view, true), (old) =>
+    old ? mapThreadCache(old, () => []) : old,
   );
 }
 

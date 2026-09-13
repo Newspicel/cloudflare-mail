@@ -3,9 +3,9 @@ import { toast } from "sonner";
 import { invalidateThreadChange, restoreSnapshot, snapshotMailboxThreads } from "./invalidate.ts";
 import { keys } from "./query-keys.ts";
 
-interface Config<V> {
+interface Config<V, R> {
   mailboxId: string;
-  mutationFn: (vars: V) => Promise<unknown>;
+  mutationFn: (vars: V) => Promise<R>;
   /**
    * Apply the optimistic change to the cached lists. When provided, the lists
    * are snapshotted first and restored automatically if the request fails;
@@ -21,14 +21,14 @@ interface Config<V> {
 
 // The cancel → snapshot → mutate → restore-on-error → toast → settle dance,
 // in one place so every thread mutation gets the same optimistic UX.
-export function useThreadListMutation<V>({
+export function useThreadListMutation<V, R = unknown>({
   mailboxId,
   mutationFn,
   optimistic,
   threadId,
   onApply,
   errorMessage = "Failed",
-}: Config<V>) {
+}: Config<V, R>) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn,

@@ -132,6 +132,16 @@ export const updateThread = z.object({
   read: z.boolean().optional(),
 });
 
+export const MAIL_VIEWS = ["inbox", "drafts", "sent", "marked", "spam", "trash", "all"] as const;
+
+// Bulk "mark all as read" over one list view of a mailbox (or the combined
+// "all" mailbox). Scoped like the thread list so only what the user is looking
+// at flips — spam stays unread when the inbox is cleared.
+export const markAllRead = z.object({
+  mailboxId: z.string().min(1),
+  view: z.enum(MAIL_VIEWS).default("inbox"),
+});
+
 // ─── Reminders ──────────────────────────────────────────────────────────────
 
 // `remindAt` is epoch ms, bounded to the future and within a year so a typo
