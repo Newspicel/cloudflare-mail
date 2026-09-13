@@ -9,48 +9,28 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from "./routes/__root"
-import { Route as TwoFactorRouteImport } from "./routes/two-factor"
-import { Route as ResetPasswordRouteImport } from "./routes/reset-password"
-import { Route as LoginRouteImport } from "./routes/login"
-import { Route as ForgotPasswordRouteImport } from "./routes/forgot-password"
-import { Route as ComposeRouteImport } from "./routes/compose"
+import { Route as IndexRouteImport } from "./routes/index"
 import { Route as AcceptInviteRouteImport } from "./routes/accept-invite"
 import { Route as AppRouteRouteImport } from "./routes/app/route"
-import { Route as IndexRouteImport } from "./routes/index"
+import { Route as ComposeRouteImport } from "./routes/compose"
+import { Route as ForgotPasswordRouteImport } from "./routes/forgot-password"
+import { Route as LoginRouteImport } from "./routes/login"
+import { Route as ResetPasswordRouteImport } from "./routes/reset-password"
+import { Route as TwoFactorRouteImport } from "./routes/two-factor"
 import { Route as AppIndexRouteImport } from "./routes/app/index"
-import { Route as AppSettingsRouteImport } from "./routes/app/settings"
-import { Route as AppSearchRouteImport } from "./routes/app/search"
 import { Route as AppAdminRouteImport } from "./routes/app/admin"
-import { Route as AppMMailboxIdRouteImport } from "./routes/app/m/$mailboxId"
+import { Route as AppSearchRouteImport } from "./routes/app/search"
+import { Route as AppSettingsRouteImport } from "./routes/app/settings"
 import { Route as AppFolderFolderIdRouteImport } from "./routes/app/folder/$folderId"
-import { Route as AppMMailboxIdIndexRouteImport } from "./routes/app/m/$mailboxId.index"
+import { Route as AppMMailboxIdRouteImport } from "./routes/app/m/$mailboxId"
 import { Route as AppFolderFolderIdIndexRouteImport } from "./routes/app/folder/$folderId.index"
-import { Route as AppMMailboxIdTThreadIdRouteImport } from "./routes/app/m/$mailboxId.t.$threadId"
+import { Route as AppMMailboxIdIndexRouteImport } from "./routes/app/m/$mailboxId.index"
 import { Route as AppFolderFolderIdTThreadIdRouteImport } from "./routes/app/folder/$folderId.t.$threadId"
+import { Route as AppMMailboxIdTThreadIdRouteImport } from "./routes/app/m/$mailboxId.t.$threadId"
 
-const TwoFactorRoute = TwoFactorRouteImport.update({
-  id: "/two-factor",
-  path: "/two-factor",
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ResetPasswordRoute = ResetPasswordRouteImport.update({
-  id: "/reset-password",
-  path: "/reset-password",
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LoginRoute = LoginRouteImport.update({
-  id: "/login",
-  path: "/login",
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
-  id: "/forgot-password",
-  path: "/forgot-password",
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ComposeRoute = ComposeRouteImport.update({
-  id: "/compose",
-  path: "/compose",
+const IndexRoute = IndexRouteImport.update({
+  id: "/",
+  path: "/",
   getParentRoute: () => rootRouteImport,
 } as any)
 const AcceptInviteRoute = AcceptInviteRouteImport.update({
@@ -63,9 +43,29 @@ const AppRouteRoute = AppRouteRouteImport.update({
   path: "/app",
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: "/",
-  path: "/",
+const ComposeRoute = ComposeRouteImport.update({
+  id: "/compose",
+  path: "/compose",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
+  id: "/forgot-password",
+  path: "/forgot-password",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: "/login",
+  path: "/login",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: "/reset-password",
+  path: "/reset-password",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TwoFactorRoute = TwoFactorRouteImport.update({
+  id: "/two-factor",
+  path: "/two-factor",
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppIndexRoute = AppIndexRouteImport.update({
@@ -73,9 +73,9 @@ const AppIndexRoute = AppIndexRouteImport.update({
   path: "/",
   getParentRoute: () => AppRouteRoute,
 } as any)
-const AppSettingsRoute = AppSettingsRouteImport.update({
-  id: "/settings",
-  path: "/settings",
+const AppAdminRoute = AppAdminRouteImport.update({
+  id: "/admin",
+  path: "/admin",
   getParentRoute: () => AppRouteRoute,
 } as any)
 const AppSearchRoute = AppSearchRouteImport.update({
@@ -83,14 +83,9 @@ const AppSearchRoute = AppSearchRouteImport.update({
   path: "/search",
   getParentRoute: () => AppRouteRoute,
 } as any)
-const AppAdminRoute = AppAdminRouteImport.update({
-  id: "/admin",
-  path: "/admin",
-  getParentRoute: () => AppRouteRoute,
-} as any)
-const AppMMailboxIdRoute = AppMMailboxIdRouteImport.update({
-  id: "/m/$mailboxId",
-  path: "/m/$mailboxId",
+const AppSettingsRoute = AppSettingsRouteImport.update({
+  id: "/settings",
+  path: "/settings",
   getParentRoute: () => AppRouteRoute,
 } as any)
 const AppFolderFolderIdRoute = AppFolderFolderIdRouteImport.update({
@@ -98,19 +93,19 @@ const AppFolderFolderIdRoute = AppFolderFolderIdRouteImport.update({
   path: "/folder/$folderId",
   getParentRoute: () => AppRouteRoute,
 } as any)
-const AppMMailboxIdIndexRoute = AppMMailboxIdIndexRouteImport.update({
-  id: "/",
-  path: "/",
-  getParentRoute: () => AppMMailboxIdRoute,
+const AppMMailboxIdRoute = AppMMailboxIdRouteImport.update({
+  id: "/m/$mailboxId",
+  path: "/m/$mailboxId",
+  getParentRoute: () => AppRouteRoute,
 } as any)
 const AppFolderFolderIdIndexRoute = AppFolderFolderIdIndexRouteImport.update({
   id: "/",
   path: "/",
   getParentRoute: () => AppFolderFolderIdRoute,
 } as any)
-const AppMMailboxIdTThreadIdRoute = AppMMailboxIdTThreadIdRouteImport.update({
-  id: "/t/$threadId",
-  path: "/t/$threadId",
+const AppMMailboxIdIndexRoute = AppMMailboxIdIndexRouteImport.update({
+  id: "/",
+  path: "/",
   getParentRoute: () => AppMMailboxIdRoute,
 } as any)
 const AppFolderFolderIdTThreadIdRoute =
@@ -119,6 +114,11 @@ const AppFolderFolderIdTThreadIdRoute =
     path: "/t/$threadId",
     getParentRoute: () => AppFolderFolderIdRoute,
   } as any)
+const AppMMailboxIdTThreadIdRoute = AppMMailboxIdTThreadIdRouteImport.update({
+  id: "/t/$threadId",
+  path: "/t/$threadId",
+  getParentRoute: () => AppMMailboxIdRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
@@ -251,39 +251,11 @@ export interface RootRouteChildren {
 
 declare module "@tanstack/react-router" {
   interface FileRoutesByPath {
-    "/two-factor": {
-      id: "/two-factor"
-      path: "/two-factor"
-      fullPath: "/two-factor"
-      preLoaderRoute: typeof TwoFactorRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    "/reset-password": {
-      id: "/reset-password"
-      path: "/reset-password"
-      fullPath: "/reset-password"
-      preLoaderRoute: typeof ResetPasswordRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    "/login": {
-      id: "/login"
-      path: "/login"
-      fullPath: "/login"
-      preLoaderRoute: typeof LoginRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    "/forgot-password": {
-      id: "/forgot-password"
-      path: "/forgot-password"
-      fullPath: "/forgot-password"
-      preLoaderRoute: typeof ForgotPasswordRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    "/compose": {
-      id: "/compose"
-      path: "/compose"
-      fullPath: "/compose"
-      preLoaderRoute: typeof ComposeRouteImport
+    "/": {
+      id: "/"
+      path: "/"
+      fullPath: "/"
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     "/accept-invite": {
@@ -300,11 +272,39 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AppRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
-    "/": {
-      id: "/"
-      path: "/"
-      fullPath: "/"
-      preLoaderRoute: typeof IndexRouteImport
+    "/compose": {
+      id: "/compose"
+      path: "/compose"
+      fullPath: "/compose"
+      preLoaderRoute: typeof ComposeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/forgot-password": {
+      id: "/forgot-password"
+      path: "/forgot-password"
+      fullPath: "/forgot-password"
+      preLoaderRoute: typeof ForgotPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/login": {
+      id: "/login"
+      path: "/login"
+      fullPath: "/login"
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/reset-password": {
+      id: "/reset-password"
+      path: "/reset-password"
+      fullPath: "/reset-password"
+      preLoaderRoute: typeof ResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/two-factor": {
+      id: "/two-factor"
+      path: "/two-factor"
+      fullPath: "/two-factor"
+      preLoaderRoute: typeof TwoFactorRouteImport
       parentRoute: typeof rootRouteImport
     }
     "/app/": {
@@ -314,11 +314,11 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AppIndexRouteImport
       parentRoute: typeof AppRouteRoute
     }
-    "/app/settings": {
-      id: "/app/settings"
-      path: "/settings"
-      fullPath: "/app/settings"
-      preLoaderRoute: typeof AppSettingsRouteImport
+    "/app/admin": {
+      id: "/app/admin"
+      path: "/admin"
+      fullPath: "/app/admin"
+      preLoaderRoute: typeof AppAdminRouteImport
       parentRoute: typeof AppRouteRoute
     }
     "/app/search": {
@@ -328,18 +328,11 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AppSearchRouteImport
       parentRoute: typeof AppRouteRoute
     }
-    "/app/admin": {
-      id: "/app/admin"
-      path: "/admin"
-      fullPath: "/app/admin"
-      preLoaderRoute: typeof AppAdminRouteImport
-      parentRoute: typeof AppRouteRoute
-    }
-    "/app/m/$mailboxId": {
-      id: "/app/m/$mailboxId"
-      path: "/m/$mailboxId"
-      fullPath: "/app/m/$mailboxId"
-      preLoaderRoute: typeof AppMMailboxIdRouteImport
+    "/app/settings": {
+      id: "/app/settings"
+      path: "/settings"
+      fullPath: "/app/settings"
+      preLoaderRoute: typeof AppSettingsRouteImport
       parentRoute: typeof AppRouteRoute
     }
     "/app/folder/$folderId": {
@@ -349,12 +342,12 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AppFolderFolderIdRouteImport
       parentRoute: typeof AppRouteRoute
     }
-    "/app/m/$mailboxId/": {
-      id: "/app/m/$mailboxId/"
-      path: "/"
-      fullPath: "/app/m/$mailboxId/"
-      preLoaderRoute: typeof AppMMailboxIdIndexRouteImport
-      parentRoute: typeof AppMMailboxIdRoute
+    "/app/m/$mailboxId": {
+      id: "/app/m/$mailboxId"
+      path: "/m/$mailboxId"
+      fullPath: "/app/m/$mailboxId"
+      preLoaderRoute: typeof AppMMailboxIdRouteImport
+      parentRoute: typeof AppRouteRoute
     }
     "/app/folder/$folderId/": {
       id: "/app/folder/$folderId/"
@@ -363,11 +356,11 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AppFolderFolderIdIndexRouteImport
       parentRoute: typeof AppFolderFolderIdRoute
     }
-    "/app/m/$mailboxId/t/$threadId": {
-      id: "/app/m/$mailboxId/t/$threadId"
-      path: "/t/$threadId"
-      fullPath: "/app/m/$mailboxId/t/$threadId"
-      preLoaderRoute: typeof AppMMailboxIdTThreadIdRouteImport
+    "/app/m/$mailboxId/": {
+      id: "/app/m/$mailboxId/"
+      path: "/"
+      fullPath: "/app/m/$mailboxId/"
+      preLoaderRoute: typeof AppMMailboxIdIndexRouteImport
       parentRoute: typeof AppMMailboxIdRoute
     }
     "/app/folder/$folderId/t/$threadId": {
@@ -376,6 +369,13 @@ declare module "@tanstack/react-router" {
       fullPath: "/app/folder/$folderId/t/$threadId"
       preLoaderRoute: typeof AppFolderFolderIdTThreadIdRouteImport
       parentRoute: typeof AppFolderFolderIdRoute
+    }
+    "/app/m/$mailboxId/t/$threadId": {
+      id: "/app/m/$mailboxId/t/$threadId"
+      path: "/t/$threadId"
+      fullPath: "/app/m/$mailboxId/t/$threadId"
+      preLoaderRoute: typeof AppMMailboxIdTThreadIdRouteImport
+      parentRoute: typeof AppMMailboxIdRoute
     }
   }
 }

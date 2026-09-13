@@ -32,7 +32,7 @@ Edit `schema.ts`, then `pnpm --filter @cfmail/db generate` to emit the `drizzle/
 
 ## Tooling
 
-- Typecheck: `pnpm typecheck` (tsgo — not `tsc`, no `composite: true`).
+- Typecheck: `pnpm typecheck` (`tsc` from `typescript@7`, the native compiler — no `composite: true`).
 - Lint: `pnpm lint` (oxlint + Biome — keep both green).
 - `apps/web/src/routeTree.gen.ts` is generated (`tsr generate`). Don't edit it.
 - New deps must run on the Workers runtime (no Node-only APIs unless `nodejs_compat` covers them).

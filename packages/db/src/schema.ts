@@ -143,6 +143,8 @@ export const twoFactor = sqliteTable(
     secret: text("secret").notNull(),
     backupCodes: text("backup_codes").notNull(),
     verified: integer("verified", { mode: "boolean" }).default(true),
+    failedVerificationCount: integer("failed_verification_count").default(0),
+    lockedUntil: integer("locked_until", { mode: "timestamp" }),
   },
   (t) => [index("two_factor_user_idx").on(t.userId)],
 );

@@ -32,8 +32,9 @@ export function TwoFactorSection({ enabled }: { enabled: boolean }) {
       return res.data;
     },
     onSuccess: (data) => {
-      setTotpUri(data?.totpURI ?? null);
-      setBackupCodes(data?.backupCodes ?? null);
+      const totp = data?.method === "totp" ? data : null;
+      setTotpUri(totp?.totpURI ?? null);
+      setBackupCodes(totp?.backupCodes ?? null);
       setPassword("");
       qc.invalidateQueries({ queryKey: meQuery.queryKey });
       toast.success("Scan the QR / save backup codes, then verify below");

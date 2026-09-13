@@ -30,15 +30,12 @@ describe("isBlockedHost — IPv4 literals", () => {
     expect(isBlockedHost(h)).toBe(true);
   });
 
-  it.each([
-    "8.8.8.8",
-    "1.1.1.1",
-    "93.184.216.34",
-    "172.32.0.1",
-    "100.128.0.1",
-  ])("allows %s", (h) => {
-    expect(isBlockedHost(h)).toBe(false);
-  });
+  it.each(["8.8.8.8", "1.1.1.1", "93.184.216.34", "172.32.0.1", "100.128.0.1"])(
+    "allows %s",
+    (h) => {
+      expect(isBlockedHost(h)).toBe(false);
+    },
+  );
 });
 
 describe("isBlockedHost — plain IPv6", () => {
@@ -66,15 +63,12 @@ describe("isBlockedHost — plain IPv6", () => {
     expect(isBlockedHost(h)).toBe(false);
   });
 
-  it.each([
-    "::1::2",
-    "1:2:3:4:5:6:7:8:9",
-    "abcd::efgh",
-    "::ffff:1.2.3",
-    "::ffff:1.2.3.999",
-  ])("blocks malformed literal %s", (h) => {
-    expect(isBlockedHost(h)).toBe(true);
-  });
+  it.each(["::1::2", "1:2:3:4:5:6:7:8:9", "abcd::efgh", "::ffff:1.2.3", "::ffff:1.2.3.999"])(
+    "blocks malformed literal %s",
+    (h) => {
+      expect(isBlockedHost(h)).toBe(true);
+    },
+  );
 });
 
 describe("isBlockedHost — IPv4-mapped/compat IPv6", () => {
@@ -93,13 +87,12 @@ describe("isBlockedHost — IPv4-mapped/compat IPv6", () => {
     expect(isBlockedHost(h)).toBe(true);
   });
 
-  it.each([
-    "::ffff:8.8.8.8",
-    "::ffff:808:808",
-    "::ffff:1.1.1.1",
-  ])("allows mapped public %s", (h) => {
-    expect(isBlockedHost(h)).toBe(false);
-  });
+  it.each(["::ffff:8.8.8.8", "::ffff:808:808", "::ffff:1.1.1.1"])(
+    "allows mapped public %s",
+    (h) => {
+      expect(isBlockedHost(h)).toBe(false);
+    },
+  );
 });
 
 describe("isBlockedHost — NAT64 (64:ff9b::/96)", () => {
