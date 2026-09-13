@@ -1,5 +1,6 @@
-import { mailboxMember } from "@cfmail/db/schema";
+import { mailbox, mailboxMember } from "@cfmail/db/schema";
 import { Perm } from "@cfmail/shared/permissions";
+import { eq } from "drizzle-orm";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { draftsRoutes } from "../../src/api/drafts.ts";
 import { applyMigrationsOnce, db, e, mountApp, request, resetDb } from "../support/app.ts";
@@ -184,6 +185,18 @@ describe("drafts", () => {
     expect(new Set(body.drafts.map((d) => d.mailboxId))).toEqual(
       new Set([MAILBOX_ID, OTHER_MAILBOX_ID]),
     );
+  });
+
+  it("the ALL view skips mailboxes opted out of All Mail", async () => {
+    await createDraft(asOwner(), { mailboxId: MAILBOX_ID });
+    await createDraft(asOwner(), { mailboxId: OTHER_MAILBOX_ID });
+    await db()
+      .update(mailbox)
+      .set({ excludeFromAll: true })
+      .where(eq(mailbox.id, OTHER_MAILBOX_ID));
+    const res = await request(asOwner(), "GET", "/?mailboxId=all");
+    const body = (await res.json()) as { drafts: DraftDto[] };
+    expect(body.drafts.map((d) => d.mailboxId)).toEqual([MAILBOX_ID]);
   });
 
   it("403s an outsider listing a mailbox they can't read", async () => {

@@ -33,11 +33,12 @@ export function threadsRoutes() {
       const mailboxId = c.req.query("mailboxId");
       if (!mailboxId) throw new HTTPException(400, { message: "mailboxId required" });
 
-      // The combined "All" view spans every mailbox the user can read; a normal
-      // request is scoped (and permission-checked) to a single mailbox.
+      // The combined "All" view spans every mailbox the user can read and hasn't
+      // opted out of All Mail; a normal request is scoped (and permission-checked)
+      // to a single mailbox.
       let scope: SQL;
       if (mailboxId === ALL_MAILBOXES) {
-        const ids = await accessibleMailboxIds(db, user.id);
+        const ids = await accessibleMailboxIds(db, user.id, { combinedView: true });
         if (ids.length === 0) return c.json({ threads: [] });
         scope = inArray(thread.mailboxId, ids);
       } else {
@@ -103,11 +104,12 @@ export function threadsRoutes() {
 
       const isAll = mailboxId === ALL_MAILBOXES;
       let inMailbox: SQL;
+      let allIds: string[] = [];
       if (isAll) {
-        const ids = await accessibleMailboxIds(db, user.id);
-        if (ids.length === 0)
+        allIds = await accessibleMailboxIds(db, user.id, { combinedView: true });
+        if (allIds.length === 0)
           return c.json({ counts: emptyCounts() } satisfies FolderCountsResponseDto);
-        inMailbox = inArray(thread.mailboxId, ids);
+        inMailbox = inArray(thread.mailboxId, allIds);
       } else {
         const access = await requirePerm(db, user.id, mailboxId, Perm.READ);
         if (access.purging)
@@ -142,9 +144,9 @@ export function threadsRoutes() {
         .from(thread)
         .where(inMailbox);
       // Drafts are per-author and live in their own table; the "All" view counts
-      // the user's drafts across every mailbox, otherwise just the one.
+      // the user's drafts across the same mailboxes it lists, otherwise just the one.
       const draftWhere = isAll
-        ? eq(draft.userId, user.id)
+        ? and(eq(draft.userId, user.id), inArray(draft.mailboxId, allIds))
         : and(eq(draft.mailboxId, mailboxId), eq(draft.userId, user.id));
       const draftP = db.select({ c: count() }).from(draft).where(draftWhere);
 

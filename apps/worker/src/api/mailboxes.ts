@@ -83,6 +83,7 @@ export function mailboxesRoutes() {
           domainName: domain.name,
           pgpMode: mailbox.pgpMode,
           aiFeatures: mailbox.aiFeatures,
+          excludeFromAll: mailbox.excludeFromAll,
           ownerUserId: mailbox.ownerUserId,
           perms: mailboxMember.perms,
         })
@@ -111,6 +112,7 @@ export function mailboxesRoutes() {
           expiresAt: m.expiresAt,
           pgpMode: m.pgpMode,
           aiFeatures: m.aiFeatures,
+          excludeFromAll: m.excludeFromAll,
           role: isOwner ? ("owner" as const) : ("member" as const),
           perms: isOwner ? 7 : (m.perms ?? 0),
         };
@@ -198,6 +200,7 @@ export function mailboxesRoutes() {
           pgpFingerprint: true,
           pgpPublicKey: true,
           pgpAutoFetch: true,
+          excludeFromAll: true,
         },
       });
       if (!mb) throw new HTTPException(404, { message: "not found" });
@@ -240,6 +243,7 @@ export function mailboxesRoutes() {
         pgpPublicKey: mb.pgpPublicKey,
         pgpConfigured: Boolean(mb.pgpPublicKey),
         pgpAutoFetch: mb.pgpAutoFetch,
+        excludeFromAll: mb.excludeFromAll,
       } satisfies MailboxSettingsDto);
     })
 
@@ -267,6 +271,7 @@ export function mailboxesRoutes() {
         replyTo: string | null;
         pgpMode: PgpMode;
         pgpAutoFetch: boolean;
+        excludeFromAll: boolean;
       }> = {};
       if (body.displayName !== undefined) {
         patch.displayName = body.displayName?.trim() ? body.displayName.trim() : null;
@@ -286,6 +291,9 @@ export function mailboxesRoutes() {
       }
       if (body.pgpAutoFetch !== undefined) {
         patch.pgpAutoFetch = body.pgpAutoFetch;
+      }
+      if (body.excludeFromAll !== undefined) {
+        patch.excludeFromAll = body.excludeFromAll;
       }
       if (Object.keys(patch).length === 0) return c.json({ ok: true });
 

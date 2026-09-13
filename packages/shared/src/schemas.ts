@@ -457,6 +457,7 @@ export const updateMailboxSettings = z.object({
   aiTokenCap: z.number().int().positive().max(100_000_000).nullable().optional(),
   pgpMode: pgpMode.optional(),
   pgpAutoFetch: z.boolean().optional(),
+  excludeFromAll: z.boolean().optional(),
 });
 
 // Import an existing armored PGP private key for a mailbox. Bounded so a giant
