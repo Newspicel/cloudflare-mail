@@ -1,6 +1,6 @@
 import { blocklist, blockRequest, systemConfig } from "@cfmail/db/schema";
 import { eq } from "drizzle-orm";
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { adminBlockRoutes } from "../../src/api/admin-block.ts";
 import { applyMigrationsOnce, db, mountApp, request, resetDb } from "../support/app.ts";
 import { admin, OWNER_ID, owner, seedBase } from "../support/seed.ts";
@@ -246,5 +246,80 @@ describe("admin-block protected domains", () => {
       domains: ["not a domain"],
     });
     expect(res.status).toBe(400);
+  });
+});
+
+describe("spamhaus dqs key", () => {
+  const KEY = "dqskey1234567890";
+
+  // Spamhaus' test points, answered only for the key under test.
+  function stubDoh(answers: Record<string, string[]>): void {
+    vi.stubGlobal("fetch", async (input: string | URL) => {
+      const name = new URL(String(input)).searchParams.get("name") ?? "";
+      const zone = name.split(`.${KEY}.`)[1]?.split(".dq.")[0] ?? "";
+      const codes = name.includes(`.${KEY}.`) ? (answers[zone] ?? []) : [];
+      return Response.json({
+        Status: codes.length ? 0 : 3,
+        Answer: codes.map((data) => ({ name, type: 1, TTL: 60, data })),
+      });
+    });
+  }
+
+  const working = { zen: ["127.0.0.2"], dbl: ["127.0.1.2"], zrd: ["127.0.2.2"] };
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  // resetDb() leaves system_config alone (it holds the generated auth/PGP
+  // secrets), so clear just this key between cases.
+  beforeEach(async () => {
+    await db().delete(systemConfig).where(eq(systemConfig.key, "spamhaus_dqs_key"));
+  });
+
+  const stored = () =>
+    db().query.systemConfig.findFirst({ where: eq(systemConfig.key, "spamhaus_dqs_key") });
+
+  it("reports no key by default", async () => {
+    const res = await request(asAdmin(), "GET", "/dqs");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ dqs: { configured: false, hint: null } });
+  });
+
+  it("verifies and stores a working key, returning only a hint", async () => {
+    stubDoh(working);
+    const res = await request(asAdmin(), "PUT", "/dqs", { key: KEY });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ dqs: { configured: true, hint: "dqsk…7890" } });
+    expect((await stored())?.value).toBe(KEY);
+  });
+
+  it("400s a key that fails its test lookups and stores nothing", async () => {
+    stubDoh({});
+    const res = await request(asAdmin(), "PUT", "/dqs", { key: KEY });
+    expect(res.status).toBe(400);
+    expect(await stored()).toBeUndefined();
+  });
+
+  it("400s a key with no Content Data access", async () => {
+    stubDoh({ zen: ["127.0.0.2"] });
+    const res = await request(asAdmin(), "PUT", "/dqs", { key: KEY });
+    expect(res.status).toBe(400);
+    expect(await res.text()).toMatch(/Content Data/);
+  });
+
+  it("400s a malformed key", async () => {
+    const res = await request(asAdmin(), "PUT", "/dqs", { key: "short" });
+    expect(res.status).toBe(400);
+  });
+
+  it("clears the key on an empty value without querying", async () => {
+    stubDoh(working);
+    await request(asAdmin(), "PUT", "/dqs", { key: KEY });
+    vi.stubGlobal("fetch", async () => {
+      throw new Error("should not be queried");
+    });
+    const res = await request(asAdmin(), "PUT", "/dqs", { key: "" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ dqs: { configured: false, hint: null } });
+    expect((await stored())?.value).toBe("");
   });
 });

@@ -11,7 +11,7 @@ A self-hostable, Gmail-style mail client that runs entirely on Cloudflare — on
 - **Gmail-style UI** — 3-pane layout, compose dock, SSE-driven live updates
 - **Full-text search** over subjects, bodies, and recipients (D1 FTS5)
 - **Organization** — labels, folders, reminders, and per-mailbox automation rules
-- **Inbound pipeline** — threading, spam scoring, gateway PGP decrypt, one-click unsubscribe, calendar (`.ics`) parsing, blocklist
+- **Inbound pipeline** — threading, spam scoring (auth + heuristics + optional Spamhaus and Workers AI), gateway PGP decrypt, one-click unsubscribe, calendar (`.ics`) parsing, blocklist
 - **IMAP4rev1 server** — read your mail in Apple Mail, Thunderbird or Outlook, with `IDLE` push, per-mailbox app passwords, and the same RBAC as the web app
 - **Push notifications** and a tracking-pixel image proxy
 - **Everything on Cloudflare** — no external database, no SMTP servers to run
@@ -168,6 +168,7 @@ That's the whole deploy. The `deploy` script applies pending migrations (`@cfmai
    - **Domains** tab → add the email domains you'll use, and tick which mailbox kinds each allows (`personal`, `group`, `service`, `temp`). The DNS-health badges and DNS records you need are shown inline.
    - **Users** tab → invite teammates (email link) or create accounts directly. Per-user, per-domain mailbox-kind grants live here.
    - Set the **Transactional email** from-address (must be on a verified Email Sending domain) so password reset and invite emails can go out.
+   - Optional, **Blocking** tab → paste a [Spamhaus DQS](https://portal.spamhaus.com/dqs/) query key to switch on IP and domain reputation lookups (ZEN, DBL, ZRD, and AuthBL on IMAP logins). The key is verified against Spamhaus' test points before it is stored. Without one those lookups are skipped — the free public zones refuse queries that arrive via a Worker's DoH resolver.
 4. In Cloudflare: enable **Email Routing** per zone, route catch-all → this Worker, and verify the zone under **Email Sending**.
 
 ### 6. IMAP access (optional)

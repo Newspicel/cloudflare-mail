@@ -10,6 +10,7 @@ import { has, Perm } from "@cfmail/shared/permissions";
 import { hashPassword, verifyPassword } from "better-auth/crypto";
 import { and, eq, or } from "drizzle-orm";
 import { AppError } from "./errors.ts";
+import { getDqsKey, lookupAuthBl } from "./mail/dnsbl.ts";
 import { resolveAccess } from "./permissions.ts";
 import { enforceRateLimit } from "./rate-limit.ts";
 
@@ -58,7 +59,17 @@ export async function loginWithAppPassword(
   const secret = normalizeAppPassword(password);
   if (!name || !secret) return null;
   await enforceRateLimit(db, "imap-login", name, 10, 15 * 60 * 1000);
-  if (clientIp) await enforceRateLimit(db, "imap-login-ip", clientIp, 30, 15 * 60 * 1000);
+  if (clientIp) {
+    await enforceRateLimit(db, "imap-login-ip", clientIp, 30, 15 * 60 * 1000);
+    // Spamhaus AuthBL: hosts seen brute-forcing mail credentials elsewhere. Our
+    // own rate limit only reacts after 30 attempts from this IP; AuthBL turns
+    // those away on the first one. Best-effort — an unset key or a failed lookup
+    // simply doesn't block anyone.
+    const dqsKey = await getDqsKey(db);
+    if (dqsKey && (await lookupAuthBl(dqsKey, clientIp))) {
+      throw new AppError("forbidden", "this network is blocked for credential abuse");
+    }
+  }
 
   const at = name.indexOf("@");
   const localPart = at === -1 ? name : name.slice(0, at);
