@@ -1,10 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  hblHash,
   lookupAuthBl,
   lookupDomain,
+  lookupHbl,
   lookupIp,
   lookupNames,
+  normalizeEmail,
   registrableDomain,
+  urlHashForms,
   verifyDqsKey,
 } from "../src/mail/dnsbl.ts";
 
@@ -94,6 +98,7 @@ describe("lookupAuthBl", () => {
 });
 
 describe("verifyDqsKey", () => {
+  const EICAR = "E5NAEG57WZEJ4VGUOGEZ67NZ2FTD7RUV5QX6FIWEKOFKX5SR7UHQ";
   const workingKey = {
     "2.0.0.127/zen": ["127.0.0.2"],
     "dbltest.com/dbl": ["127.0.1.2"],
@@ -102,7 +107,12 @@ describe("verifyDqsKey", () => {
 
   it("accepts a key that answers all three test points", async () => {
     stubDoh(workingKey);
-    expect(await verifyDqsKey(KEY)).toEqual({ ok: true });
+    expect(await verifyDqsKey(KEY)).toEqual({ ok: true, hbl: false });
+  });
+
+  it("reports a plan that also answers the HBL test point", async () => {
+    stubDoh({ ...workingKey, [`${EICAR}._file/hbl`]: ["127.0.3.10"] });
+    expect(await verifyDqsKey(KEY)).toEqual({ ok: true, hbl: true });
   });
 
   it("rejects a malformed key without querying", async () => {
@@ -166,5 +176,79 @@ describe("registrableDomain", () => {
     expect(registrableDomain("a..b")).toBeNull();
     expect(registrableDomain("under_score.example")).toBeNull();
     expect(registrableDomain("")).toBeNull();
+  });
+});
+
+describe("hblHash", () => {
+  // Spamhaus' published test vectors — SHA-256, BASE32, no padding.
+  it("matches the documented hashes", async () => {
+    expect(await hblHash("user@hbltest.com")).toBe(
+      "F3PDGTMWU6LFIGDJC67YNIWRY5ZRM7ERLETNFO36QAEQPMBPW2DA",
+    );
+    expect(await hblHash("www.hbltest.com/test")).toBe(
+      "JRBRNOUNTQWKLOKRDDX5DC65YHFFJ4ZLJ5EXP7D6TWHJTDR23PSA",
+    );
+    expect(await hblHash("withqm.hbltest.com/openurl?lid=test")).toBe(
+      "EORVXYR6YPU2B54QOCEK4SS6XN3YXMHDQCFGHAEN4ZPMZ5QUSCVA",
+    );
+  });
+
+  it("hashes bytes as well as strings", async () => {
+    expect(await hblHash(new TextEncoder().encode("user@hbltest.com"))).toBe(
+      await hblHash("user@hbltest.com"),
+    );
+  });
+});
+
+describe("lookupHbl", () => {
+  it("queries the hash under its context and maps the return code", async () => {
+    const hash = await hblHash("user@hbltest.com");
+    const asked = stubDoh({ [`${hash}._email/hbl`]: ["127.0.3.2"] });
+    expect(await lookupHbl(KEY, "email", "user@hbltest.com")).toEqual({
+      kind: "spam-email",
+      code: "127.0.3.2",
+    });
+    expect(asked()).toEqual([`${hash}._email.${KEY}.hbl.dq.spamhaus.net`]);
+  });
+
+  it("returns null when the content is unlisted", async () => {
+    stubDoh({});
+    expect(await lookupHbl(KEY, "url", "example.com/x")).toBeNull();
+  });
+});
+
+describe("normalizeEmail", () => {
+  it("applies HBL's normalisation rules", () => {
+    expect(normalizeEmail("  User+Tag@HBLtest.com ")).toBe("user@hbltest.com");
+    expect(normalizeEmail("first.last@googlemail.com")).toBe("firstlast@gmail.com");
+    expect(normalizeEmail("first.last@gmail.com")).toBe("firstlast@gmail.com");
+    expect(normalizeEmail("first.last@example.com")).toBe("first.last@example.com");
+  });
+
+  it("rejects non-addresses", () => {
+    expect(normalizeEmail("nope")).toBeNull();
+    expect(normalizeEmail("@example.com")).toBeNull();
+    expect(normalizeEmail("user@localhost")).toBeNull();
+  });
+});
+
+describe("urlHashForms", () => {
+  it("drops the scheme and keeps the path as sent", () => {
+    expect(urlHashForms("https://www.hbltest.com/test")).toEqual(["www.hbltest.com/test"]);
+    expect(urlHashForms("http://withqm.hbltest.com/openurl?lid=test")).toEqual([
+      "withqm.hbltest.com/openurl?lid=test",
+    ]);
+  });
+
+  it("adds a lowercase form when the path is mixed case", () => {
+    expect(urlHashForms("https://catchall.hbltest.com/testdir1/testdir2/Test")).toEqual([
+      "catchall.hbltest.com/testdir1/testdir2/Test",
+      "catchall.hbltest.com/testdir1/testdir2/test",
+    ]);
+  });
+
+  it("normalises the host and ignores a bare trailing slash", () => {
+    expect(urlHashForms("https://WWW.Example.COM/")).toEqual(["www.example.com"]);
+    expect(urlHashForms("https://192.0.2.1/x")).toEqual([]);
   });
 });

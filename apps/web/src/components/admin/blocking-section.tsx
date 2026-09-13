@@ -361,9 +361,12 @@ function SpamhausPanel() {
       title="Spamhaus DQS"
       description={
         <>
-          Query key for reputation lookups — IP Data (SBL/XBL/PBL, plus AuthBL on IMAP logins) and
-          Content Data (DBL + ZRD) on sender and link domains. Without a key these lookups are
-          skipped: the free public zones refuse queries from a Worker's resolver. Get one at{" "}
+          Query key for reputation lookups — IP Data (SBL/XBL/PBL, plus AuthBL on IMAP logins),
+          Content Data (DBL + ZRD) on sender, EHLO and link domains, and, on plans that include it,
+          the Hash Blocklist for links, addresses, crypto wallets and attachments. Listed senders
+          are refused at SMTP; content signals only raise the spam score. Without a key these
+          lookups are skipped: the free public zones refuse queries from a Worker's resolver. Get
+          one at{" "}
           <a
             href="https://portal.spamhaus.com/dqs/"
             target="_blank"
@@ -377,9 +380,15 @@ function SpamhausPanel() {
       }
     >
       {status?.configured && (
-        <p className="mb-2 flex items-center gap-1.5 text-[12px] text-muted-foreground">
+        <p className="mb-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[12px] text-muted-foreground">
           <Check className="size-3.5 shrink-0 text-primary" />
           Active — <Mono>{status.hint}</Mono>
+          <span>
+            · IP Data and Content Data verified
+            {status.hbl
+              ? ", Hash Blocklist available (links, addresses, wallets and attachments are checked)"
+              : ". This plan has no Hash Blocklist, so message content is only checked by domain."}
+          </span>
         </p>
       )}
       <div className="flex flex-col gap-2 sm:flex-row">

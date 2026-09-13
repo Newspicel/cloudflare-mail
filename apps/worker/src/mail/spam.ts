@@ -5,12 +5,18 @@ import type { Env } from "../env.ts";
 import {
   type DomainListing,
   type DomainListKind,
-  getDqsKey,
+  type DqsConfig,
+  getDqsConfig,
+  type HblContext,
+  type HblKind,
   type IpListing,
   type IpListKind,
   lookupDomain,
+  lookupHbl,
   lookupIp,
   lookupNames,
+  normalizeEmail,
+  urlHashForms,
 } from "./dnsbl.ts";
 import type { ParsedEmail } from "./mime.ts";
 
@@ -48,6 +54,8 @@ const AI_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
 // Score thresholds. A reliable auth failure alone (+5) reaches SPAM; softer
 // content and reputation signals can only ever push a message into the gray
 // zone, so they are never the sole reason to file as spam.
+const EMPTY_SCORE = { score: 0, reasons: [] as string[] };
+
 const SUSPICIOUS_AT = 2;
 const SPAM_AT = 5;
 
@@ -89,53 +97,46 @@ export async function evaluateSpam(
   // Spamhaus DQS, when an admin has configured a query key. Without one every
   // lookup is skipped rather than attempted: the free public zones answer
   // "query via public/open resolver" for everything a Worker asks them.
-  const dqsKey = level === "auth" ? null : await getDqsKey(db);
+  const dqs = level === "auth" ? null : await getDqsConfig(db);
 
-  // Domain reputation runs even for fully authenticated mail — publishing valid
-  // SPF/DKIM/DMARC on a throwaway domain is free, and catching those is exactly
-  // what DBL and ZRD are for.
-  if (dqsKey) {
-    const dom = await scoreDomains(dqsKey, parsed, input.fromEnvelope);
-    score += dom.score;
-    reasons.push(...dom.reasons);
-    if (dom.reject) return blocked(score, reasons, auth, dom.reject);
+  // Reputation runs for every message, fully authenticated ones included:
+  // publishing valid SPF/DKIM/DMARC on a throwaway domain is free, and a signed
+  // message can still carry a listed link, address, wallet or attachment.
+  if (dqs) {
+    const [names, content] = await Promise.all([
+      scoreDomains(dqs.key, parsed, input.fromEnvelope),
+      scoreContent(dqs, parsed),
+    ]);
+    score += names.score + content.score;
+    reasons.push(...names.reasons, ...content.reasons);
+    if (names.reject) return blocked(score, reasons, auth, names.reject);
   }
 
-  // Fully authenticated mail (DMARC pass implies an aligned, passing SPF or
-  // DKIM) is otherwise trusted — skip the auth, content, IP and AI checks to
-  // avoid false positives and cost.
-  if (auth.dmarc === "pass") {
-    const trusted = scoreToVerdict(score);
-    return { verdict: trusted, score, reasons, auth, folderSpam: trusted === "spam", reject: null };
-  }
+  // DMARC pass implies an aligned, passing SPF or DKIM: the sender is who they
+  // claim to be, so the forgery signals below don't apply and the connecting
+  // relay is someone else's problem. Content still gets read (above, and the
+  // heuristics further down) — a signed message is not a trustworthy one.
+  const authenticated = auth.dmarc === "pass";
 
-  // ─── Authentication signal (all levels) ──────────────────────────────────
-  if (auth.dmarc === "fail") {
-    score += 5;
-    reasons.push("DMARC authentication failed — this sender is likely forged.");
-  } else if (auth.spf === "fail" && auth.dkim === "fail") {
-    score += 5;
-    reasons.push("Both SPF and DKIM authentication failed — this sender may be forged.");
-  } else if (!auth.spf && !auth.dkim && !auth.dmarc) {
-    score += 2;
-    reasons.push("No sender authentication results were present.");
-  } else if (auth.spf !== "pass" && auth.dkim !== "pass") {
-    score += 2;
-    reasons.push("This message is not authenticated (SPF and DKIM did not pass).");
-  } else if (!auth.dmarc || auth.dmarc === "none") {
-    score += 2;
-    reasons.push("The sender domain has no DMARC policy.");
-  }
+  // ─── Authentication signal (all levels, unauthenticated mail only) ───────
+  if (!authenticated)
+    authScore(auth, (points, reason) => {
+      score += points;
+      reasons.push(reason);
+    });
 
   // ─── Content heuristics + IP reputation (standard / ai) ───────────────────
-  if (level !== "auth") {
-    const heur = scoreHeuristics(parsed);
+  const heur = level === "auth" ? EMPTY_SCORE : scoreHeuristics(parsed);
+  if (level !== "auth" && !authenticated) {
+    // Spam phrasing is weak evidence: plenty of legitimate marketing reads like
+    // spam. It counts toward the verdict only for mail that isn't authenticated;
+    // for the rest it just decides whether the AI level takes a closer look.
     score += heur.score;
     reasons.push(...heur.reasons);
 
     const relay = extractRelayIp(parsed);
-    if (dqsKey && relay) {
-      const listing = await lookupIp(dqsKey, relay.ip);
+    if (dqs && relay) {
+      const listing = await lookupIp(dqs.key, relay.ip);
       if (listing) {
         score += IP_WEIGHTS[listing.kind];
         reasons.push(
@@ -150,13 +151,21 @@ export async function evaluateSpam(
   let verdict = scoreToVerdict(score);
 
   // ─── AI refinement, gray zone only (ai level) ─────────────────────────────
-  if (level === "ai" && score >= SUSPICIOUS_AT && score < SPAM_AT) {
+  if (
+    level === "ai" &&
+    score + (authenticated ? heur.score : 0) >= SUSPICIOUS_AT &&
+    score < SPAM_AT
+  ) {
     const ai = await classifyWithAI(env, db, input);
     if (ai) {
       // AI may only confirm or escalate the heuristic verdict — never lower the
       // floor. A prompt-injected "clean" cannot pull a suspicious message into
       // the inbox; the worst it can do is leave the heuristic verdict unchanged.
-      if (verdictRank(ai.verdict) > verdictRank(verdict)) verdict = ai.verdict;
+      if (verdictRank(ai.verdict) > verdictRank(verdict)) {
+        verdict = ai.verdict;
+        // The phrasing that triggered the look is worth showing once it counts.
+        if (authenticated) reasons.push(...heur.reasons);
+      }
       if (ai.reason) reasons.push(`AI: ${ai.reason}`);
     }
   }
@@ -171,6 +180,22 @@ function blocked(
   reject: string,
 ): SpamEvaluation {
   return { verdict: "spam", score, reasons, auth, folderSpam: true, reject };
+}
+
+// The forgery signals, strongest first. Only reached for mail that didn't pass
+// DMARC — an aligned signature answers all of these.
+function authScore(auth: AuthResult, add: (points: number, reason: string) => void): void {
+  if (auth.dmarc === "fail") {
+    add(5, "DMARC authentication failed — this sender is likely forged.");
+  } else if (auth.spf === "fail" && auth.dkim === "fail") {
+    add(5, "Both SPF and DKIM authentication failed — this sender may be forged.");
+  } else if (!auth.spf && !auth.dkim && !auth.dmarc) {
+    add(2, "No sender authentication results were present.");
+  } else if (auth.spf !== "pass" && auth.dkim !== "pass") {
+    add(2, "This message is not authenticated (SPF and DKIM did not pass).");
+  } else if (!auth.dmarc || auth.dmarc === "none") {
+    add(2, "The sender domain has no DMARC policy.");
+  }
 }
 
 function scoreToVerdict(score: number): SpamVerdict {
@@ -384,6 +409,140 @@ async function scoreDomains(
     reject ??= domainReject(hit, source);
   }
   return { score: score + Math.round(Math.min(linkScore, LINK_SCORE_CAP)), reasons, reject };
+}
+
+// ─── Hashed content (HBL) ────────────────────────────────────────────────────
+//
+// HBL answers "has Spamhaus seen this exact thing in spam?" for four kinds of
+// content, hashed so the lookup discloses nothing. These are content signals:
+// they raise the score and can file a message under Spam, but never refuse it —
+// a listed link in a quoted reply says nothing about who sent this message.
+const MAX_HBL_URLS = 3;
+const MAX_HBL_EMAILS = 4;
+const MAX_HBL_WALLETS = 2;
+const MAX_HBL_FILES = 3;
+const HBL_SCORE_CAP = 6;
+
+const HBL_WEIGHTS: Record<HblKind, number> = {
+  // A hash match on a malware attachment is exact, not a reputation guess, so
+  // it is the one listing allowed to file a message on its own.
+  "malware-file": 5,
+  "suspicious-file": 3,
+  "spam-url": 3,
+  "spam-wallet": 3,
+  "spam-email": 3,
+};
+
+interface HblTarget {
+  context: HblContext;
+  /** Forms to try; the first that answers counts. */
+  values: (string | Uint8Array)[];
+  display: string;
+}
+
+async function scoreContent(
+  dqs: DqsConfig,
+  parsed: ParsedEmail,
+): Promise<{ score: number; reasons: string[] }> {
+  if (!dqs.hbl) return { score: 0, reasons: [] };
+  const targets = contentTargets(parsed);
+  const hits = await Promise.all(
+    targets.map(async (t) => {
+      const found = await Promise.all(t.values.map((v) => lookupHbl(dqs.key, t.context, v)));
+      return found.find((f) => f !== null) ?? null;
+    }),
+  );
+
+  const reasons: string[] = [];
+  let score = 0;
+  for (const [i, hit] of hits.entries()) {
+    if (!hit) continue;
+    score += HBL_WEIGHTS[hit.kind];
+    reasons.push(hblReason(hit.kind, targets[i]!.display));
+  }
+  return { score: Math.min(score, HBL_SCORE_CAP), reasons };
+}
+
+function hblReason(kind: HblKind, display: string): string {
+  switch (kind) {
+    case "malware-file":
+      return `The attachment ${display} is a file Spamhaus knows as malware.`;
+    case "suspicious-file":
+      return `The attachment ${display} matches a file Spamhaus flags as suspicious.`;
+    case "spam-url":
+      return `This message links to ${display}, a URL Spamhaus has seen in spam.`;
+    case "spam-wallet":
+      return `The crypto address ${display} has been seen in spam.`;
+    case "spam-email":
+      return `The address ${display} has been seen in spam.`;
+  }
+}
+
+function contentTargets(parsed: ParsedEmail): HblTarget[] {
+  const out: HblTarget[] = [];
+
+  for (const url of unique(extractUrls(parsed)).slice(0, MAX_HBL_URLS)) {
+    const values = urlHashForms(url);
+    if (values.length) out.push({ context: "url", values, display: url });
+  }
+
+  const addresses = unique([
+    parsed.from?.address,
+    ...(parsed.replyTo ?? []).map((a) => a.address),
+    ...extractAddresses(parsed),
+  ]).slice(0, MAX_HBL_EMAILS);
+  for (const address of addresses) {
+    const normalized = normalizeEmail(address);
+    if (normalized) out.push({ context: "email", values: [normalized], display: address });
+  }
+
+  for (const wallet of unique(extractWallets(parsed)).slice(0, MAX_HBL_WALLETS)) {
+    // Ethereum addresses are hashed lower-cased; every other chain as written.
+    const value = /^0x[0-9a-fA-F]{40}$/.test(wallet) ? wallet.toLowerCase() : wallet;
+    out.push({ context: "cw", values: [value], display: wallet });
+  }
+
+  for (const [i, att] of (parsed.attachments ?? []).slice(0, MAX_HBL_FILES).entries()) {
+    const bytes =
+      typeof att.content === "string"
+        ? new TextEncoder().encode(att.content)
+        : new Uint8Array(att.content);
+    out.push({ context: "file", values: [bytes], display: att.filename ?? `attachment ${i + 1}` });
+  }
+  return out;
+}
+
+const URL_RE = /\bhttps?:\/\/[^\s"'<>)\]]+/gi;
+const ADDRESS_RE = /\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/gi;
+
+// Wallet formats worth the lookup: anything shorter or looser matches ordinary
+// words. Bitcoin (base58 + bech32), Ethereum, Monero and Litecoin.
+const WALLET_RES = [
+  /\b(?:bc1[02-9ac-hj-np-z]{7,71}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})\b/g,
+  /\b0x[0-9a-fA-F]{40}\b/g,
+  /\b[48][0-9AB][1-9A-HJ-NP-Za-km-z]{93}\b/g,
+  /\b(?:ltc1[02-9ac-hj-np-z]{7,71}|[LM][a-km-zA-HJ-NP-Z1-9]{26,33})\b/g,
+];
+
+function unique(values: (string | null | undefined)[]): string[] {
+  return [...new Set(values.filter((v): v is string => !!v))];
+}
+
+function bodyText(parsed: ParsedEmail): string {
+  return `${parsed.text ?? ""}\n${parsed.html ?? ""}`;
+}
+
+function extractUrls(parsed: ParsedEmail): string[] {
+  return [...bodyText(parsed).matchAll(URL_RE)].map((m) => m[0].replace(/[.,;:)\]]+$/, ""));
+}
+
+function extractAddresses(parsed: ParsedEmail): string[] {
+  return [...bodyText(parsed).matchAll(ADDRESS_RE)].map((m) => m[0]);
+}
+
+function extractWallets(parsed: ParsedEmail): string[] {
+  const body = bodyText(parsed);
+  return WALLET_RES.flatMap((re) => [...body.matchAll(re)].map((m) => m[0]));
 }
 
 function describe(hit: DomainListing, source: NameSource): string {

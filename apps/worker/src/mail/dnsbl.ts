@@ -10,6 +10,7 @@
 //   <reversed-ipv4>.<key>.authbl.dq.spamhaus.net   credential-abuse sources
 //   <domain>.<key>.dbl.dq.spamhaus.net             domain reputation
 //   <domain>.<key>.zrd.dq.spamhaus.net             domains first seen <24h ago
+//   <base32 sha256>._<ctx>.<key>.hbl.dq.spamhaus.net   hashed message content
 //
 // A listing answers inside 127.0.0.0/16, "not listed" is NXDOMAIN (no answer),
 // and 127.255.255.0/24 carries errors (key disabled, key used from the wrong
@@ -29,6 +30,8 @@ const KEY_RE = /^[a-z0-9]{8,64}$/i;
 // comes back empty means the key isn't working rather than "nothing listed".
 const TEST_IP = "127.0.0.2";
 const TEST_ZRD_NAME = "test";
+// SHA-256 of the EICAR test file, the hash Spamhaus keeps listed in HBL.
+const TEST_HBL_HASH = "E5NAEG57WZEJ4VGUOGEZ67NZ2FTD7RUV5QX6FIWEKOFKX5SR7UHQ";
 
 export type IpListKind = "drop" | "sbl" | "css" | "bcl" | "xbl" | "pbl";
 export type DomainListKind = "phish" | "malware" | "botnet" | "spam" | "abused" | "new";
@@ -47,21 +50,59 @@ export interface DomainListing {
   ageHours?: number;
 }
 
-// ─── Key storage (invariant 4: no deployment values in the repo) ─────────────
+// HBL hashes message content rather than naming it, so a lookup reveals nothing
+// about the message. Each context has its own normalisation before hashing.
+export type HblContext = "email" | "file" | "cw" | "url";
+export type HblKind =
+  | "spam-email"
+  | "malware-file"
+  | "suspicious-file"
+  | "spam-wallet"
+  | "spam-url";
 
-export async function getDqsKey(db: DB): Promise<string | null> {
-  const raw = (await getConfig(db, DQS_KEY_CONFIG))?.trim();
-  return raw && KEY_RE.test(raw) ? raw : null;
+export interface HblListing {
+  kind: HblKind;
+  code: string;
 }
 
-/** Stores a key, or clears it when given an empty string. */
-export async function setDqsKey(db: DB, key: string): Promise<void> {
-  await setConfig(db, DQS_KEY_CONFIG, KEY_RE.test(key.trim()) ? key.trim() : "");
+// ─── Key storage (invariant 4: no deployment values in the repo) ─────────────
+
+export interface DqsConfig {
+  key: string;
+  /** Whether this key's plan includes the Hash Blocklist. */
+  hbl: boolean;
+}
+
+// Stored as JSON so the plan travels with the key and the mail path needs one
+// read; a bare string is a key saved before the tier was recorded.
+export async function getDqsConfig(db: DB): Promise<DqsConfig | null> {
+  const raw = (await getConfig(db, DQS_KEY_CONFIG))?.trim();
+  if (!raw) return null;
+  const parsed = raw.startsWith("{") ? parseConfig(raw) : { key: raw, hbl: false };
+  return parsed && KEY_RE.test(parsed.key) ? parsed : null;
+}
+
+function parseConfig(raw: string): DqsConfig | null {
+  try {
+    const v = JSON.parse(raw) as Partial<DqsConfig>;
+    return typeof v.key === "string" ? { key: v.key, hbl: v.hbl === true } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Stores a key and its plan, or clears both when given an empty key. */
+export async function setDqsConfig(db: DB, key: string, hbl: boolean): Promise<void> {
+  const trimmed = key.trim();
+  const value = KEY_RE.test(trimmed) ? JSON.stringify({ key: trimmed, hbl }) : "";
+  await setConfig(db, DQS_KEY_CONFIG, value);
 }
 
 export interface DqsKeyCheck {
   ok: boolean;
   error?: string;
+  /** Whether the key answered the HBL test point too. */
+  hbl?: boolean;
 }
 
 /**
@@ -73,10 +114,12 @@ export async function verifyDqsKey(key: string): Promise<DqsKeyCheck> {
   if (!KEY_RE.test(key)) return { ok: false, error: "not a DQS query key" };
   // Raw answers here: an error code is the diagnosis we want to report, not
   // something to swallow the way a live lookup does.
-  const [zen, dbl, zrd] = await Promise.all([
+  const [zen, dbl, zrd, hbl] = await Promise.all([
     rawAnswers(zoneName(reverseIpv4(TEST_IP)!, key, "zen")),
     rawAnswers(zoneName("dbltest.com", key, "dbl")),
     rawAnswers(zoneName(TEST_ZRD_NAME, key, "zrd")),
+    // The EICAR hash is permanently listed; a plan without HBL answers nothing.
+    rawAnswers(`${TEST_HBL_HASH}._file.${key}.hbl.dq.spamhaus.net`),
   ]);
 
   const err = [...zen, ...dbl, ...zrd].find(isErrorCode);
@@ -87,7 +130,7 @@ export async function verifyDqsKey(key: string): Promise<DqsKeyCheck> {
   if (!dbl.includes("127.0.1.2") || !zrd.includes("127.0.2.2")) {
     return { ok: false, error: "this key has no Content Data (DBL + ZRD) access" };
   }
-  return { ok: true };
+  return { ok: true, hbl: hbl.includes("127.0.3.10") };
 }
 
 // ─── Lookups ────────────────────────────────────────────────────────────────
@@ -119,7 +162,85 @@ export async function lookupDomain(key: string, domain: string): Promise<DomainL
   return pickDbl(domain, dbl) ?? pickZrd(domain, zrd);
 }
 
+/**
+ * HBL: is this piece of content — an address, a wallet, a URL, a file — one
+ * Spamhaus has seen in spam? `value` is hashed here and never sent.
+ */
+export async function lookupHbl(
+  key: string,
+  context: HblContext,
+  value: string | Uint8Array,
+): Promise<HblListing | null> {
+  const hash = await hblHash(value);
+  const codes = await answers(`${hash}._${context}.${key}.hbl.dq.spamhaus.net`);
+  for (const [code, kind] of HBL_CODES) {
+    if (codes.includes(code)) return { kind, code };
+  }
+  return null;
+}
+
+/** SHA-256 of the value, BASE32 without padding — the shape HBL queries take. */
+export async function hblHash(value: string | Uint8Array): Promise<string> {
+  const bytes = typeof value === "string" ? new TextEncoder().encode(value) : value;
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes as BufferSource));
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let bits = 0;
+  let acc = 0;
+  let out = "";
+  for (const b of digest) {
+    acc = (acc << 8) | b;
+    bits += 8;
+    while (bits >= 5) {
+      out += alphabet[(acc >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+  if (bits > 0) out += alphabet[(acc << (5 - bits)) & 31];
+  return out;
+}
+
+/**
+ * The normalised forms of an address before hashing, per HBL's rules: lowercase
+ * it, drop any `+tag`, fold googlemail onto gmail and drop the dots Gmail
+ * ignores. Returns null when it isn't an address at all.
+ */
+export function normalizeEmail(address: string): string | null {
+  const at = address.trim().toLowerCase().lastIndexOf("@");
+  const lower = address.trim().toLowerCase();
+  if (at <= 0 || at === lower.length - 1) return null;
+  let local = lower.slice(0, at).split("+")[0]!;
+  let domain = lower.slice(at + 1);
+  if (domain === "googlemail.com") domain = "gmail.com";
+  if (domain === "gmail.com") local = local.replaceAll(".", "");
+  return local && normalizeHost(domain) ? `${local}@${domain}` : null;
+}
+
+/**
+ * The forms of a URL to look up: scheme dropped, host lowercased, path kept as
+ * sent — plus an all-lowercase variant, which is what Spamhaus' own catch-all
+ * test domain hashes. (The per-domain variation rules ship as a YAML we don't
+ * carry; these two cover the cases their test set exercises.)
+ */
+export function urlHashForms(url: string): string[] {
+  const m = url.trim().match(/^(?:[a-z][a-z0-9+.-]*:\/\/)?([^/?#]+)([^\s]*)$/i);
+  if (!m) return [];
+  const host = normalizeHost(m[1]!.split("@").at(-1)!.split(":")[0]!);
+  if (!host) return [];
+  const rest = m[2] === "/" ? "" : m[2];
+  const canonical = `${host}${rest}`;
+  const lowered = canonical.toLowerCase();
+  return canonical === lowered ? [canonical] : [canonical, lowered];
+}
+
 // ─── Return-code parsing ────────────────────────────────────────────────────
+
+const HBL_CODES: [string, HblKind][] = [
+  ["127.0.3.10", "malware-file"],
+  ["127.0.3.15", "suspicious-file"],
+  ["127.0.3.30", "spam-url"],
+  ["127.0.3.20", "spam-wallet"],
+  ["127.0.3.2", "spam-email"],
+];
 
 // ZEN, most severe first — a single IP routinely answers with several codes.
 const IP_CODES: [string, IpListKind][] = [
