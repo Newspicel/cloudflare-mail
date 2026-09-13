@@ -6,13 +6,13 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
+import { wrapUnique } from "../errors.ts";
 import {
   getProtectedDomains,
   isProtectedDomain,
   setProtectedDomains as persistProtectedDomains,
 } from "../mail/blocklist.ts";
 import { requireAdmin, requireUser } from "../middleware.ts";
-import { wrapUnique } from "./util.ts";
 
 // Admin-only blocklist + block-request review. Mounted at /api/admin/block.
 export function adminBlockRoutes() {

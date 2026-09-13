@@ -6,6 +6,10 @@
   "compatibility_flags": ["nodejs_compat"],
   "minify": true,
   "placement": { "mode": "smart" },
+  // An IMAP session is a single long-lived invocation (`connect`), so its CPU
+  // budget must cover hours of FETCH/SEARCH, not one HTTP request. Billing is
+  // still by CPU actually used; this only lifts the cap.
+  "limits": { "cpu_ms": 300000 },
   "alias": {
     // mimetext only uses mime-types#contentType to validate attachment types;
     // the shim avoids bundling the ~134 KB mime-db table.

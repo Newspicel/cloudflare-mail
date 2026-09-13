@@ -2,8 +2,8 @@ import type { DB } from "@cfmail/db";
 import { domain, domainGrant } from "@cfmail/db/schema";
 import { kindBit, type MailboxKindBit } from "@cfmail/shared/permissions";
 import { and, eq } from "drizzle-orm";
-import { HTTPException } from "hono/http-exception";
 import type { User } from "./auth.ts";
+import { AppError } from "./errors.ts";
 
 // Authorises a (user, domain, kind) triple for mailbox creation.
 //
@@ -21,13 +21,11 @@ export async function authorizeMailboxCreate(
     where: eq(domain.id, domainId),
     columns: { id: true, allowedKinds: true },
   });
-  if (!dom) throw new HTTPException(400, { message: "domain not found" });
+  if (!dom) throw new AppError("bad_request", "domain not found");
 
   const bit: MailboxKindBit = kindBit(type);
   if ((dom.allowedKinds & bit) !== bit) {
-    throw new HTTPException(400, {
-      message: `domain does not allow ${type} mailboxes`,
-    });
+    throw new AppError("bad_request", `domain does not allow ${type} mailboxes`);
   }
 
   if ((user as { role?: string }).role === "admin") return;
@@ -37,6 +35,6 @@ export async function authorizeMailboxCreate(
     columns: { allowedKinds: true },
   });
   if (!grant || (grant.allowedKinds & bit) !== bit) {
-    throw new HTTPException(403, { message: `not permitted to create ${type} on this domain` });
+    throw new AppError("forbidden", `not permitted to create ${type} on this domain`);
   }
 }

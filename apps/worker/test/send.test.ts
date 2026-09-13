@@ -2,10 +2,10 @@ import { attachment, draft, message, thread } from "@cfmail/db/schema";
 import { Flag } from "@cfmail/shared/flags";
 import type { SendMessageInput } from "@cfmail/shared/schemas";
 import { eq } from "drizzle-orm";
-import { HTTPException } from "hono/http-exception";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { runCron } from "../src/cron.ts";
 import type { Env } from "../src/env.ts";
+import { AppError } from "../src/errors.ts";
 import { sendFromMailbox } from "../src/mail/send.ts";
 import { applyMigrationsOnce, db, e, resetDb } from "./support/app.ts";
 import { MAILBOX_ID, OWNER_ID, seedBase, seedThread } from "./support/seed.ts";
@@ -123,8 +123,8 @@ describe("sendFromMailbox — delivery failure cleanup", () => {
       () => null,
       (x: unknown) => x,
     );
-    expect(err).toBeInstanceOf(HTTPException);
-    expect((err as HTTPException).status).toBe(502);
+    expect(err).toBeInstanceOf(AppError);
+    expect((err as AppError).code).toBe("upstream");
 
     expect(await db().query.message.findMany()).toHaveLength(0);
     expect(await db().query.thread.findMany()).toHaveLength(0);
@@ -142,7 +142,7 @@ describe("sendFromMailbox — delivery failure cleanup", () => {
           attachments: [{ r2Key: key, filename: "note.txt", contentType: "text/plain" }],
         }),
       ),
-    ).rejects.toMatchObject({ status: 502 });
+    ).rejects.toMatchObject({ code: "upstream" });
 
     expect(await db().query.attachment.findMany()).toHaveLength(0);
     expect(await attBlobKeys()).toHaveLength(0);
@@ -162,7 +162,7 @@ describe("sendFromMailbox — delivery failure cleanup", () => {
         OWNER_ID,
         input({ subject: "Re: hello", inReplyTo: "<orig@example.com>" }),
       ),
-    ).rejects.toMatchObject({ status: 502 });
+    ).rejects.toMatchObject({ code: "upstream" });
 
     // The failed reply is rolled back, but the original thread + message stay.
     expect(await db().query.thread.findFirst({ where: eq(thread.id, threadId) })).toBeDefined();

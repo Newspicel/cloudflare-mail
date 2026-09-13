@@ -49,7 +49,35 @@ describe("domains", () => {
     await setConfig(db(), "auth_from_address", "noreply@example.com");
     const res = await request(asAdmin(), "GET", "/settings");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ authFromAddress: "noreply@example.com" });
+    expect(await res.json()).toEqual({ authFromAddress: "noreply@example.com", imap: null });
+  });
+
+  // ── PUT /settings/imap (admin) ──────────────────────────────────────────
+  it("stores the IMAP host and port, and reports them back", async () => {
+    const res = await request(asAdmin(), "PUT", "/settings/imap", {
+      host: "IMAP.Example.com",
+      port: 993,
+    });
+    expect(res.status).toBe(200);
+    expect(await getConfig(db(), "imap_host")).toBe("imap.example.com");
+    const settings = await request(asAdmin(), "GET", "/settings");
+    expect(await settings.json()).toMatchObject({
+      imap: { host: "imap.example.com", port: 993 },
+    });
+  });
+
+  it("403s a non-admin and 400s a bad host", async () => {
+    const denied = await request(asOwner(), "PUT", "/settings/imap", { host: "a.test", port: 993 });
+    expect(denied.status).toBe(403);
+    const bad = await request(asAdmin(), "PUT", "/settings/imap", { host: "nope", port: 993 });
+    expect(bad.status).toBe(400);
+  });
+
+  it("clears the IMAP host with an empty string", async () => {
+    await request(asAdmin(), "PUT", "/settings/imap", { host: "imap.example.com", port: 993 });
+    await request(asAdmin(), "PUT", "/settings/imap", { host: "", port: 993 });
+    const settings = await request(asAdmin(), "GET", "/settings");
+    expect(await settings.json()).toMatchObject({ imap: null });
   });
 
   // ── PUT /settings/auth-from (admin) ─────────────────────────────────────

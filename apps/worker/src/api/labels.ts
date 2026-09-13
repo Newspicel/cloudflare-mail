@@ -8,9 +8,10 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
+import { wrapUnique } from "../errors.ts";
 import { requireUser } from "../middleware.ts";
 import { requireEntityAccess, requirePerm } from "../permissions.ts";
-import { buildPatch, wrapUnique } from "./util.ts";
+import { buildPatch } from "./util.ts";
 
 export function labelsRoutes() {
   const r = new Hono<AppBindings>()

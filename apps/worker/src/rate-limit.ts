@@ -1,7 +1,7 @@
 import type { DB } from "@cfmail/db";
 import { rateLimitCounter } from "@cfmail/db/schema";
 import { sql } from "drizzle-orm";
-import { HTTPException } from "hono/http-exception";
+import { AppError } from "./errors.ts";
 
 // Fixed-window rate limiting for abuse-sensitive app endpoints, backed by the
 // `rate_limit_counter` D1 table (Better Auth's own limiter covers /api/auth/*
@@ -37,7 +37,7 @@ export async function enforceRateLimit(
     console.error(`rate limit check failed for ${key}`, err);
     return;
   }
-  if (count > max) throw new HTTPException(429, { message: "rate limit exceeded" });
+  if (count > max) throw new AppError("rate_limited", "rate limit exceeded");
 }
 
 // Client IP for keying unauthenticated limits. Cloudflare sets CF-Connecting-IP

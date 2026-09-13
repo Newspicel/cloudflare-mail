@@ -5,9 +5,11 @@ import { HTTPException } from "hono/http-exception";
 import { logger } from "hono/logger";
 import { authFromCtx } from "../auth-ctx.ts";
 import type { AppBindings } from "../env.ts";
+import { AppError, httpStatus } from "../errors.ts";
 import { sessionMiddleware } from "../middleware.ts";
 import { adminRoutes } from "./admin.ts";
 import { adminBlockRoutes } from "./admin-block.ts";
+import { appPasswordsRoutes } from "./app-passwords.ts";
 import { attachmentsRoutes } from "./attachments.ts";
 import { avatarRoutes } from "./avatar.ts";
 import { blocklistRoutes } from "./blocklist.ts";
@@ -88,6 +90,7 @@ export function buildApi() {
     .route("/api/avatar", avatarRoutes())
     .route("/api/temp", tempRoutes())
     .route("/api/push", pushRoutes())
+    .route("/api/app-passwords", appPasswordsRoutes())
     .route("/api/reminders", remindersRoutes())
     .route("/api/search", searchRoutes())
     .get("/api/stream", streamRoute);
@@ -100,6 +103,7 @@ export function buildApi() {
       if (err.res) return err.getResponse();
       return c.json({ error: err.message }, err.status);
     }
+    if (err instanceof AppError) return c.json({ error: err.message }, httpStatus(err.code));
     console.error("unhandled", err);
     return c.json({ error: "internal_error" }, 500);
   });

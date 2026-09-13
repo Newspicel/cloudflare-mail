@@ -114,6 +114,18 @@ export const setAuthFromAddress = z.object({
   address: emailAddress,
 });
 
+// IMAP endpoint shown to users next to their app passwords. The host is the
+// Spectrum application's hostname; empty clears it.
+export const setImapSettings = z.object({
+  host: z.union([z.literal(""), domainName]),
+  port: z.number().int().min(1).max(65535).default(993),
+});
+
+export const createAppPassword = z.object({
+  mailboxId: z.string().min(1),
+  name: z.string().trim().min(1).max(64),
+});
+
 export const updateThread = z.object({
   trashed: z.boolean().optional(),
   spam: z.boolean().optional(),

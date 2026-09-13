@@ -1,10 +1,21 @@
 import { domain } from "@cfmail/db/schema";
-import { createDomain, setAuthFromAddress, updateDomain } from "@cfmail/shared/schemas";
+import {
+  createDomain,
+  setAuthFromAddress,
+  setImapSettings,
+  updateDomain,
+} from "@cfmail/shared/schemas";
 import { zValidator } from "@hono/zod-validator";
 import { asc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { getConfig, setConfig } from "../config.ts";
+import {
+  getConfig,
+  getImapConnection,
+  IMAP_HOST_KEY,
+  IMAP_PORT_KEY,
+  setConfig,
+} from "../config.ts";
 import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
 import { checkDomainHealth } from "../mail/dns.ts";
@@ -26,7 +37,18 @@ export function domainsRoutes() {
     .get("/settings", requireAdmin, async (c) => {
       const db = dbFromCtx(c);
       const fromAddr = await getConfig(db, "auth_from_address");
-      return c.json({ authFromAddress: fromAddr });
+      const imap = await getImapConnection(db);
+      return c.json({ authFromAddress: fromAddr, imap });
+    })
+
+    // Where IMAP clients connect: the Spectrum application's hostname + port.
+    // Deployment-specific, so it lives in system_config (invariant 4).
+    .put("/settings/imap", requireAdmin, zValidator("json", setImapSettings), async (c) => {
+      const db = dbFromCtx(c);
+      const body = c.req.valid("json");
+      await setConfig(db, IMAP_HOST_KEY, body.host.toLowerCase());
+      await setConfig(db, IMAP_PORT_KEY, String(body.port));
+      return c.json({ ok: true });
     })
 
     .put("/settings/auth-from", requireAdmin, zValidator("json", setAuthFromAddress), async (c) => {

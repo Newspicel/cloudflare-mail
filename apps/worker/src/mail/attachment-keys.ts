@@ -1,4 +1,4 @@
-import { HTTPException } from "hono/http-exception";
+import { AppError } from "../errors.ts";
 
 // Client-supplied attachment r2Keys must live in the caller's own upload
 // namespace (attachments.ts always writes `draft/<userId>/...`). Without this
@@ -11,7 +11,7 @@ export function assertOwnedAttachmentKeys(
   const prefix = `draft/${userId}/`;
   for (const att of attachments ?? []) {
     if (!att.r2Key.startsWith(prefix)) {
-      throw new HTTPException(400, { message: "invalid attachment key" });
+      throw new AppError("bad_request", "invalid attachment key");
     }
   }
 }

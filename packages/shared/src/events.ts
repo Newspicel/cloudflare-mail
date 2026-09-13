@@ -32,6 +32,13 @@ export const hubEvent = z.discriminatedUnion("type", [
     type: z.literal("mailbox_expired"),
     mailboxId: z.string(),
   }),
+  // Coarse "something in this mailbox changed" from an IMAP client (flags,
+  // moves, expunges, appends). Web clients refetch the mailbox; other IMAP
+  // sessions of the same user re-reconcile their selected folder.
+  z.object({
+    type: z.literal("mailbox_changed"),
+    mailboxId: z.string(),
+  }),
   // A deferred (scheduled) send failed at dispatch time. The draft was reverted
   // to an editable draft so the user can retry; the client refreshes + warns.
   z.object({
