@@ -214,6 +214,11 @@ export const rulesQuery = (mailboxId: string) =>
     staleTime: 5 * 60_000,
   });
 
+export const appPasswordsQuery = queryOptions({
+  queryKey: keys.appPasswords(),
+  queryFn: () => unwrap(rpc["app-passwords"].$get()),
+});
+
 export const foldersQuery = queryOptions({
   queryKey: keys.folders(),
   queryFn: () => unwrap(rpc.folders.$get()),

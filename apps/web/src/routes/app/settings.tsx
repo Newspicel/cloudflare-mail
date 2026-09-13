@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { MailboxImportSection, MailboxSettingsForm } from "@/components/mailbox-settings-form.tsx";
 import { RulesSection } from "@/components/rules-settings.tsx";
+import { AppPasswordsSection } from "@/components/settings/app-passwords-section.tsx";
 import { AppearanceSection } from "@/components/settings/appearance-section.tsx";
 import { ComposeSection } from "@/components/settings/compose-section.tsx";
 import { DateTimeSection } from "@/components/settings/datetime-section.tsx";
@@ -27,6 +28,7 @@ const NAV = [
   ["compose", "Compose"],
   ["templates", "Templates"],
   ["security", "Security"],
+  ["imap", "IMAP access"],
   ["notifications", "Notifications"],
   ["folders", "Folders"],
   ["rules", "Rules"],
@@ -79,6 +81,7 @@ function SettingsPage() {
           <TemplatesSection />
           <SecuritySection />
           <TwoFactorSection enabled={!!meData?.user?.twoFactorEnabled} />
+          <AppPasswordsSection mailboxes={mailboxesData?.mailboxes ?? []} />
           <NotificationsSection mailboxes={mailboxesData?.mailboxes ?? []} />
           <FoldersSection />
           <RulesSection mailboxes={editable} />

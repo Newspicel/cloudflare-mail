@@ -1,6 +1,7 @@
 import { buildApi } from "./api/index.ts";
 import { runCron } from "./cron.ts";
 import type { Env } from "./env.ts";
+import { handleImapConnection } from "./imap/index.ts";
 import { handleInbound } from "./mail/receive.ts";
 
 export { UserHub } from "./hub.ts";
@@ -52,6 +53,12 @@ export default {
 
   async email(msg: ForwardableEmailMessage, env: Env, ctx: ExecutionContext): Promise<void> {
     await handleInbound(msg, env, ctx);
+  },
+
+  // IMAP over inbound TCP: a Spectrum application (TLS terminated at the edge)
+  // routes port 993 to this Worker. Same script, same bindings, same RBAC.
+  async connect(socket: Socket, env: Env): Promise<void> {
+    await handleImapConnection(socket, env);
   },
 
   async scheduled(_ctrl: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {

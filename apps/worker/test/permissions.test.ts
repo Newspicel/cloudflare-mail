@@ -2,9 +2,9 @@ import { applyD1Migrations, env } from "cloudflare:test";
 import { makeDB } from "@cfmail/db";
 import { domain, mailbox, mailboxMember, user } from "@cfmail/db/schema";
 import { ALL_PERMS, Perm } from "@cfmail/shared/permissions";
-import { HTTPException } from "hono/http-exception";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Env } from "../src/env.ts";
+import { AppError } from "../src/errors.ts";
 import { requirePerm, resolveAccess } from "../src/permissions.ts";
 
 const e = env as unknown as Env & { TEST_MIGRATIONS: Parameters<typeof applyD1Migrations>[1] };
@@ -57,8 +57,8 @@ async function grantMember(mailboxId: string, perms: number): Promise<void> {
 }
 
 async function expectForbidden(promise: Promise<unknown>): Promise<void> {
-  await expect(promise).rejects.toMatchObject({ status: 403 });
-  await expect(promise).rejects.toBeInstanceOf(HTTPException);
+  await expect(promise).rejects.toMatchObject({ code: "forbidden" });
+  await expect(promise).rejects.toBeInstanceOf(AppError);
 }
 
 beforeAll(async () => {

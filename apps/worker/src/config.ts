@@ -6,6 +6,8 @@ import { importMasterKey } from "./mail/pgp.ts";
 
 const SECRET_KEY = "auth_secret";
 const PGP_MASTER_KEY = "pgp_master_key";
+export const IMAP_HOST_KEY = "imap_host";
+export const IMAP_PORT_KEY = "imap_port";
 
 export async function getConfig(db: DB, key: string): Promise<string | null> {
   const row = await db.query.systemConfig.findFirst({
@@ -52,4 +54,13 @@ export async function getOrCreatePgpMasterKey(db: DB): Promise<CryptoKey> {
     if (!secret) throw new Error("failed to persist pgp master key");
   }
   return importMasterKey(secret);
+}
+
+// The IMAP endpoint an admin configured (the Spectrum app's hostname), or null
+// while unset — the settings UI then shows app passwords without a host.
+export async function getImapConnection(db: DB): Promise<{ host: string; port: number } | null> {
+  const host = await getConfig(db, IMAP_HOST_KEY);
+  if (!host) return null;
+  const port = Number(await getConfig(db, IMAP_PORT_KEY));
+  return { host, port: Number.isInteger(port) && port > 0 ? port : 993 };
 }

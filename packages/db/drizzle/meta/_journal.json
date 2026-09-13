@@ -253,6 +253,13 @@
       "when": 1782948517490,
       "tag": "0035_certain_greymalkin",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1789323930856,
+      "tag": "0036_pale_payback",
+      "breakpoints": true
     }
   ]
 }

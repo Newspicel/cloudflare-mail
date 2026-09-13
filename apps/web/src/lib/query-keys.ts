@@ -39,4 +39,6 @@ export const keys = {
   /** Prefix matching every per-folder thread list. */
   folderThreadsRoot: () => ["folder-threads"] as const,
   folderThreads: (folderId: string) => ["folder-threads", folderId] as const,
+  /** The user's IMAP app passwords plus the server's connection details. */
+  appPasswords: () => ["app-passwords"] as const,
 };

@@ -1,8 +1,8 @@
 import type { DB } from "@cfmail/db";
 import { rateLimitCounter } from "@cfmail/db/schema";
 import { eq } from "drizzle-orm";
-import { HTTPException } from "hono/http-exception";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { AppError } from "../src/errors.ts";
 import { clientIp, enforceRateLimit } from "../src/rate-limit.ts";
 import { applyMigrationsOnce, db, resetDb } from "./support/app.ts";
 
@@ -35,8 +35,8 @@ describe("enforceRateLimit", () => {
       () => null,
       (x: unknown) => x,
     );
-    expect(err).toBeInstanceOf(HTTPException);
-    expect((err as HTTPException).status).toBe(429);
+    expect(err).toBeInstanceOf(AppError);
+    expect((err as AppError).code).toBe("rate_limited");
   });
 
   it("keys are isolated per name and id", async () => {
@@ -49,14 +49,14 @@ describe("enforceRateLimit", () => {
     await expect(enforceRateLimit(db(), "send", "user-2", 2, WINDOW)).resolves.toBeUndefined();
     // The exhausted bucket still 429s.
     await expect(enforceRateLimit(db(), "send", "user-1", 2, WINDOW)).rejects.toMatchObject({
-      status: 429,
+      code: "rate_limited",
     });
   });
 
   it("resets the count when the window lapses", async () => {
     await hit("send", "user-1", 2, 2);
     await expect(enforceRateLimit(db(), "send", "user-1", 2, WINDOW)).rejects.toMatchObject({
-      status: 429,
+      code: "rate_limited",
     });
 
     // Age the window past the cutoff; the next check starts a fresh window.

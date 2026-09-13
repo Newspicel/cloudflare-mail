@@ -138,3 +138,9 @@ export const RULE_ACTION_TYPES = [
   "stopProcessing",
 ] as const;
 export type RuleActionType = (typeof RULE_ACTION_TYPES)[number];
+
+// The IMAP folders exposed per mailbox (imap/store.ts). The four system kinds
+// derive from thread/message state; "folder" is one of the user's custom
+// folders (imap_folder.folder_id).
+export const IMAP_FOLDER_KINDS = ["inbox", "sent", "spam", "trash", "folder"] as const;
+export type ImapFolderKind = (typeof IMAP_FOLDER_KINDS)[number];

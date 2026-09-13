@@ -24,13 +24,14 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
+import { wrapUnique } from "../errors.ts";
 import { randomToken } from "../lib/encoding.ts";
 import { authorizeMailboxCreate } from "../mailbox-access.ts";
 import { markMailboxPurge } from "../mailbox-purge.ts";
 import { requireAdmin, requireUser } from "../middleware.ts";
 import { mailboxNotDeletePending } from "../permissions.ts";
 import { sha256Hex } from "./svc.ts";
-import { buildPatch, wrapUnique } from "./util.ts";
+import { buildPatch } from "./util.ts";
 
 // Admin-only mailbox & redirect management. Mounted at /api/admin.
 export function adminRoutes() {

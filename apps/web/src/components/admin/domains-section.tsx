@@ -46,6 +46,25 @@ export function DomainsSection() {
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
+  const [imapHost, setImapHost] = useState<string | null>(null);
+  const [imapPort, setImapPort] = useState<string | null>(null);
+  const imapHostValue = imapHost ?? settingsData?.imap?.host ?? "";
+  const imapPortValue = imapPort ?? String(settingsData?.imap?.port ?? 993);
+  const saveImap = useMutation({
+    mutationFn: () =>
+      unwrap(
+        rpc.domains.settings.imap.$put({
+          json: { host: imapHostValue.trim(), port: Number(imapPortValue) || 993 },
+        }),
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["domains-settings"] });
+      qc.invalidateQueries({ queryKey: ["app-passwords"] });
+      toast.success("Saved");
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
   return (
     <div className="space-y-5">
       <Section
@@ -64,6 +83,31 @@ export function DomainsSection() {
             onClick={() => saveFrom.mutate()}
             disabled={!fromAddr || saveFrom.isPending}
           >
+            Save
+          </Button>
+        </div>
+      </Section>
+
+      <Section
+        title="IMAP access"
+        description="Hostname of the Cloudflare Spectrum application that routes TCP (TLS terminated) to this Worker. Shown to users next to their app passwords; leave empty to hide IMAP."
+      >
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Input
+            value={imapHostValue}
+            onChange={(e) => setImapHost(e.target.value)}
+            placeholder="imap.example.com"
+            className="flex-1"
+          />
+          <Input
+            value={imapPortValue}
+            onChange={(e) => setImapPort(e.target.value)}
+            inputMode="numeric"
+            placeholder="993"
+            className="sm:w-24"
+            aria-label="IMAP port"
+          />
+          <Button variant="primary" onClick={() => saveImap.mutate()} disabled={saveImap.isPending}>
             Save
           </Button>
         </div>

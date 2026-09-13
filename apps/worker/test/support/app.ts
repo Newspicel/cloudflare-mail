@@ -3,6 +3,7 @@ import { makeDB } from "@cfmail/db";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import type { AppBindings, Env } from "../../src/env.ts";
+import { AppError, httpStatus } from "../../src/errors.ts";
 
 export const e = env as unknown as Env & {
   TEST_MIGRATIONS: Parameters<typeof applyD1Migrations>[1];
@@ -47,6 +48,7 @@ export function mountApp(
       if (err.res) return err.getResponse();
       return c.json({ error: err.message }, err.status);
     }
+    if (err instanceof AppError) return c.json({ error: err.message }, httpStatus(err.code));
     return c.json({ error: "internal_error" }, 500);
   });
   return app;
@@ -81,6 +83,9 @@ export async function applyMigrationsOnce(): Promise<void> {
 // Order matters: children before parents to respect FKs. Better Auth tables are
 // left alone — tests seed `user` directly and never touch sessions.
 const TRUNCATE_TABLES = [
+  "imap_uid",
+  "imap_folder",
+  "app_password",
   "rate_limit",
   "rate_limit_counter",
   "reminder",

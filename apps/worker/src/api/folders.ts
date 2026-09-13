@@ -8,11 +8,12 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
+import { wrapUnique } from "../errors.ts";
 import { requireUser } from "../middleware.ts";
 import { accessibleMailboxIds, requirePerm } from "../permissions.ts";
 import { cursorBefore, decodeCursor, nextCursor } from "./pagination.ts";
 import { serializeThread } from "./serialize.ts";
-import { buildPatch, typedQuery, wrapUnique } from "./util.ts";
+import { buildPatch, typedQuery } from "./util.ts";
 
 function serializeFolder(r: typeof folder.$inferSelect, total: number, unread: number): FolderDto {
   return { ...r, createdAt: r.createdAt.toISOString(), total, unread };

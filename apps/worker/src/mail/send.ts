@@ -12,9 +12,9 @@ import {
 import { Flag } from "@cfmail/shared/flags";
 import type { SendMessageInput } from "@cfmail/shared/schemas";
 import { and, count, eq, inArray } from "drizzle-orm";
-import { HTTPException } from "hono/http-exception";
 import { getOrCreatePgpMasterKey } from "../config.ts";
 import type { Env } from "../env.ts";
+import { AppError } from "../errors.ts";
 import { broadcastToUsers } from "../hub.ts";
 import { escapeHtml } from "../lib/encoding.ts";
 import { addrsToText, bodyForIndex, buildMime, snippet, type ThreadingHeaders } from "./mime.ts";
@@ -55,13 +55,13 @@ export async function sendFromMailbox(
       pgpAutoFetch: true,
     },
   });
-  if (!mb) throw new HTTPException(404, { message: "mailbox not found" });
+  if (!mb) throw new AppError("not_found", "mailbox not found");
 
   const dom = await db.query.domain.findFirst({
     where: eq(domain.id, mb.domainId),
     columns: { name: true },
   });
-  if (!dom) throw new HTTPException(500, { message: "domain missing" });
+  if (!dom) throw new AppError("internal", "domain missing");
 
   const fromAddr = resolveFromAddr(input.fromAddress, mb.localPart, dom.name);
   const fromName = mb.displayName ?? undefined;
@@ -86,7 +86,7 @@ export async function sendFromMailbox(
   const attachmentBytes: AttachmentBytes[] = await Promise.all(
     (input.attachments ?? []).map(async (att) => {
       const obj = await env.BLOBS.get(att.r2Key);
-      if (!obj) throw new HTTPException(400, { message: `attachment missing: ${att.r2Key}` });
+      if (!obj) throw new AppError("bad_request", `attachment missing: ${att.r2Key}`);
       const buf = await obj.arrayBuffer();
       return {
         filename: att.filename,
@@ -261,7 +261,7 @@ export async function sendFromMailbox(
     // can't leave duplicate Sent entries, then surface the failure.
     await cleanupFailedSend(env, db, { messageId, rawKey, threadId, attKeys });
     const detail = err instanceof Error ? err.message : String(err);
-    throw new HTTPException(502, { message: `send failed: ${detail}` });
+    throw new AppError("upstream", `send failed: ${detail}`);
   }
 
   // The platform may assign its own Message-ID on structured sends; adopt it so
@@ -505,9 +505,7 @@ function resolveFromAddr(
   const [local, dom] = override.split("@");
   const baseLocal = (local?.split("+")[0] ?? "").toLowerCase();
   if (dom?.toLowerCase() !== domainName.toLowerCase() || baseLocal !== localPart.toLowerCase()) {
-    throw new HTTPException(400, {
-      message: "from address must be the mailbox or a plus-alias of it",
-    });
+    throw new AppError("bad_request", "from address must be the mailbox or a plus-alias of it");
   }
   return override;
 }

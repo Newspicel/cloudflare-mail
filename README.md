@@ -1,6 +1,6 @@
 # cloudflare-mail
 
-A self-hostable, Gmail-style mail client that runs entirely on Cloudflare — one Worker serves the React app, the REST API, inbound mail (`email()`), and scheduled cleanup (`scheduled()`).
+A self-hostable, Gmail-style mail client that runs entirely on Cloudflare — one Worker serves the React app, the REST API, inbound mail (`email()`), IMAP over inbound TCP (`connect()`), and scheduled cleanup (`scheduled()`).
 
 - **Four mailbox types**, all first-class with RBAC from day one:
   - `personal` — individual inbox
@@ -12,18 +12,22 @@ A self-hostable, Gmail-style mail client that runs entirely on Cloudflare — on
 - **Full-text search** over subjects, bodies, and recipients (D1 FTS5)
 - **Organization** — labels, folders, reminders, and per-mailbox automation rules
 - **Inbound pipeline** — threading, spam scoring, gateway PGP decrypt, one-click unsubscribe, calendar (`.ics`) parsing, blocklist
+- **IMAP4rev1 server** — read your mail in Apple Mail, Thunderbird or Outlook, with `IDLE` push, per-mailbox app passwords, and the same RBAC as the web app
 - **Push notifications** and a tracking-pixel image proxy
 - **Everything on Cloudflare** — no external database, no SMTP servers to run
 
 > Status: actively developed. Auth, RBAC, inbound/outbound mail, threading, search, labels/folders/rules, spam, PGP, reminders, calendar, push, temp GC, and SSE are wired end-to-end, with a Vitest suite covering the worker pipelines. Contributions welcome.
+>
+> IMAP is built and tested but needs Cloudflare's **inbound TCP for Workers** (private beta at time of writing) plus a Spectrum application to reach it — see [IMAP access](#6-imap-access-optional).
 
 ## Stack
 
 | Layer         | Choice                                                             |
 | ------------- | ------------------------------------------------------------------ |
-| Runtime       | Cloudflare Workers (single Worker: `fetch` + `email` + `scheduled` + Durable Objects) |
+| Runtime       | Cloudflare Workers (single Worker: `fetch` + `email` + `scheduled` + `connect` + Durable Objects) |
 | Storage       | D1 (SQLite, metadata), R2 (raw MIME + attachments), DO (SSE fan-out) |
 | Inbound       | Cloudflare Email Routing → Worker `email()` handler                |
+| IMAP          | Cloudflare Spectrum (TLS terminated) → Worker `connect()` handler  |
 | Outbound      | Cloudflare Email Service (`env.EMAIL.send()`)                      |
 | Auth          | [Better Auth](https://better-auth.com) on D1                       |
 | MIME          | [postal-mime](https://github.com/postalsys/postal-mime) (parse), [mimetext](https://github.com/muratgozel/MIMEText) (build for archived copy) |
@@ -39,6 +43,7 @@ One Worker owns every code path. There is no separate API service, no message qu
 flowchart LR
   Browser["Browser SPA<br/>(apps/web)"]
   Inbound["Cloudflare<br/>Email Routing"]
+  MailApp["Mail app<br/>(IMAP client)"]
   Cron["Cloudflare<br/>Cron Trigger"]
   Sender["Outbound recipient<br/>(env.EMAIL.send)"]
 
@@ -46,6 +51,7 @@ flowchart LR
     direction TB
     Fetch["fetch()<br/>Hono API + SPA assets"]
     Email["email()<br/>inbound handler"]
+    Connect["connect()<br/>IMAP4rev1 server"]
     Scheduled["scheduled()<br/>temp-mailbox GC"]
     Hub["UserHub<br/>(Durable Object, SSE fan-out)"]
   end
@@ -58,6 +64,7 @@ flowchart LR
   Browser -- "/ (static)" --> Assets
   Assets --> Fetch
   Inbound --> Email
+  MailApp -- "TCP 993 via Spectrum" --> Connect
   Cron --> Scheduled
   Fetch --> D1
   Fetch --> R2
@@ -65,6 +72,9 @@ flowchart LR
   Email --> D1
   Email --> R2
   Email --> Hub
+  Connect --> D1
+  Connect --> R2
+  Hub -- "IDLE wake-ups" --> Connect
   Scheduled --> D1
   Scheduled --> R2
   Fetch -- "compose / reply" --> Sender
@@ -98,6 +108,7 @@ Key files to orient from:
 
 - `apps/worker/src/index.ts` — handler exports
 - `apps/worker/src/mail/receive.ts`, `apps/worker/src/mail/send.ts` — mail pipelines
+- `apps/worker/src/imap/` — IMAP wire protocol, session state machine, mail-model bridge
 - `apps/worker/src/permissions.ts` — single RBAC checker
 - `apps/worker/src/hub.ts` — SSE fan-out Durable Object
 - `packages/db/src/schema.ts` — data model
@@ -159,7 +170,19 @@ That's the whole deploy. The `deploy` script applies pending migrations (`@cfmai
    - Set the **Transactional email** from-address (must be on a verified Email Sending domain) so password reset and invite emails can go out.
 4. In Cloudflare: enable **Email Routing** per zone, route catch-all → this Worker, and verify the zone under **Email Sending**.
 
-### 6. Local dev
+### 6. IMAP access (optional)
+
+Mail apps talk to the same Worker over TCP. Cloudflare Spectrum terminates TLS and routes the raw socket to the `connect()` handler, so there is no separate IMAP server to run and no `STARTTLS` — connect on the implicit-TLS port.
+
+1. In the Cloudflare dashboard, create a **Spectrum application**: TCP, port `993`, origin = this Worker. (Inbound TCP for Workers is in private beta — you may need to request access.)
+2. In the app's admin panel → **Domains** tab → **IMAP access**, enter that Spectrum hostname and port. Until this is set, the app hides IMAP from users.
+3. Each user creates their own credentials in **Settings → IMAP access**: pick a mailbox, name the device, and copy the generated app password (shown once).
+
+Client settings are then: server = the Spectrum hostname, port `993`, SSL/TLS, username = the mailbox address, password = the app password. One password unlocks one mailbox; revoking it cuts that client off immediately, and losing access to a shared mailbox revokes it automatically.
+
+Folders map onto the app's own model: `INBOX`, `Sent`, `Spam`, `Trash`, plus each of your custom folders. Moving mail, flagging it, and deleting it in a mail app shows up in the web UI live, and vice versa.
+
+### 7. Local dev
 
 ```bash
 pnpm --filter @cfmail/db migrate:local
@@ -171,7 +194,7 @@ pnpm dev          # Vite (:5173) + Wrangler (:8787), Vite proxies /api
 ```bash
 pnpm typecheck    # tsgo across all packages
 pnpm lint         # oxlint + biome check
-pnpm test         # Vitest (worker pipelines)
+pnpm test         # Vitest (worker pipelines + IMAP server)
 pnpm build        # Vite + Wrangler dry-run
 ```
 

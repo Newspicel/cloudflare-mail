@@ -14,6 +14,7 @@ import {
   BLOCK_REQUEST_STATUS,
   CONTACT_KEY_SOURCES,
   EDITOR_FORMATS,
+  IMAP_FOLDER_KINDS,
   MAILBOX_TYPES,
   MESSAGE_DIRECTIONS,
   NOTIFY_LEVELS,
@@ -960,4 +961,82 @@ export const shareToken = sqliteTable(
     createdAt: createdAt(),
   },
   (t) => [index("share_token_mailbox_idx").on(t.mailboxId)],
+);
+
+// ─── IMAP ───────────────────────────────────────────────────────────────────
+
+// Per-mailbox credentials for IMAP clients. Web sign-in (passkeys, 2FA) can't
+// be typed into a mail client, so each client gets its own random secret bound
+// to one user and one mailbox. Only the scrypt hash is stored; the plaintext is
+// shown once at creation. Login still runs permissions.ts — losing mailbox
+// access silently revokes every password for it.
+export const appPassword = sqliteTable(
+  "app_password",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    mailboxId: text("mailbox_id")
+      .notNull()
+      .references(() => mailbox.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    hash: text("hash").notNull(),
+    lastUsedAt: integer("last_used_at", { mode: "timestamp" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("app_password_user_idx").on(t.userId),
+    index("app_password_mailbox_idx").on(t.mailboxId),
+  ],
+);
+
+// One IMAP folder as one user sees it: INBOX/Sent/Spam/Trash of a mailbox, or a
+// custom folder. Folder *contents* are derived from thread/message state in
+// imap/store.ts on every SELECT/NOOP; this row only owns the UID space —
+// UIDVALIDITY plus the next UID to hand out. Per user because custom-folder
+// filing is per user, so two members of a group mailbox see different INBOXes.
+// `key` is "inbox" | "sent" | "spam" | "trash" | "folder:<folderId>" — the
+// unique handle (a nullable folder_id can't take part in a UNIQUE index).
+export const imapFolder = sqliteTable(
+  "imap_folder",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    mailboxId: text("mailbox_id")
+      .notNull()
+      .references(() => mailbox.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: IMAP_FOLDER_KINDS }).notNull(),
+    folderId: text("folder_id").references(() => folder.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    uidValidity: integer("uid_validity").notNull(),
+    uidNext: integer("uid_next").notNull().default(1),
+  },
+  (t) => [
+    uniqueIndex("imap_folder_key_uq").on(t.userId, t.mailboxId, t.key),
+    index("imap_folder_folder_idx").on(t.folderId),
+  ],
+);
+
+// Message ↔ UID assignment inside an imap_folder. A row exists only while the
+// message is in that folder from that user's point of view; a message that
+// leaves and later returns gets a fresh, higher UID (RFC 3501 never reuses one).
+export const imapUid = sqliteTable(
+  "imap_uid",
+  {
+    imapFolderId: text("imap_folder_id")
+      .notNull()
+      .references(() => imapFolder.id, { onDelete: "cascade" }),
+    uid: integer("uid").notNull(),
+    messageId: text("message_id")
+      .notNull()
+      .references(() => message.id, { onDelete: "cascade" }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.imapFolderId, t.uid] }),
+    uniqueIndex("imap_uid_message_uq").on(t.imapFolderId, t.messageId),
+    index("imap_uid_message_idx").on(t.messageId),
+  ],
 );

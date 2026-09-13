@@ -64,6 +64,7 @@ const EVENT_TYPES = [
   "thread_updated",
   "thread_read",
   "mailbox_expired",
+  "mailbox_changed",
   "scheduled_send_failed",
   "reminder_fired",
   "ping",
@@ -133,6 +134,13 @@ export function connectStream(qc: QueryClient, navigate?: Navigate): () => void 
       }
       case "mailbox_expired": {
         qc.invalidateQueries({ queryKey: keys.mailboxes() });
+        break;
+      }
+      case "mailbox_changed": {
+        // An IMAP client changed flags/placement somewhere in the mailbox —
+        // no per-thread detail, so refresh lists, counts, and folders.
+        coalescer.push({ mailboxId: evt.mailboxId, counts: true, folders: true });
+        qc.invalidateQueries({ queryKey: ["thread"] });
         break;
       }
       case "scheduled_send_failed": {

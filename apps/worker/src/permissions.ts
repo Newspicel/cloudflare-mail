@@ -3,7 +3,7 @@ import { mailbox, mailboxMember } from "@cfmail/db/schema";
 import { ALL_PERMS, has, type PermBit } from "@cfmail/shared/permissions";
 import { and, eq, isNull, ne, or } from "drizzle-orm";
 import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core";
-import { HTTPException } from "hono/http-exception";
+import { AppError } from "./errors.ts";
 
 // Reusable predicates over the mailbox purge marker (schema: pending_purge).
 // `notPurging` excludes both empty- and delete-pending mailboxes (no live
@@ -82,7 +82,7 @@ export async function requirePerm(
 ): Promise<MailboxAccess> {
   const access = await resolveAccess(db, userId, mailboxId);
   if (!access || !has(access.perms, bit)) {
-    throw new HTTPException(403, { message: "forbidden" });
+    throw new AppError("forbidden", "forbidden");
   }
   return access;
 }
@@ -97,7 +97,7 @@ export async function requireEntityAccess<
 >(db: DB, userId: string, table: T, id: string, bit: PermBit): Promise<T["$inferSelect"]> {
   const rows = await db.select().from(table).where(eq(table.id, id)).limit(1);
   const row = rows[0] as T["$inferSelect"] | undefined;
-  if (!row) throw new HTTPException(404, { message: "not found" });
+  if (!row) throw new AppError("not_found", "not found");
   await requirePerm(db, userId, (row as { mailboxId: string }).mailboxId, bit);
   return row;
 }

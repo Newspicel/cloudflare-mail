@@ -389,3 +389,32 @@ export interface ContactsDto {
 export interface MeDto {
   user: MeUserDto | null;
 }
+
+// ─── IMAP / app passwords ───────────────────────────────────────────────────
+
+export interface ImapConnectionDto {
+  host: string;
+  port: number;
+}
+
+export interface AppPasswordDto {
+  id: string;
+  name: string;
+  mailboxId: string;
+  mailboxAddress: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+
+export interface AppPasswordListDto {
+  passwords: AppPasswordDto[];
+  /** Null until an admin sets the IMAP hostname. */
+  imap: ImapConnectionDto | null;
+}
+
+/** The plaintext is returned exactly once, at creation. */
+export interface AppPasswordCreatedDto {
+  id: string;
+  password: string;
+  username: string;
+}
