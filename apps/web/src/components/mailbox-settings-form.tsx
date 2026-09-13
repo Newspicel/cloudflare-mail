@@ -214,7 +214,7 @@ function MailboxSettingsFields({
     >
       <Region label="Identity">
         <div className="space-y-4">
-          <Field label="Display name">
+          <Field label="Display name" hint="Shown as the sender name on outgoing mail.">
             <Input
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
