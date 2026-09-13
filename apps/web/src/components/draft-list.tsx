@@ -10,7 +10,7 @@ import { keys } from "@/lib/query-keys.ts";
 import { formatStamp } from "@/lib/time.ts";
 import { useListVirtualizer } from "@/lib/use-list-virtualizer.ts";
 import { openCompose } from "./compose-dock.tsx";
-import { FOLDER_META, FolderTabs } from "./folder-tabs.tsx";
+import { FOLDER_META, MailListHeader } from "./folder-tabs.tsx";
 import { Button } from "./ui/button.tsx";
 import { useConfirmHelpers } from "./ui/confirm.tsx";
 import { Tooltip, TooltipProvider } from "./ui/tooltip.tsx";
@@ -97,9 +97,7 @@ export function DraftList({
   return (
     <TooltipProvider delay={400}>
       <div className="flex h-full flex-col bg-card">
-        <div className="flex h-11 shrink-0 items-center gap-2 border-b px-2">
-          <FolderTabs mailboxId={mailboxId} view={view} unread={unread} />
-        </div>
+        <MailListHeader mailboxId={mailboxId} view={view} unread={unread} />
         {loading ? (
           <ThreadListSkeleton />
         ) : drafts.length === 0 ? (

@@ -31,7 +31,7 @@ import { useThreadListMutation } from "@/lib/thread-mutations.ts";
 import { formatRemaining, useNow } from "@/lib/time.ts";
 import { useListVirtualizer, visibleBlock } from "@/lib/use-list-virtualizer.ts";
 import { usePullToRefresh } from "@/lib/use-pull-to-refresh.ts";
-import { FOLDER_META, FolderTabs } from "./folder-tabs.tsx";
+import { FOLDER_META, MailListHeader } from "./folder-tabs.tsx";
 import { BulkLabelsMenu } from "./labels-menu.tsx";
 import { MoveToFolderMenu } from "./move-to-folder-menu.tsx";
 import { ThreadActionSheet } from "./thread-action-sheet.tsx";
@@ -280,41 +280,39 @@ export function ThreadList({
             </div>
           </div>
         ) : (
-          <div className="flex h-11 shrink-0 items-center gap-1 border-b px-2">
-            <FolderTabs mailboxId={mailboxId} view={view} unread={unread} />
-            <Tooltip label={unread ? "Show all conversations" : "Show unread only"}>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Unread only"
-                aria-pressed={unread}
-                className={cn(
-                  "shrink-0",
-                  unread && "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary",
-                )}
-                onClick={() => setUnread(!unread)}
-              >
-                <ListFilter />
-              </Button>
-            </Tooltip>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <IconButton
-                    icon={EllipsisVertical}
-                    label="More"
+          <MailListHeader
+            mailboxId={mailboxId}
+            view={view}
+            unread={unread}
+            actions={
+              <>
+                <Tooltip label={unread ? "Show all conversations" : "Show unread only"}>
+                  <Button
+                    variant="ghost"
                     size="icon-sm"
-                    className="shrink-0"
+                    aria-label="Unread only"
+                    aria-pressed={unread}
+                    className={cn(
+                      unread && "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary",
+                    )}
+                    onClick={() => setUnread(!unread)}
+                  >
+                    <ListFilter />
+                  </Button>
+                </Tooltip>
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={<IconButton icon={EllipsisVertical} label="More" size="icon-sm" />}
                   />
-                }
-              />
-              <DropdownMenuContent>
-                <DropdownMenuItem disabled={readAll.isPending} onClick={markAllRead}>
-                  <MailOpen /> Mark all in {meta.label} as read
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+                  <DropdownMenuContent>
+                    <DropdownMenuItem disabled={readAll.isPending} onClick={markAllRead}>
+                      <MailOpen /> Mark all in {meta.label} as read
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </>
+            }
+          />
         )}
         {expiresAt && <ExpiryBanner expiresAt={expiresAt} />}
         {loading ? (

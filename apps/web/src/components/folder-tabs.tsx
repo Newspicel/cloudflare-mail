@@ -10,6 +10,7 @@ import {
   Star,
   Trash2,
 } from "lucide-react";
+import type { ReactNode } from "react";
 import { folderCountsQuery, listSearch, MAIL_VIEWS, type MailView } from "@/lib/queries.ts";
 import { Tabs, TabsIndicator, TabsList, TabsTab } from "./ui/tabs.tsx";
 import { Tooltip } from "./ui/tooltip.tsx";
@@ -70,5 +71,26 @@ export function FolderTabs({
         <TabsIndicator />
       </TabsList>
     </Tabs>
+  );
+}
+
+// Shared list header: the tab row keeps the same geometry in every view, so the
+// action slot is fixed-width (two icon-sm buttons) even where a view has none.
+export function MailListHeader({
+  mailboxId,
+  view,
+  unread,
+  actions,
+}: {
+  mailboxId: string;
+  view: MailView;
+  unread?: boolean;
+  actions?: ReactNode;
+}) {
+  return (
+    <div className="flex h-11 shrink-0 items-center gap-1 border-b px-2">
+      <FolderTabs mailboxId={mailboxId} view={view} unread={unread} />
+      <div className="flex w-15 shrink-0 items-center justify-end gap-1">{actions}</div>
+    </div>
   );
 }
