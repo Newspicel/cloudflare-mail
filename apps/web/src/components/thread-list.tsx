@@ -121,29 +121,35 @@ export function ThreadList({
   const { data: labelsData } = useQuery(threadLabelsQuery(visibleIds));
   const labelsByThread: Record<string, MessageLabel[]> | undefined = labelsData?.labels;
 
-  const bulk = useThreadListMutation<{ trashed?: boolean; spam?: boolean }>({
+  // Every bulk action takes its ids as mutation *variables*, never off the
+  // `selected` closure: clearing the selection re-renders this component, and
+  // React Query hands the in-flight mutation the fresh `mutationFn` before it
+  // runs — one that would see an already-emptied set and send nothing.
+  const bulk = useThreadListMutation<{
+    ids: string[];
+    patch: { trashed?: boolean; spam?: boolean };
+  }>({
     mailboxId,
-    mutationFn: (patch) =>
+    mutationFn: ({ ids, patch }) =>
       Promise.all(
-        [...selected].map((id) =>
-          unwrap(rpc.threads[":id"].$patch({ param: { id }, json: patch })),
-        ),
+        ids.map((id) => unwrap(rpc.threads[":id"].$patch({ param: { id }, json: patch }))),
       ),
-    optimistic: (_patch, qc) => removeThreadsFromLists(qc, mailboxId, [...selected]),
+    optimistic: ({ ids }, qc) => removeThreadsFromLists(qc, mailboxId, ids),
     onApply: () => setSelected(new Set()),
   });
+  const bulkPatch = (patch: { trashed?: boolean; spam?: boolean }) =>
+    bulk.mutate({ ids: [...selected], patch });
 
-  const bulkRead = useThreadListMutation<boolean>({
+  const bulkRead = useThreadListMutation<{ ids: string[]; read: boolean }>({
     mailboxId,
-    mutationFn: (read) =>
+    mutationFn: ({ ids, read }) =>
       Promise.all(
-        [...selected].map((id) =>
-          unwrap(rpc.threads[":id"].$patch({ param: { id }, json: { read } })),
-        ),
+        ids.map((id) => unwrap(rpc.threads[":id"].$patch({ param: { id }, json: { read } }))),
       ),
-    optimistic: (read, qc) =>
-      patchThreadsInLists(qc, mailboxId, [...selected], { unreadCount: read ? 0 : 1 }),
+    optimistic: ({ ids, read }, qc) =>
+      patchThreadsInLists(qc, mailboxId, ids, { unreadCount: read ? 0 : 1 }),
   });
+  const bulkSetRead = (read: boolean) => bulkRead.mutate({ ids: [...selected], read });
 
   const bulkDel = useThreadListMutation<string[]>({
     mailboxId,
@@ -215,7 +221,7 @@ export function ThreadList({
                     label="Restore"
                     size="icon-sm"
                     disabled={bulk.isPending}
-                    onClick={() => bulk.mutate({ trashed: false })}
+                    onClick={() => bulkPatch({ trashed: false })}
                   />
                   <IconButton
                     icon={Trash2}
@@ -232,14 +238,14 @@ export function ThreadList({
                     label="Mark as read"
                     size="icon-sm"
                     disabled={bulkRead.isPending}
-                    onClick={() => bulkRead.mutate(true)}
+                    onClick={() => bulkSetRead(true)}
                   />
                   <IconButton
                     icon={Mail}
                     label="Mark as unread"
                     size="icon-sm"
                     disabled={bulkRead.isPending}
-                    onClick={() => bulkRead.mutate(false)}
+                    onClick={() => bulkSetRead(false)}
                   />
                   <BulkLabelsMenu mailboxId={mailboxId} threadIds={[...selected]} size="icon-sm" />
                   <MoveToFolderMenu
@@ -257,7 +263,7 @@ export function ThreadList({
                       label="Not spam"
                       size="icon-sm"
                       disabled={bulk.isPending}
-                      onClick={() => bulk.mutate({ spam: false })}
+                      onClick={() => bulkPatch({ spam: false })}
                     />
                   ) : (
                     <IconButton
@@ -265,7 +271,7 @@ export function ThreadList({
                       label="Mark as spam"
                       size="icon-sm"
                       disabled={bulk.isPending}
-                      onClick={() => bulk.mutate({ spam: true })}
+                      onClick={() => bulkPatch({ spam: true })}
                     />
                   )}
                   <IconButton
@@ -273,7 +279,7 @@ export function ThreadList({
                     label="Trash"
                     size="icon-sm"
                     disabled={bulk.isPending}
-                    onClick={() => bulk.mutate({ trashed: true })}
+                    onClick={() => bulkPatch({ trashed: true })}
                   />
                 </>
               )}
