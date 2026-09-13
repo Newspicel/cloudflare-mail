@@ -44,6 +44,7 @@ import { buildQuote } from "../mail/quote.ts";
 import { sanitizeEmailHtml } from "../mail/sanitize.ts";
 import { sendFromMailbox } from "../mail/send.ts";
 import { recomputeThreadAfterMessageDelete, recomputeThreadUnread } from "../mail/threads.ts";
+import { getTrackerRules, stripTrackers } from "../mail/trackers.ts";
 import { performUnsubscribe } from "../mail/unsubscribe.ts";
 import { fetchWkdKey } from "../mail/wkd.ts";
 import { requireUser } from "../middleware.ts";
@@ -283,8 +284,15 @@ export function messagesRoutes() {
       // never leaks the reader's IP to the sender (tracking pixels); inline `cid:`
       // images are rewritten to the same-origin attachment route so they render.
       let html: string | null = null;
+      let trackersBlocked = 0;
       if (parsed.html) {
-        html = await proxyRemoteContent(parsed.html, await getOrCreateAuthSecret(db));
+        // Known beacons and invisible pixels are dropped before proxying so the
+        // request is never made at all — the proxy only hides who made it.
+        ({ html, blocked: trackersBlocked } = await stripTrackers(
+          parsed.html,
+          await getTrackerRules(db),
+        ));
+        html = await proxyRemoteContent(html, await getOrCreateAuthSecret(db));
         const cidMap = new Map(
           atts.filter((a) => a.contentId).map((a) => [bareCid(a.contentId!), a.id]),
         );
@@ -300,6 +308,7 @@ export function messagesRoutes() {
         text: parsed.text ?? null,
         attachments: atts,
         calendar: extractCalendar(parsed),
+        trackersBlocked,
       } satisfies MessageBodyDto);
     })
 
@@ -422,16 +431,16 @@ export function messagesRoutes() {
       // following, and the reader's frame is waiting on every image. The timer
       // is cleared once headers land so a large legitimate image can stream
       // past the deadline (the byte cap below bounds that instead).
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), PROXY_FETCH_TIMEOUT_MS);
+      const abort = new AbortController();
+      const timer = setTimeout(() => abort.abort(), PROXY_FETCH_TIMEOUT_MS);
       let result: Awaited<ReturnType<typeof safeRedirectFetch>>;
       try {
         result = await safeRedirectFetch(new URL(url), {
           headers: { accept: "image/*" },
-          signal: ctrl.signal,
+          signal: abort.signal,
         });
       } catch {
-        if (ctrl.signal.aborted) throw new HTTPException(504, { message: "upstream timeout" });
+        if (abort.signal.aborted) throw new HTTPException(504, { message: "upstream timeout" });
         throw new HTTPException(502, { message: "fetch failed" });
       } finally {
         clearTimeout(timer);

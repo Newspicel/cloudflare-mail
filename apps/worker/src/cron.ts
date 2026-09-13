@@ -8,6 +8,7 @@ import { checkDomainHealth } from "./mail/dns.ts";
 import { pushToUsers } from "./mail/push.ts";
 import { buildQuote } from "./mail/quote.ts";
 import { sendFromMailbox } from "./mail/send.ts";
+import { refreshTrackerList } from "./mail/trackers.ts";
 import { markMailboxPurge } from "./mailbox-purge.ts";
 
 const DNS_RECHECK_INTERVAL_MS = 60 * 60 * 1000;
@@ -60,6 +61,7 @@ export async function runCron(env: Env, now: Date): Promise<void> {
   await step("purge-pending-mailboxes", () => purgePendingMailboxes(env, db));
   await step("prune-rate-limit-counters", () => pruneRateLimitCounters(db, now));
   await step("dns-recheck", () => recheckDomains(db, now));
+  await step("tracker-list", () => refreshTrackerList(db, now));
 }
 
 // Expired temp mailboxes go through the same background purge as admin/owner
