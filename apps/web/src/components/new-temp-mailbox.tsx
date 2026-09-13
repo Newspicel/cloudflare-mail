@@ -32,9 +32,7 @@ export function NewTempMailbox() {
   const [created, setCreated] = useState<CreatedTemp | null>(null);
   const { data: domainsData } = useQuery(tempDomainsQueryOptions);
 
-  // Hide entirely when the user can't create a temp mailbox on any domain, but
-  // keep its slot so the sidebar header height stays the same with or without it.
-  if ((domainsData?.domains.length ?? 0) === 0) return <div className="h-8 shrink-0" aria-hidden />;
+  if ((domainsData?.domains.length ?? 0) === 0) return null;
 
   return (
     <Popover
