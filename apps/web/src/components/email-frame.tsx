@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/cn.ts";
 import { adaptTextContrast, parseCssColor } from "@/lib/contrast.ts";
 import { handleMailtoClick } from "@/lib/use-mailto-links.ts";
@@ -56,7 +56,7 @@ function buildDoc(bodyHtml: string, c: Colors): string {
     `img{height:auto}` +
     `a{color:${c.link}}pre{white-space:pre-wrap}table{border-collapse:collapse}` +
     `blockquote{margin:0;padding-left:12px;border-left:2px solid currentColor;opacity:.7}` +
-    `</style></head><body>${bodyHtml}</body></html>`
+    `</style></head><body data-scheme="${scheme}">${bodyHtml}</body></html>`
   );
 }
 
@@ -81,41 +81,85 @@ export function EmailFrame({ html, className }: { html: string; className?: stri
 
   const doc = buildDoc(html, colors);
 
-  // `allow-same-origin` + no scripts lets us read the child document to size it;
-  // re-observe on every (re)load so late reflow (image loads) keeps it exact.
+  // `allow-same-origin` + no scripts lets us read the child document to size it.
+  // Wires a body document up once (mailto interception, contrast fix) and
+  // (re)starts the size observer; safe to call again for the same document.
+  const preparedRef = useRef<Document | null>(null);
+  const observe = useCallback(
+    (d: Document) => {
+      roRef.current?.disconnect();
+      const root = d.documentElement;
+      const body = d.body;
+      if (!root || !body) return;
+      if (preparedRef.current !== d) {
+        preparedRef.current = d;
+        // `mailto:` links belong to the app's composer, not the OS mail client.
+        // The listener rides on the frame's own document — replaced on every
+        // load, so it can't stack up — and beats the sanitizer's target="_blank".
+        d.addEventListener("click", handleMailtoClick);
+        // Mail styles its text for the sender's default (white) page and rarely
+        // paints its own background, so on the dark theme `#333` copy would sit
+        // on our dark card. Re-tint any text that can't be read against what's
+        // actually behind it — see contrast.ts. Runs before the first measure
+        // since it only touches colors, never layout.
+        const canvasBg = parseCssColor(colors.bg);
+        if (canvasBg) adaptTextContrast(d, canvasBg);
+      }
+      // Grow the frame to the full content so the card lengthens instead of the
+      // body scrolling inside it. `documentElement.scrollHeight` can under-report
+      // by a few px (margin collapse), leaving a sliver scrollbar — take the max
+      // with the body and observe both so late reflow (image loads) stays exact.
+      // Width is measured too: content the stylesheet can't shrink below the pane
+      // (hard inline widths) gets scaled down to fit instead of side-scrolling.
+      const update = () =>
+        setSize({
+          height: Math.max(root.scrollHeight, body.scrollHeight),
+          contentWidth: Math.max(root.scrollWidth, body.scrollWidth),
+        });
+      update();
+      const ro = new ResizeObserver(update);
+      ro.observe(root);
+      ro.observe(body);
+      roRef.current = ro;
+    },
+    [colors.bg],
+  );
+
+  // Measure as soon as the srcdoc document is *parsed*, not when it has
+  // *loaded*: the iframe's `load` event waits on every <img>, so one slow or
+  // hanging tracking pixel (the proxy times those out, but only after seconds)
+  // would hold the whole message behind the skeleton. There is no parent-side
+  // event for "child document created", so poll a frame at a time until the
+  // body carries our marker — `data-scheme` also tells the current document
+  // apart from the initial about:blank and from a stale one still showing
+  // while a re-themed srcdoc navigates in — then attach at DOMContentLoaded.
+  // Text shows at once; the ResizeObserver grows the frame as images land.
+  useEffect(() => {
+    let raf = 0;
+    let active = true;
+    const scheme = colors.dark ? "dark" : "light";
+    const tick = () => {
+      const d = ref.current?.contentDocument;
+      if (d?.body?.dataset.scheme === scheme) {
+        if (d.readyState === "loading") {
+          d.addEventListener("DOMContentLoaded", () => active && observe(d), { once: true });
+        } else observe(d);
+        return;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      active = false;
+      cancelAnimationFrame(raf);
+    };
+  }, [colors.dark, observe]);
+
+  // Fallback for anything the early path missed (rAF is paused in a hidden
+  // tab); a no-op re-measure otherwise.
   const onLoad = () => {
-    roRef.current?.disconnect();
     const d = ref.current?.contentDocument;
-    const root = d?.documentElement;
-    const body = d?.body;
-    if (!root || !body) return;
-    // `mailto:` links belong to the app's composer, not the OS mail client. The
-    // listener rides on the frame's own document — replaced on every load, so
-    // it can't stack up — and beats the sanitizer's target="_blank".
-    d.addEventListener("click", handleMailtoClick);
-    // Mail styles its text for the sender's default (white) page and rarely
-    // paints its own background, so on the dark theme `#333` copy would sit on
-    // our dark card. Re-tint any text that can't be read against what's
-    // actually behind it — see contrast.ts. Runs before the first measure since
-    // it only touches colors, never layout.
-    const canvasBg = parseCssColor(colors.bg);
-    if (canvasBg) adaptTextContrast(d, canvasBg);
-    // Grow the frame to the full content so the card lengthens instead of the
-    // body scrolling inside it. `documentElement.scrollHeight` can under-report
-    // by a few px (margin collapse), leaving a sliver scrollbar — take the max
-    // with the body and observe both so late reflow (image loads) stays exact.
-    // Width is measured too: content the stylesheet can't shrink below the pane
-    // (hard inline widths) gets scaled down to fit instead of side-scrolling.
-    const update = () =>
-      setSize({
-        height: Math.max(root.scrollHeight, body.scrollHeight),
-        contentWidth: Math.max(root.scrollWidth, body.scrollWidth),
-      });
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(root);
-    ro.observe(body);
-    roRef.current = ro;
+    if (d) observe(d);
   };
 
   useEffect(() => () => roRef.current?.disconnect(), []);

@@ -60,6 +60,11 @@ function slugifyForFile(subject: string | null): string {
     .slice(0, 60);
 }
 
+// Wall-clock budget for /proxy-image to reach a final response's headers,
+// redirects included. Legit image CDNs answer well inside this; only hanging or
+// self-redirecting trackers run into it.
+const PROXY_FETCH_TIMEOUT_MS = 5_000;
+
 const patchSchema = z.object({
   seen: z.boolean().optional(),
   starred: z.boolean().optional(),
@@ -412,7 +417,25 @@ export function messagesRoutes() {
 
       // Manual redirect following: every hop is re-checked against the SSRF
       // guard, so an attacker host can't 302 us at an internal address.
-      const result = await safeRedirectFetch(new URL(url), { headers: { accept: "image/*" } });
+      // Time-to-headers is bounded across the whole chain: "open duration"
+      // trackers 307 to themselves about once a second for as long as we keep
+      // following, and the reader's frame is waiting on every image. The timer
+      // is cleared once headers land so a large legitimate image can stream
+      // past the deadline (the byte cap below bounds that instead).
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), PROXY_FETCH_TIMEOUT_MS);
+      let result: Awaited<ReturnType<typeof safeRedirectFetch>>;
+      try {
+        result = await safeRedirectFetch(new URL(url), {
+          headers: { accept: "image/*" },
+          signal: ctrl.signal,
+        });
+      } catch {
+        if (ctrl.signal.aborted) throw new HTTPException(504, { message: "upstream timeout" });
+        throw new HTTPException(502, { message: "fetch failed" });
+      } finally {
+        clearTimeout(timer);
+      }
       if ("blocked" in result) throw new HTTPException(403, { message: result.reason });
       const upstream = result;
       if (!upstream.ok || !upstream.body) throw new HTTPException(502, { message: "fetch failed" });

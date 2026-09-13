@@ -308,6 +308,22 @@ describe("GET /proxy-image — size limits", () => {
     expect((await res.arrayBuffer()).byteLength).toBe(16);
   });
 
+  it("504s when the upstream never answers (hanging or self-redirecting tracker)", async () => {
+    const path = await signedProxyPath("https://tracker.example/open-duration.gif");
+    // Hang until the proxy's own deadline aborts the request.
+    vi.stubGlobal(
+      "fetch",
+      (_url: unknown, init?: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () =>
+            reject(new DOMException("aborted", "AbortError")),
+          );
+        }),
+    );
+    const res = await request(asOwner(), "GET", path);
+    expect(res.status).toBe(504);
+  }, 10_000);
+
   it("429s once the per-user proxy window is exhausted", async () => {
     await db()
       .insert(rateLimitCounter)
