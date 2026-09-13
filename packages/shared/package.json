@@ -8,13 +8,13 @@
     "./*": "./src/*.ts"
   },
   "scripts": {
-    "typecheck": "tsgo --noEmit"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@cfmail/db": "workspace:*",
-    "zod": "4.4.3"
+    "zod": "4.6.2"
   },
   "devDependencies": {
-    "@typescript/native-preview": "7.0.0-dev.20260623.1"
+    "typescript": "7.0.2"
   }
 }

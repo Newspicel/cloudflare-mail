@@ -33,7 +33,7 @@ A self-hostable, Gmail-style mail client that runs entirely on Cloudflare — on
 | MIME          | [postal-mime](https://github.com/postalsys/postal-mime) (parse), [mimetext](https://github.com/muratgozel/MIMEText) (build for archived copy) |
 | API           | [Hono](https://hono.dev) + [Drizzle ORM](https://orm.drizzle.team) |
 | Frontend      | React 19, Vite, Tailwind v4, shadcn/ui, TanStack Router + Query    |
-| Tooling       | pnpm · Turborepo · Biome v2 · oxlint · tsgo (TypeScript 7)         |
+| Tooling       | pnpm · Turborepo · Biome v2 · oxlint · tsc (TypeScript 7, native) |
 
 ## Architecture
 
@@ -121,7 +121,7 @@ The goal: fork, connect the repo to Cloudflare, open the URL, create the admin a
 
 - A Cloudflare account on the **Workers Paid** plan (Email Sending requires it)
 - A domain on Cloudflare with **Email Routing** enabled (per email-domain DNS still needs the standard MX + SPF/DKIM/DMARC records — the admin UI shows you what to paste)
-- Node 22+, pnpm 10+
+- Node 22+, pnpm 12+
 
 ### 2. Install
 
@@ -192,7 +192,7 @@ pnpm dev          # Vite (:5173) + Wrangler (:8787), Vite proxies /api
 ## Verification commands
 
 ```bash
-pnpm typecheck    # tsgo across all packages
+pnpm typecheck    # tsc (TypeScript 7) across all packages
 pnpm lint         # oxlint + biome check
 pnpm test         # Vitest (worker pipelines + IMAP server)
 pnpm build        # Vite + Wrangler dry-run
@@ -202,7 +202,7 @@ pnpm build        # Vite + Wrangler dry-run
 
 Issues and PRs welcome — see [`CONTRIBUTING.md`](./CONTRIBUTING.md) for branching, required checks, and how to run locally against a real Cloudflare account. TL;DR:
 
-- Keep the toolchain (tsgo / Biome / oxlint / pnpm / Turborepo) — don't swap pieces without discussion.
+- Keep the toolchain (tsc / Biome / oxlint / pnpm / Turborepo) — don't swap pieces without discussion.
 - Run `pnpm typecheck && pnpm lint && pnpm build && pnpm test` before opening a PR.
 - If you use Claude Code or similar AI tooling, read `CLAUDE.md` first — it captures the invariants that make the project safe to change.
 

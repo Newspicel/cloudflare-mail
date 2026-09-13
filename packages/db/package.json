@@ -11,15 +11,15 @@
     "generate": "drizzle-kit generate",
     "migrate": "wrangler d1 migrations apply cfmail --config ../../apps/worker/wrangler.jsonc",
     "migrate:local": "wrangler d1 migrations apply cfmail --local --config ../../apps/worker/wrangler.jsonc",
-    "typecheck": "tsgo --noEmit"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "4.20260623.1",
-    "@typescript/native-preview": "7.0.0-dev.20260623.1",
+    "@cloudflare/workers-types": "5.20260911.1",
     "drizzle-kit": "0.31.10",
-    "wrangler": "4.104.0"
+    "typescript": "7.0.2",
+    "wrangler": "4.131.1"
   }
 }

@@ -6,6 +6,7 @@ overrides:
   esbuild: ">=0.28.1"
   "@babel/core": "^7.29.6"
 
-onlyBuiltDependencies:
-  - esbuild
-  - workerd
+allowBuilds:
+  esbuild: true
+  workerd: true
+  core-js-pure: false
