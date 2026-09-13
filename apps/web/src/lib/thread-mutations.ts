@@ -14,7 +14,13 @@ interface Config<V, R> {
   optimistic?: (vars: V, qc: QueryClient) => void;
   /** Extra thread id to invalidate on settle (the open detail view). */
   threadId?: string;
-  /** Side effect to run alongside the optimistic update, e.g. clear selection. */
+  /**
+   * Side effect to run alongside the optimistic update, e.g. clear selection.
+   * It runs in `onMutate`, so the re-render it triggers lands *before*
+   * `mutationFn` — React Query swaps the fresh options into the in-flight
+   * mutation. Whatever the request needs must therefore arrive in `vars`, never
+   * off a closure this side effect just invalidated.
+   */
   onApply?: (vars: V) => void;
   errorMessage?: string;
 }
