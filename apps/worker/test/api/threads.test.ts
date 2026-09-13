@@ -1,6 +1,7 @@
-import { folder, message, thread, threadFolder } from "@cfmail/db/schema";
+import { folder, mailbox, message, thread, threadFolder } from "@cfmail/db/schema";
 import { Flag } from "@cfmail/shared/flags";
 import { Perm } from "@cfmail/shared/permissions";
+import { eq } from "drizzle-orm";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { threadsRoutes } from "../../src/api/threads.ts";
 import { applyMigrationsOnce, type DB, db, mountApp, request, resetDb } from "../support/app.ts";
@@ -162,6 +163,23 @@ describe("threads list", () => {
     expect(body.threads.map((t) => t.id).toSorted()).toEqual([a.threadId, b.threadId].toSorted());
   });
 
+  it("drops a mailbox opted out of All Mail from the combined view", async () => {
+    const a = await seedMsgThread(db(), { mailboxId: MAILBOX_ID, direction: "in" });
+    await seedMsgThread(db(), { mailboxId: OTHER_MAILBOX_ID, direction: "in" });
+    await db()
+      .update(mailbox)
+      .set({ excludeFromAll: true })
+      .where(eq(mailbox.id, OTHER_MAILBOX_ID));
+
+    const all = await request(asOwner(), "GET", "/?mailboxId=all&view=all");
+    const body = (await all.json()) as { threads: { id: string }[] };
+    expect(body.threads.map((t) => t.id)).toEqual([a.threadId]);
+
+    // The mailbox itself is untouched — opened directly it still lists everything.
+    const direct = await request(asOwner(), "GET", `/?mailboxId=${OTHER_MAILBOX_ID}&view=all`);
+    expect(((await direct.json()) as { threads: unknown[] }).threads).toHaveLength(1);
+  });
+
   it("returns an empty list for the 'all' view when the user can read nothing", async () => {
     await seedMsgThread(db(), { direction: "in" });
     const res = await request(asOutsider(), "GET", "/?mailboxId=all");
@@ -230,6 +248,22 @@ describe("thread counts", () => {
     expect(body.counts.spam.total).toBe(1);
     expect(body.counts.trash.total).toBe(1);
     expect(body.counts.all.total).toBe(4);
+  });
+
+  it("leaves a mailbox opted out of All Mail out of the combined counts", async () => {
+    await seedMsgThread(db(), { mailboxId: MAILBOX_ID, direction: "in", unreadCount: 1 });
+    await seedMsgThread(db(), { mailboxId: OTHER_MAILBOX_ID, direction: "in", unreadCount: 1 });
+    await db()
+      .update(mailbox)
+      .set({ excludeFromAll: true })
+      .where(eq(mailbox.id, OTHER_MAILBOX_ID));
+
+    const res = await request(asOwner(), "GET", "/counts?mailboxId=all");
+    const body = (await res.json()) as {
+      counts: { inbox: { total: number; unread: number }; all: { total: number } };
+    };
+    expect(body.counts.inbox).toEqual({ total: 1, unread: 1 });
+    expect(body.counts.all.total).toBe(1);
   });
 
   it("returns zeroed counts for the 'all' view with no accessible mailboxes", async () => {

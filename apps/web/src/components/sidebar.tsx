@@ -125,7 +125,9 @@ function SidebarBody({ onClose }: { onClose?: () => void }) {
   };
   for (const m of mailboxes) grouped[m.type].push(m);
 
-  const totalUnread = mailboxes.reduce((sum, m) => sum + m.unread, 0);
+  // Mailboxes opted out of All Mail don't feed its badge either (see the worker's
+  // combined-view scope).
+  const totalUnread = mailboxes.reduce((sum, m) => (m.excludeFromAll ? sum : sum + m.unread), 0);
 
   return (
     <>

@@ -7,6 +7,7 @@ import {
   fieldClass,
   GroupLabel,
   Region,
+  Row,
   Section,
 } from "@/components/settings-ui.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
@@ -27,6 +28,7 @@ import { Textarea } from "@/components/ui/textarea.tsx";
 import { rpc, unwrap } from "@/lib/api.ts";
 import { cn } from "@/lib/cn.ts";
 import { type ImportProgress, runImport } from "@/lib/import.ts";
+import { ALL_MAILBOXES } from "@/lib/queries.ts";
 import { keys } from "@/lib/query-keys.ts";
 
 export type SpamLevel = "off" | "auth" | "standard" | "ai";
@@ -51,6 +53,8 @@ interface MailboxSettings {
   pgpPublicKey?: string | null;
   pgpConfigured?: boolean;
   pgpAutoFetch?: boolean;
+  // Owner endpoint only — the admin settings endpoint doesn't return it.
+  excludeFromAll?: boolean;
 }
 
 interface ImportTarget {
@@ -129,7 +133,15 @@ export function MailboxSettingsForm({
         type={type}
       />
       {!admin && type !== "service" && type !== "temp" && (
-        <MailboxPgpCard mailboxId={mailboxId} settingsKey={queryKey} />
+        <>
+          <MailboxAllMailRegion
+            mailboxId={mailboxId}
+            settings={data}
+            loading={isLoading}
+            settingsKey={queryKey}
+          />
+          <MailboxPgpCard mailboxId={mailboxId} settingsKey={queryKey} />
+        </>
       )}
     </section>
   );
@@ -330,6 +342,58 @@ function MailboxSettingsFields({
         </div>
       </Region>
     </form>
+  );
+}
+
+/**
+ * Whether this mailbox feeds the combined "All Mail" view (its thread list,
+ * folder counts, drafts and the sidebar badge). Opting out hides nothing — the
+ * mailbox still lists everything when opened directly. Saves on toggle so the
+ * sidebar follows immediately.
+ */
+function MailboxAllMailRegion({
+  mailboxId,
+  settings,
+  loading,
+  settingsKey,
+}: {
+  mailboxId: string;
+  settings: MailboxSettings | undefined;
+  loading: boolean;
+  settingsKey: unknown[];
+}) {
+  const qc = useQueryClient();
+  const save = useMutation({
+    mutationFn: (include: boolean) =>
+      unwrap(
+        rpc.mailboxes[":id"].settings.$patch({
+          param: { id: mailboxId },
+          json: { excludeFromAll: !include },
+        }),
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: settingsKey });
+      qc.invalidateQueries({ queryKey: keys.mailboxes() });
+      qc.invalidateQueries({ queryKey: keys.threadsRoot(ALL_MAILBOXES) });
+      qc.invalidateQueries({ queryKey: keys.drafts(ALL_MAILBOXES) });
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+
+  return (
+    <Region label="All Mail">
+      <Row
+        label="Include in All Mail"
+        hint="Off keeps this mailbox out of the combined view, its counts and the unread badge. Opening the mailbox still shows everything."
+      >
+        <Switch
+          checked={!(settings?.excludeFromAll ?? false)}
+          disabled={loading || save.isPending}
+          onCheckedChange={(v) => save.mutate(v)}
+          aria-label="Include in All Mail"
+        />
+      </Row>
+    </Region>
   );
 }
 

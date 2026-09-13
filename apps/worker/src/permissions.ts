@@ -56,7 +56,14 @@ export async function resolveAccess(
 
 // Every non-service mailbox the user can read (owned + member). Backs the
 // combined "All" view; service mailboxes are key-driven and never user-facing.
-export async function accessibleMailboxIds(db: DB, userId: string): Promise<string[]> {
+// `combinedView` additionally drops mailboxes opted out of All Mail — pass it
+// for the All Mail list/counts, not for surfaces the user filed into by hand
+// (custom folders), which stay complete.
+export async function accessibleMailboxIds(
+  db: DB,
+  userId: string,
+  opts?: { combinedView?: boolean },
+): Promise<string[]> {
   const rows = await db
     .selectDistinct({ id: mailbox.id })
     .from(mailbox)
@@ -69,6 +76,7 @@ export async function accessibleMailboxIds(db: DB, userId: string): Promise<stri
         or(eq(mailbox.ownerUserId, userId), eq(mailboxMember.userId, userId)),
         ne(mailbox.type, "service"),
         mailboxNotPurging,
+        opts?.combinedView ? eq(mailbox.excludeFromAll, false) : undefined,
       ),
     );
   return rows.map((r) => r.id);

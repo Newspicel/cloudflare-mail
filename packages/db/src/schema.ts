@@ -293,6 +293,11 @@ export const mailbox = sqliteTable(
     // don't have). Outbound lookups reveal who you email to their provider, so
     // this is a toggle (default on).
     pgpAutoFetch: integer("pgp_auto_fetch", { mode: "boolean" }).notNull().default(true),
+    // Keep this mailbox out of the combined "All Mail" view (list, folder counts
+    // and the sidebar badge). The mailbox itself is untouched — open it directly
+    // and everything is still there. Mailbox-level, so it applies to every user
+    // the mailbox is shared with.
+    excludeFromAll: integer("exclude_from_all", { mode: "boolean" }).notNull().default(false),
     expiresAt: integer("expires_at", { mode: "timestamp" }),
     // Background purge marker (admin empty/delete). "empty" drains the mailbox's
     // threads then clears; "delete" drains then drops the mailbox row. The cron

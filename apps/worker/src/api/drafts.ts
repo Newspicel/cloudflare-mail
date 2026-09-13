@@ -2,14 +2,14 @@ import { draft } from "@cfmail/db/schema";
 import { Perm } from "@cfmail/shared/permissions";
 import { createDraft, scheduleDraft, updateDraft } from "@cfmail/shared/schemas";
 import { zValidator } from "@hono/zod-validator";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { dbFromCtx } from "../db.ts";
 import type { AppBindings } from "../env.ts";
 import { assertOwnedAttachmentKeys } from "../mail/attachment-keys.ts";
 import { requireUser } from "../middleware.ts";
-import { ALL_MAILBOXES, requirePerm } from "../permissions.ts";
+import { ALL_MAILBOXES, accessibleMailboxIds, requirePerm } from "../permissions.ts";
 import { cursorBefore, decodeCursor, nextCursor } from "./pagination.ts";
 import { serializeDraft } from "./serialize.ts";
 import { buildPatch } from "./util.ts";
@@ -25,11 +25,14 @@ export function draftsRoutes() {
       const mailboxId = c.req.query("mailboxId");
       if (!mailboxId) throw new HTTPException(400, { message: "mailboxId required" });
 
-      // "All" view: every draft the user authored, regardless of mailbox. Drafts
-      // are already scoped to the author, so no per-mailbox permission check.
+      // "All" view: every draft the user authored, minus mailboxes opted out of
+      // All Mail. Drafts are already scoped to the author, so the mailbox list is
+      // only a view filter — no per-mailbox permission check.
       let scope: ReturnType<typeof eq> | ReturnType<typeof and>;
       if (mailboxId === ALL_MAILBOXES) {
-        scope = eq(draft.userId, user.id);
+        const ids = await accessibleMailboxIds(db, user.id, { combinedView: true });
+        if (ids.length === 0) return c.json({ drafts: [], nextCursor: null });
+        scope = and(eq(draft.userId, user.id), inArray(draft.mailboxId, ids));
       } else {
         await requirePerm(db, user.id, mailboxId, Perm.READ);
         scope = and(eq(draft.mailboxId, mailboxId), eq(draft.userId, user.id));

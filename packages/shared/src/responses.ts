@@ -85,6 +85,8 @@ export interface MailboxSummaryDto {
   pgpMode: PgpMode;
   /** Whether reader AI features (summaries, smart reply, thread summary) are on. */
   aiFeatures: boolean;
+  /** Opted out of the combined All Mail view (list, counts and sidebar badge). */
+  excludeFromAll: boolean;
 }
 
 export interface SearchResultDto {
@@ -303,6 +305,8 @@ export interface MailboxSettingsDto {
   pgpConfigured: boolean;
   // Auto-discover correspondent keys via WKD (see schema). Toggle in settings.
   pgpAutoFetch: boolean;
+  // Keep the mailbox out of the combined All Mail view (see schema).
+  excludeFromAll: boolean;
 }
 
 export interface ContactKeyDto {

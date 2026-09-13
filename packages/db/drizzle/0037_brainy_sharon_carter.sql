@@ -1,0 +1,1 @@
+ALTER TABLE `mailbox` ADD `exclude_from_all` integer DEFAULT false NOT NULL;
