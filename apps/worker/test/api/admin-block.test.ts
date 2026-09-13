@@ -281,15 +281,27 @@ describe("spamhaus dqs key", () => {
   it("reports no key by default", async () => {
     const res = await request(asAdmin(), "GET", "/dqs");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ dqs: { configured: false, hint: null } });
+    expect(await res.json()).toEqual({ dqs: { configured: false, hint: null, hbl: false } });
   });
 
   it("verifies and stores a working key, returning only a hint", async () => {
     stubDoh(working);
     const res = await request(asAdmin(), "PUT", "/dqs", { key: KEY });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ dqs: { configured: true, hint: "dqsk…7890" } });
-    expect((await stored())?.value).toBe(KEY);
+    expect(await res.json()).toEqual({
+      dqs: { configured: true, hint: "dqsk…7890", hbl: false },
+    });
+    expect((await stored())?.value).toBe(JSON.stringify({ key: KEY, hbl: false }));
+  });
+
+  it("records a plan that includes the Hash Blocklist", async () => {
+    stubDoh({
+      ...working,
+      hbl: ["127.0.3.10"],
+    });
+    const res = await request(asAdmin(), "PUT", "/dqs", { key: KEY });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ dqs: { hbl: true } });
   });
 
   it("400s a key that fails its test lookups and stores nothing", async () => {
@@ -319,7 +331,7 @@ describe("spamhaus dqs key", () => {
     });
     const res = await request(asAdmin(), "PUT", "/dqs", { key: "" });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ dqs: { configured: false, hint: null } });
+    expect(await res.json()).toEqual({ dqs: { configured: false, hint: null, hbl: false } });
     expect((await stored())?.value).toBe("");
   });
 });

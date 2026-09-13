@@ -10,7 +10,7 @@ import { has, Perm } from "@cfmail/shared/permissions";
 import { hashPassword, verifyPassword } from "better-auth/crypto";
 import { and, eq, or } from "drizzle-orm";
 import { AppError } from "./errors.ts";
-import { getDqsKey, lookupAuthBl } from "./mail/dnsbl.ts";
+import { getDqsConfig, lookupAuthBl } from "./mail/dnsbl.ts";
 import { resolveAccess } from "./permissions.ts";
 import { enforceRateLimit } from "./rate-limit.ts";
 
@@ -65,8 +65,8 @@ export async function loginWithAppPassword(
     // own rate limit only reacts after 30 attempts from this IP; AuthBL turns
     // those away on the first one. Best-effort — an unset key or a failed lookup
     // simply doesn't block anyone.
-    const dqsKey = await getDqsKey(db);
-    if (dqsKey && (await lookupAuthBl(dqsKey, clientIp))) {
+    const dqs = await getDqsConfig(db);
+    if (dqs && (await lookupAuthBl(dqs.key, clientIp))) {
       throw new AppError("forbidden", "this network is blocked for credential abuse");
     }
   }

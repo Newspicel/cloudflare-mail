@@ -12,7 +12,7 @@ import {
   isProtectedDomain,
   setProtectedDomains as persistProtectedDomains,
 } from "../mail/blocklist.ts";
-import { getDqsKey, setDqsKey as persistDqsKey, verifyDqsKey } from "../mail/dnsbl.ts";
+import { type DqsConfig, getDqsConfig, setDqsConfig, verifyDqsKey } from "../mail/dnsbl.ts";
 import { requireAdmin, requireUser } from "../middleware.ts";
 
 // Admin-only blocklist + block-request review. Mounted at /api/admin/block.
@@ -168,25 +168,36 @@ export function adminBlockRoutes() {
     // one is set, and enough of it to recognise which.
     .get("/dqs", async (c) => {
       const db = dbFromCtx(c);
-      return c.json({ dqs: keyStatus(await getDqsKey(db)) });
+      return c.json({ dqs: keyStatus(await getDqsConfig(db)) });
     })
 
     .put("/dqs", zValidator("json", setDqsKey), async (c) => {
       const db = dbFromCtx(c);
       const key = c.req.valid("json").key.trim();
+      let hbl = false;
       if (key) {
         // Verify against Spamhaus' test points before storing, so a typo or an
         // inactive key fails here instead of silently disabling every lookup.
+        // The same probe records whether the plan includes the Hash Blocklist.
         const check = await verifyDqsKey(key);
         if (!check.ok) throw new HTTPException(400, { message: check.error ?? "invalid DQS key" });
+        hbl = check.hbl === true;
       }
-      await persistDqsKey(db, key);
-      return c.json({ dqs: keyStatus(await getDqsKey(db)) });
+      await setDqsConfig(db, key, hbl);
+      return c.json({ dqs: keyStatus(await getDqsConfig(db)) });
     });
 
   return r;
 }
 
-function keyStatus(key: string | null): { configured: boolean; hint: string | null } {
-  return { configured: key !== null, hint: key ? `${key.slice(0, 4)}…${key.slice(-4)}` : null };
+function keyStatus(dqs: DqsConfig | null): {
+  configured: boolean;
+  hint: string | null;
+  hbl: boolean;
+} {
+  return {
+    configured: dqs !== null,
+    hint: dqs ? `${dqs.key.slice(0, 4)}…${dqs.key.slice(-4)}` : null,
+    hbl: dqs?.hbl === true,
+  };
 }

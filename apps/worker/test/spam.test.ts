@@ -1,6 +1,7 @@
 import type { DB } from "@cfmail/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/env.ts";
+import { hblHash } from "../src/mail/dnsbl.ts";
 import type { ParsedEmail } from "../src/mail/mime.ts";
 import { evaluateSpam, parseAiResponse, parseAuthResults } from "../src/mail/spam.ts";
 
@@ -11,6 +12,7 @@ function parsed(opts: {
   html?: string;
   from?: string;
   received?: string[];
+  attachments?: { filename: string; content: Uint8Array }[];
 }): ParsedEmail {
   const headers: { key: string; value: string }[] = [];
   for (const value of opts.received ?? []) headers.push({ key: "received", value });
@@ -21,7 +23,7 @@ function parsed(opts: {
     text: opts.text ?? "Just a normal message.",
     html: opts.html,
     from: { address: opts.from ?? "sender@elsewhere.com" },
-    attachments: [],
+    attachments: opts.attachments ?? [],
   } as unknown as ParsedEmail;
 }
 
@@ -29,9 +31,10 @@ function parsed(opts: {
 // system_config read for the Spamhaus key.
 const fakeEnv = {} as Env;
 
-function dbWithDqsKey(key: string | null): DB {
+function dbWithDqsKey(key: string | null, hbl = false): DB {
+  const value = key ? JSON.stringify({ key, hbl }) : null;
   return {
-    query: { systemConfig: { findFirst: async () => (key ? { value: key } : undefined) } },
+    query: { systemConfig: { findFirst: async () => (value ? { value } : undefined) } },
   } as unknown as DB;
 }
 
@@ -352,5 +355,93 @@ describe("evaluateSpam — Spamhaus DQS", () => {
       fromEnvelope: "sender@elsewhere.com",
     });
     expect(asked()).toEqual([]);
+  });
+});
+
+describe("evaluateSpam — content scanning", () => {
+  const authed = "mx; spf=pass; dkim=pass; dmarc=pass";
+
+  it("does not let spam phrasing alone flag authenticated mail", async () => {
+    stubDoh({});
+    const r = await evalStandard(
+      parsed({
+        authResults: authed,
+        subject: "CONGRATULATIONS, YOU WON",
+        text: "Claim your prize now!!! Limited time offer, act now.",
+      }),
+      dbWithDqsKey(DQS_KEY),
+    );
+    // Legitimate marketing reads like this; only reputation or the AI level may
+    // flag a message whose sender is verified.
+    expect(r).toMatchObject({ verdict: "clean", score: 0 });
+  });
+
+  it("still counts spam phrasing when the sender is not authenticated", async () => {
+    stubDoh({});
+    const r = await evalStandard(
+      parsed({
+        authResults: "mx; spf=pass; dkim=none; dmarc=none",
+        subject: "CONGRATULATIONS, YOU WON",
+        text: "Claim your prize now!!! Limited time offer, act now.",
+      }),
+      dbWithDqsKey(DQS_KEY),
+    );
+    expect(r.verdict).toBe("spam");
+  });
+
+  it("flags an authenticated message that links to an HBL-listed URL", async () => {
+    const hash = await hblHash("www.hbltest.com/test");
+    stubDoh({ [`${hash}._url/hbl`]: ["127.0.3.30"] });
+    const r = await evalStandard(
+      parsed({ authResults: authed, html: '<a href="https://www.hbltest.com/test">go</a>' }),
+      dbWithDqsKey(DQS_KEY, true),
+    );
+    expect(r.score).toBe(3);
+    expect(r.verdict).toBe("suspicious");
+    expect(r.reasons.join(" ")).toMatch(/links to https:\/\/www\.hbltest\.com\/test, a URL/);
+    expect(r.reject).toBeNull();
+  });
+
+  it("files a known-malware attachment as spam on its own", async () => {
+    const bytes = new TextEncoder().encode("evil");
+    const hash = await hblHash(bytes);
+    stubDoh({ [`${hash}._file/hbl`]: ["127.0.3.10"] });
+    const r = await evalStandard(
+      parsed({ authResults: authed, attachments: [{ filename: "invoice.pdf", content: bytes }] }),
+      dbWithDqsKey(DQS_KEY, true),
+    );
+    expect(r).toMatchObject({ verdict: "spam", score: 5, folderSpam: true, reject: null });
+    expect(r.reasons.join(" ")).toMatch(/invoice\.pdf is a file Spamhaus knows as malware/);
+  });
+
+  it("looks up addresses and wallets found in the body", async () => {
+    const wallet = "0x0123456789abcdef0123456789ABCDEF01234567";
+    const [mailHash, walletHash] = await Promise.all([
+      hblHash("scammer@hbltest.com"),
+      hblHash(wallet.toLowerCase()),
+    ]);
+    stubDoh({
+      [`${mailHash}._email/hbl`]: ["127.0.3.2"],
+      [`${walletHash}._cw/hbl`]: ["127.0.3.20"],
+    });
+    const r = await evalStandard(
+      parsed({
+        authResults: authed,
+        text: `Send payment to ${wallet} and reply to scammer@hbltest.com`,
+      }),
+      dbWithDqsKey(DQS_KEY, true),
+    );
+    expect(r.score).toBe(6);
+    expect(r.reasons.join(" ")).toMatch(/scammer@hbltest\.com has been seen in spam/);
+    expect(r.reasons.join(" ")).toMatch(/crypto address 0x0123/i);
+  });
+
+  it("makes no HBL query when the key's plan does not include it", async () => {
+    const asked = stubDoh({});
+    await evalStandard(
+      parsed({ authResults: authed, html: '<a href="https://www.hbltest.com/test">go</a>' }),
+      dbWithDqsKey(DQS_KEY),
+    );
+    expect(asked().join(" ")).not.toMatch(/hbl\.dq\.spamhaus\.net/);
   });
 });
