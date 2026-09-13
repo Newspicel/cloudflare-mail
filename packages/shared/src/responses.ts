@@ -242,6 +242,8 @@ export interface MessageBodyDto {
   attachments: AttachmentDto[];
   /** Present when the message carries an iCalendar invite. */
   calendar?: CalendarEventDto | null;
+  /** Tracking beacons stripped from `html` before it was served. */
+  trackersBlocked: number;
 }
 
 /**

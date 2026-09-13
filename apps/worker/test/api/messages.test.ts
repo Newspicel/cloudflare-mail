@@ -8,6 +8,7 @@ import { messagesRoutes } from "../../src/api/messages.ts";
 import { getOrCreateAuthSecret } from "../../src/config.ts";
 import type { AppBindings, Env } from "../../src/env.ts";
 import { MAX_IMAGE_BYTES, proxyRemoteContent } from "../../src/mail/img-proxy.ts";
+import { refreshTrackerList } from "../../src/mail/trackers.ts";
 import { applyMigrationsOnce, db, e, mountApp, request, resetDb } from "../support/app.ts";
 import {
   grantMember,
@@ -173,7 +174,7 @@ describe("GET /:id/body — server-side sanitization", () => {
     `<a href="javascript:alert(2)">bad</a>` +
     `<a href="https://ok.test/a">ok</a></div>`;
 
-  async function seedHtmlMessage(): Promise<string> {
+  async function seedHtmlMessage(rawHtml = RAW_HTML): Promise<string> {
     const { messageId } = await seedThread(db());
     const rawKey = `raw/${MAILBOX_ID}/in/${messageId}.eml`;
     const eml = [
@@ -183,7 +184,7 @@ describe("GET /:id/body — server-side sanitization", () => {
       "Subject: Hello",
       "Content-Type: text/html; charset=utf-8",
       "",
-      RAW_HTML,
+      rawHtml,
     ].join("\r\n");
     await e.BLOBS.put(rawKey, eml);
     await db().update(message).set({ rawR2Key: rawKey }).where(eq(message.id, messageId));
@@ -203,6 +204,32 @@ describe("GET /:id/body — server-side sanitization", () => {
     expect(html).not.toContain("javascript:");
     expect(html).toContain("Hi <b>there</b>");
     expect(html).toContain("https://ok.test/a");
+  });
+
+  it("strips tracking beacons before proxying and reports the count", async () => {
+    // Seed the fetched list the cron would have stored.
+    const uglyEmail = "SendGrid@@=\\/wf\\/open\\?upn=\n";
+    await refreshTrackerList(
+      db(),
+      new Date(),
+      (async (input: RequestInfo | URL) =>
+        new Response(String(input).includes("trocker") ? "openTrackers = [];" : uglyEmail)) as unknown as typeof fetch,
+    );
+    const id = await seedHtmlMessage(
+      `<p>News</p>` +
+        `<img src="https://news.example.com/wf/open?upn=abc" alt="">` +
+        `<img src="https://cdn.example.com/px.gif" width="1" height="1">` +
+        `<img src="https://cdn.example.com/hero.png" width="600" height="200">`,
+    );
+    const res = await request(asOwner(), "GET", `/${id}/body`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { html: string; trackersBlocked: number };
+    expect(body.trackersBlocked).toBe(2);
+    expect(body.html).not.toContain("wf/open");
+    expect(body.html).not.toContain("px.gif");
+    // The surviving image went through the signed proxy, not to the sender.
+    expect(body.html).toContain("/api/messages/proxy-image?u=");
+    expect(body.html).not.toContain("https://cdn.example.com/hero.png");
   });
 
   it("lets a READ member fetch the body", async () => {

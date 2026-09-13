@@ -91,7 +91,7 @@ async function rewriteSrcset(secret: string, srcset: string): Promise<string> {
 }
 
 // Matches `url( … )` in CSS — both `url(http://x)` and `url("http://x")`.
-const CSS_URL_RE = /url\(\s*(['"]?)([^'")]+)\1\s*\)/gi;
+export const CSS_URL_RE = /url\(\s*(['"]?)([^'")]+)\1\s*\)/gi;
 // `@import` pulls in a remote stylesheet — a tracking vector with no legit use
 // in a sanitized mail body. Strip the whole rule rather than try to proxy it.
 const CSS_IMPORT_RE = /@import[^;]+;/gi;

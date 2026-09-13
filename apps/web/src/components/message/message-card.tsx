@@ -1,7 +1,17 @@
 import { Flag, hasFlag } from "@cfmail/shared/flags";
 import type { AttachmentDto } from "@cfmail/shared/responses";
 import { useQuery } from "@tanstack/react-query";
-import { Download, FileText, Forward, Image, Paperclip, Reply, ReplyAll, Star } from "lucide-react";
+import {
+  Download,
+  FileText,
+  Forward,
+  Image,
+  Paperclip,
+  Reply,
+  ReplyAll,
+  ShieldCheck,
+  Star,
+} from "lucide-react";
 import { useState } from "react";
 import { CodeBanner } from "@/components/code-banner.tsx";
 import { openCompose } from "@/components/compose-dock.tsx";
@@ -9,6 +19,7 @@ import { EmailFrame } from "@/components/email-frame.tsx";
 import { LabelChips } from "@/components/labels-menu.tsx";
 import { MessageMenu } from "@/components/message-menu.tsx";
 import { Button } from "@/components/ui/button.tsx";
+import { Badge } from "@/components/ui/badge.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { Tooltip } from "@/components/ui/tooltip.tsx";
 import { cn } from "@/lib/cn.ts";
@@ -221,6 +232,17 @@ export function MessageCard({
         </div>
         <div className="flex shrink-0 flex-col items-end gap-2">
           <div className="flex items-center gap-1.5">
+            {bodyData && bodyData.trackersBlocked > 0 && (
+              <Tooltip
+                label={`${bodyData.trackersBlocked} tracking ${bodyData.trackersBlocked === 1 ? "pixel" : "pixels"} blocked`}
+              >
+                <Badge variant="outline" className="gap-1 px-1.5 text-[11px] text-muted-foreground">
+                  <ShieldCheck className="size-3" aria-hidden />
+                  {bodyData.trackersBlocked}
+                  <span className="sr-only">tracking pixels blocked</span>
+                </Badge>
+              </Tooltip>
+            )}
             <time
               className="text-[11px] text-muted-foreground"
               title={when.toLocaleString(undefined, { hour12: fmt.hour12 })}
