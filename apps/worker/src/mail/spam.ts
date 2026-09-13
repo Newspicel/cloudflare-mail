@@ -134,15 +134,21 @@ export async function evaluateSpam(
     score += heur.score;
     reasons.push(...heur.reasons);
 
-    const relay = extractRelayIp(parsed);
-    if (dqs && relay) {
-      const listing = await lookupIp(dqs.key, relay.ip);
-      if (listing) {
-        score += IP_WEIGHTS[listing.kind];
+    const relays = dqs ? extractRelayIps(parsed) : [];
+    if (dqs && relays.length) {
+      const listings = await Promise.all(relays.map((r) => lookupIp(dqs.key, r.ip)));
+      const hits = relays
+        .map((relay, i) => ({ relay, listing: listings[i] }))
+        .filter((h): h is { relay: RelayIp; listing: IpListing } => h.listing !== null);
+      // A listing that warrants a refusal outranks one that only scores.
+      const blocking = hits.find((h) => ipReject(h.relay, h.listing) !== null);
+      const hit = blocking ?? hits[0];
+      if (hit) {
+        score += IP_WEIGHTS[hit.listing.kind];
         reasons.push(
-          `The sending IP (${relay.ip}) is listed by Spamhaus as ${IP_LABELS[listing.kind]}.`,
+          `The sending IP (${hit.relay.ip}) is listed by Spamhaus as ${IP_LABELS[hit.listing.kind]}.`,
         );
-        const reject = ipReject(relay, listing);
+        const reject = ipReject(hit.relay, hit.listing);
         if (reject) return blocked(score, reasons, auth, reject);
       }
     }
@@ -596,24 +602,31 @@ function extractLinkHosts(parsed: ParsedEmail): string[] {
 
 interface RelayIp {
   ip: string;
-  /** The IP came from the hop that reached our MX, not from further out. */
+  /** Named by the topmost Received header, i.e. the host that reached our MX. */
   connecting: boolean;
 }
 
-// The IP that delivered the message to Cloudflare's MX — the *topmost* Received
-// header, which is the one our own inbound side added and therefore the only one
-// a sender can't forge. (Walking bottom-up would find the original submitting
-// client instead, which for provider-relayed mail is a residential address that
-// PBL rightly lists but that says nothing about this message.) When the top hop
-// names no public address we keep looking down the chain, but what we find there
-// is no longer the connecting host.
-function extractRelayIp(parsed: ParsedEmail): RelayIp | null {
+const MAX_RELAY_IPS = 3;
+const IPV4_RE = /\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/g;
+
+// Public addresses from the Received chain, nearest hop first. The topmost
+// header is the one our own inbound side wrote, so an address in it is the host
+// that actually connected and is the only one a sender can't forge — but we
+// check the hops behind it too rather than assume a particular header layout,
+// since a spam source relaying through one more machine is still a spam source.
+// Only the connecting host can be refused on PBL (see ipReject).
+function extractRelayIps(parsed: ParsedEmail): RelayIp[] {
+  const out: RelayIp[] = [];
   const received = (parsed.headers ?? []).filter((h) => h.key === "received");
   for (const [i, line] of received.entries()) {
-    const m = line.value.match(/\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/);
-    if (m && isPublicIp(m[1]!)) return { ip: m[1]!, connecting: i === 0 };
+    for (const m of line.value.matchAll(IPV4_RE)) {
+      const ip = m[1]!;
+      if (!isPublicIp(ip) || out.some((r) => r.ip === ip)) continue;
+      out.push({ ip, connecting: i === 0 });
+      if (out.length >= MAX_RELAY_IPS) return out;
+    }
   }
-  return null;
+  return out;
 }
 
 function isPublicIp(ip: string): boolean {

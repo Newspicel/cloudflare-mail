@@ -250,7 +250,7 @@ describe("evaluateSpam — Spamhaus DQS", () => {
     expect(r.reasons.join(" ")).toMatch(/first seen 7 hours ago/);
   });
 
-  it("queries the reversed relay IP from the topmost Received header", async () => {
+  it("queries the reversed relay IP from the topmost Received header first", async () => {
     const asked = stubDoh({ "4.3.2.1/zen": ["127.0.0.2"] });
     const r = await evalStandard(
       parsed({
@@ -263,7 +263,8 @@ describe("evaluateSpam — Spamhaus DQS", () => {
       dbWithDqsKey(DQS_KEY),
     );
     expect(asked()).toContain(`4.3.2.1.${DQS_KEY}.zen.dq.spamhaus.net`);
-    expect(asked().join(" ")).not.toMatch(/9\.9\.9\.9/);
+    // Hops behind the connecting one are checked too, but reported second.
+    expect(asked()).toContain(`9.9.9.9.${DQS_KEY}.zen.dq.spamhaus.net`);
     // +2 no DMARC policy, +4 SBL → spam.
     expect(r.score).toBe(6);
     expect(r.verdict).toBe("spam");
