@@ -213,14 +213,10 @@ describe("GET /:id/body — server-side sanitization", () => {
       "/wf/open?upn=$image",
       ...Array.from({ length: 20 }, (_, i) => `.v${i}.example/open/$image`),
     ].join("\n");
-    await refreshTrackerList(
-      db(),
-      new Date(),
-      (async (input: RequestInfo | URL) =>
-        String(input).includes("easylist")
-          ? new Response(easyPrivacy)
-          : new Response("gone", { status: 404 })) as unknown as typeof fetch,
-    );
+    await refreshTrackerList(db(), new Date(), (async (input: RequestInfo | URL) =>
+      String(input).includes("easylist")
+        ? new Response(easyPrivacy)
+        : new Response("gone", { status: 404 })) as unknown as typeof fetch);
     const id = await seedHtmlMessage(
       `<p>News</p>` +
         `<img src="https://news.example.com/wf/open?upn=abc" alt="">` +
