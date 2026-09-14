@@ -1,5 +1,23 @@
 import SwiftUI
 
+/// Mail rows own their horizontal margin instead of taking the list's row
+/// insets, so the separator and the row background run edge to edge while
+/// the content keeps a gutter that lines up with the navigation bar's.
+enum MailRow {
+    static let margin: CGFloat = 16
+    static let insets = EdgeInsets(top: 14, leading: 0, bottom: 14, trailing: 0)
+}
+
+extension View {
+    /// Zero horizontal list insets plus a full-bleed separator. Apply to the
+    /// row's root view; the row pads its own content by `MailRow.margin`.
+    func mailRow() -> some View {
+        listRowInsets(MailRow.insets)
+            .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+            .alignmentGuide(.listRowSeparatorTrailing) { d in d.width }
+    }
+}
+
 /// One conversation in the list.
 ///
 /// The thread row carries no message snippet — `ThreadDto` is the thread table
@@ -27,12 +45,7 @@ struct ThreadRow: View {
 
     var body: some View {
         Button(action: onTap) {
-            HStack(alignment: .top, spacing: 8) {
-                // Mail's unread gutter: the dot sits outside the avatar, and the
-                // column stays reserved when read so rows never shift.
-                UnreadDot(isVisible: thread.isUnread && !isSelecting)
-                    .padding(.top, isCompact ? 8 : 9)
-
+            HStack(alignment: .top, spacing: 10) {
                 // The check takes the avatar's own footprint rather than a
                 // column of its own, so entering selection never shifts the text.
                 ZStack {
@@ -44,6 +57,7 @@ struct ThreadRow: View {
                     }
                 }
                 .frame(width: avatarSize, height: avatarSize)
+                .overlay(alignment: .topLeading) { unreadBadge }
                 .animation(.snappy(duration: 0.2), value: isSelected)
 
                 VStack(alignment: .leading, spacing: isCompact ? 1 : 2) {
@@ -114,9 +128,11 @@ struct ThreadRow: View {
                 }
             }
             .padding(.vertical, isCompact ? 4 : 6)
+            .padding(.horizontal, MailRow.margin)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .mailRow()
         .listRowBackground(rowBackground)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel)
@@ -130,6 +146,20 @@ struct ThreadRow: View {
         if isSelected { return Color.accentColor.opacity(0.10) }
         if isOpen { return Color(.systemGray5) }
         return nil
+    }
+
+    /// Mail's unread dot, worn on the avatar's shoulder instead of in a gutter
+    /// of its own, so read and unread rows share one left edge. The ring in
+    /// the row's colour keeps it legible on any avatar tint.
+    private var unreadBadge: some View {
+        Circle()
+            .fill(Color.accentColor)
+            .frame(width: 10, height: 10)
+            .padding(2)
+            .background(isOpen ? Color(.systemGray5) : Color(.systemBackground), in: .circle)
+            .offset(x: -3, y: -3)
+            .opacity(thread.isUnread && !isSelecting ? 1 : 0)
+            .accessibilityHidden(true)
     }
 
     private var chipsAreEmpty: Bool {
@@ -178,7 +208,7 @@ struct DraftRow: View {
 
     var body: some View {
         Button(action: onTap) {
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
                 Image(systemName: draft.scheduledFor != nil ? "clock.badge" : "square.and.pencil")
                     .font(.system(size: 17))
                     .foregroundStyle(draft.scheduledError != nil ? .red : .secondary)
@@ -224,9 +254,11 @@ struct DraftRow: View {
                 }
             }
             .padding(.vertical, 5)
+            .padding(.horizontal, MailRow.margin)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .mailRow()
     }
 
     private var recipients: String {
@@ -241,7 +273,7 @@ struct SearchResultRow: View {
 
     var body: some View {
         Button(action: onTap) {
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
                 Avatar(address: AddressObject(name: result.fromName, address: result.fromAddr), size: 40)
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(alignment: .firstTextBaseline) {
@@ -282,9 +314,11 @@ struct SearchResultRow: View {
                 }
             }
             .padding(.vertical, 5)
+            .padding(.horizontal, MailRow.margin)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .mailRow()
     }
 }
 
