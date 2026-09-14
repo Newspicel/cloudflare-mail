@@ -230,7 +230,7 @@ final class MailFlowUITests: XCTestCase {
     /// `app.navigationBars.buttons` spans every bar still in the hierarchy, so
     /// picking by index reaches the screen underneath instead.
     private func goBack() {
-        for title in ["All Inboxes", "Inbox", "Mailboxes"] {
+        for title in ["All Mail", "Inbox", "Mailboxes"] {
             let named = app.navigationBars.buttons[title]
             if named.exists, named.isHittable {
                 named.tap()

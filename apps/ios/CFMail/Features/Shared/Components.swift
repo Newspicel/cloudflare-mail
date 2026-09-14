@@ -91,16 +91,20 @@ struct CategoryChip: View {
     }
 }
 
-/// Mail's mailbox count: plain secondary digits to the right of the row.
-struct SidebarCount: View {
+/// The web app's unread pill: a filled capsule, hidden at zero.
+struct UnreadBadge: View {
     let count: Int
+    var tint: Color = .accentColor
 
     var body: some View {
         if count > 0 {
-            Text(count.formatted())
-                .font(.body)
-                .foregroundStyle(.secondary)
+            Text(count > 999 ? "999+" : count.formatted())
+                .font(.caption2.weight(.semibold))
                 .monospacedDigit()
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(tint, in: .capsule)
+                .foregroundStyle(.white)
         }
     }
 }
