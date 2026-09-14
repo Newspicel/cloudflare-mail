@@ -40,8 +40,10 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         extensionContext.completeOneTimeCodeRequest(using: ASOneTimeCodeCredential(code: stored.code))
     }
 
-    /// Reached from "Passwords" in the QuickType bar: list what's live.
-    override func prepareCredentialList(for serviceIdentifiers: [ASCredentialServiceIdentifier]) {
+    /// Reached from the "show all codes" button in a code field: list what's
+    /// live. This is the one-time-code flavour of the list callback; the
+    /// password one never fires because the extension declares passwords off.
+    override func prepareOneTimeCodeCredentialList(for serviceIdentifiers: [ASCredentialServiceIdentifier]) {
         let wanted = Set(serviceIdentifiers.map { $0.identifier.lowercased() })
         let all = CodeVault.load()
         // Codes for the asking site first, everything else after — the reader
