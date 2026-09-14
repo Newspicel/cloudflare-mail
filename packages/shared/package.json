@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@cfmail/db": "workspace:*",
-    "zod": "4.6.2"
+    "zod": "4.6.4"
   },
   "devDependencies": {
     "typescript": "7.0.2"
