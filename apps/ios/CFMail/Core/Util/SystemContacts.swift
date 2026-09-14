@@ -14,7 +14,7 @@ import SwiftUI
 final class SystemContacts {
     static let shared = SystemContacts()
 
-    nonisolated private static let log = Logger(subsystem: "dev.cfmail.CFMail", category: "contacts")
+    nonisolated private static let log = Logger(subsystem: "dev.newspicel.cfmail", category: "contacts")
     private static let enabledKey = "cfmail.useSystemContacts"
 
     private var names: [String: String] = [:]

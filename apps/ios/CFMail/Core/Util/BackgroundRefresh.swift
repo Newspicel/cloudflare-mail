@@ -9,8 +9,8 @@ import OSLog
 /// for unread inbox threads across every mailbox, and notifies about the ones
 /// it hasn't already announced.
 nonisolated enum BackgroundRefresh {
-    static let taskIdentifier = "dev.cfmail.refresh"
-    private static let log = Logger(subsystem: "dev.cfmail.CFMail", category: "refresh")
+    static let taskIdentifier = "dev.newspicel.cfmail.refresh"
+    private static let log = Logger(subsystem: "dev.newspicel.cfmail", category: "refresh")
     private static let seenKey = "cfmail.notifiedThreads"
     private static let configKey = "cfmail.notifyConfigs"
 

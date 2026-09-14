@@ -10,8 +10,18 @@ import UniformTypeIdentifiers
 /// AI gist. Message bodies stay on the server; the app has no local copy of
 /// them and putting them in Spotlight would create one.
 nonisolated enum SpotlightIndex {
-    private static let log = Logger(subsystem: "dev.cfmail.CFMail", category: "spotlight")
-    private static let domain = "dev.cfmail.threads"
+    private static let log = Logger(subsystem: "dev.newspicel.cfmail", category: "spotlight")
+    private static let domain = "dev.newspicel.cfmail.threads"
+
+    /// Complete protection: subjects and gists are unreadable while the phone
+    /// is locked, including from the Lock Screen's own search field. Indexing
+    /// only ever runs with the app in the foreground, so nothing needs them
+    /// earlier. Computed rather than stored because `CSSearchableIndex` isn't
+    /// `Sendable`, and a handle is just a name — two of them address the same
+    /// index.
+    private static var index: CSSearchableIndex {
+        CSSearchableIndex(name: "threads", protectionClass: .complete)
+    }
 
     /// Identifier a Spotlight result carries back, so a tap can open the thread.
     static func identifier(threadId: String, mailboxId: String) -> String {
@@ -50,7 +60,7 @@ nonisolated enum SpotlightIndex {
             return item
         }
 
-        CSSearchableIndex.default().indexSearchableItems(items) { error in
+        index.indexSearchableItems(items) { error in
             if let error {
                 log.debug("index failed: \(error.localizedDescription, privacy: .public)")
             }
@@ -58,13 +68,13 @@ nonisolated enum SpotlightIndex {
     }
 
     static func remove(threadId: String, mailboxId: String) {
-        CSSearchableIndex.default().deleteSearchableItems(
+        index.deleteSearchableItems(
             withIdentifiers: [identifier(threadId: threadId, mailboxId: mailboxId)]
         )
     }
 
     /// Signing out must take the index with it — those titles are mail.
     static func clear() {
-        CSSearchableIndex.default().deleteSearchableItems(withDomainIdentifiers: [domain])
+        index.deleteSearchableItems(withDomainIdentifiers: [domain])
     }
 }

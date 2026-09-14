@@ -13,7 +13,7 @@ open apps/ios/CFMail.xcodeproj
 
 The project ships without a team, so set yours once (Signing & Capabilities, or
 `DEVELOPMENT_TEAM=… xcodebuild … -allowProvisioningUpdates`) before building to
-a device. `PRODUCT_BUNDLE_IDENTIFIER` is `dev.cfmail.CFMail`.
+a device. `PRODUCT_BUNDLE_IDENTIFIER` is `dev.newspicel.cfmail`.
 
 ## Requirements
 
@@ -106,7 +106,7 @@ Two things have to be true for it to work:
 
 1. **Signing.** The capability needs a provisioning profile that carries
    `com.apple.developer.authentication-services.autofill-credential-provider`
-   and the `dev.cfmail.shared` Keychain group. Sign into Xcode
+   and the `dev.newspicel.cfmail.shared` Keychain group. Sign into Xcode
    (Settings → Accounts) and build once — automatic signing adds both. Without
    an account signed in, `xcodebuild` can't create the profile and the build
    fails on that capability; building with `CODE_SIGN_ENTITLEMENTS` pointed at
