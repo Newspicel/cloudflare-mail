@@ -11,7 +11,7 @@ import OSLog
 /// than `VerificationCode.lifetime` is gone, not merely hidden.
 nonisolated enum CodeVault {
     private static let key = "cfmail.otp"
-    private static let log = Logger(subsystem: "dev.cfmail.CFMail", category: "otp")
+    private static let log = Logger(subsystem: "dev.newspicel.cfmail", category: "otp")
     private static let maximum = 20
 
     static func load() -> [VerificationCode] {

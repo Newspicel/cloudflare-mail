@@ -24,7 +24,7 @@ enum ConnectionState: Equatable {
 /// subscription that keeps them honest.
 @Observable
 final class MailStore {
-    private static let log = Logger(subsystem: "dev.cfmail.CFMail", category: "store")
+    private static let log = Logger(subsystem: "dev.newspicel.cfmail", category: "store")
 
     let client: APIClient
     private unowned let app: AppModel

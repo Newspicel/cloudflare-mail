@@ -57,7 +57,7 @@
 	     alerts come from a refresh task comparing unread counts. -->
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
-		<string>dev.cfmail.refresh</string>
+		<string>dev.newspicel.cfmail.refresh</string>
 	</array>
 	<key>NSContactsUsageDescription</key>
 	<string>Show the names and photos you already have for the people who email you. Read on this device only, and only after you turn it on in Settings.</string>

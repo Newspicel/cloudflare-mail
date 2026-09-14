@@ -17,7 +17,7 @@ import WebKit
 final class BimiStore {
     static let shared = BimiStore()
 
-    private static let log = Logger(subsystem: "dev.cfmail.CFMail", category: "bimi")
+    private static let log = Logger(subsystem: "dev.newspicel.cfmail", category: "bimi")
     /// Rendered at 2× the largest avatar so it stays crisp everywhere.
     private static let renderSize: CGFloat = 96
 
@@ -34,6 +34,9 @@ final class BimiStore {
         // Unlike the API session, this one *wants* the HTTP cache: the server
         // marks both logos and misses cacheable for a day.
         config.requestCachePolicy = .useProtocolCachePolicy
+        // Memory only: the PNG cache below is the across-launch copy and it is
+        // protected, so a disk URLCache would only re-spill the same bytes.
+        config.urlCache = URLCache(memoryCapacity: 4 << 20, diskCapacity: 0)
         config.timeoutIntervalForRequest = 15
         return URLSession(configuration: config)
     }()
@@ -241,9 +244,12 @@ final class BimiStore {
     private static func writeDisk(_ domain: String, _ image: UIImage) {
         guard let data = image.pngData() else { return }
         try? FileManager.default.createDirectory(
-            at: cacheDirectory, withIntermediateDirectories: true
+            at: cacheDirectory, withIntermediateDirectories: true,
+            attributes: [.protectionKey: FileProtectionType.complete]
         )
-        try? data.write(to: cacheURL(domain), options: .atomic)
+        // Which brands mail you is correspondent metadata, and a logo is only
+        // ever drawn in the foreground, so it takes the strictest class.
+        try? data.write(to: cacheURL(domain), options: [.atomic, .completeFileProtection])
     }
 
     // ─── Domains ────────────────────────────────────────────────────────────

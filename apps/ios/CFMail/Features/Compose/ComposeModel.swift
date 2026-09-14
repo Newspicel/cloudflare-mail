@@ -22,7 +22,7 @@ struct ComposeContext: Identifiable {
 
 @Observable
 final class ComposeModel {
-    private static let log = Logger(subsystem: "dev.cfmail.CFMail", category: "compose")
+    private static let log = Logger(subsystem: "dev.newspicel.cfmail", category: "compose")
 
     private let client: APIClient
     private unowned let app: AppModel

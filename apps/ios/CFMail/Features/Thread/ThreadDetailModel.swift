@@ -5,7 +5,7 @@ import OSLog
 /// and the best-effort AI extras the mailbox may have enabled.
 @Observable
 final class ThreadDetailModel {
-    private static let log = Logger(subsystem: "dev.cfmail.CFMail", category: "thread")
+    private static let log = Logger(subsystem: "dev.newspicel.cfmail", category: "thread")
 
     let threadId: String
     let mailboxId: String

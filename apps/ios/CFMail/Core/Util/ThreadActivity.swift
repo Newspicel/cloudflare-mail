@@ -9,7 +9,7 @@ import Foundation
 /// off to the browser instead — the Worker serves both, so it's the same mail
 /// either way.
 nonisolated enum ThreadActivity {
-    static let type = "dev.cfmail.thread"
+    static let type = "dev.newspicel.cfmail.thread"
 
     private enum Key {
         static let thread = "threadId"

@@ -17,7 +17,7 @@ nonisolated struct NotificationTap: Sendable, Hashable {
 @MainActor
 final class Notifications {
     static let shared = Notifications()
-    nonisolated private static let log = Logger(subsystem: "dev.cfmail.CFMail", category: "notifications")
+    nonisolated private static let log = Logger(subsystem: "dev.newspicel.cfmail", category: "notifications")
 
     private let delegate = Delegate()
     /// Set by the app so a tap can route into the thread.

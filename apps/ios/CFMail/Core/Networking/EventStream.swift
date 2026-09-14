@@ -18,7 +18,7 @@ nonisolated enum StreamSignal: Sendable {
 /// keeps running until the consuming task is cancelled.
 nonisolated struct EventStream: Sendable {
     let client: APIClient
-    private static let log = Logger(subsystem: "dev.cfmail.CFMail", category: "stream")
+    private static let log = Logger(subsystem: "dev.newspicel.cfmail", category: "stream")
 
     func signals() -> AsyncStream<StreamSignal> {
         AsyncStream(bufferingPolicy: .bufferingNewest(64)) { continuation in

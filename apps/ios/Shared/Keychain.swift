@@ -8,18 +8,22 @@ import Security
 /// extension too — that's how a verification code reaches the QuickType bar
 /// without a shared container.
 nonisolated enum Keychain {
-    private static let service = "dev.cfmail.CFMail"
+    private static let service = "dev.newspicel.cfmail"
 
     /// The team-prefixed group both targets declare in their entitlements.
     /// `$(AppIdentifierPrefix)` resolves at build time, so the literal here is
     /// only the suffix and the system matches it against the entitlement.
-    static let sharedAccessGroup = "dev.cfmail.shared"
+    static let sharedAccessGroup = "dev.newspicel.cfmail.shared"
 
     static func set(_ data: Data, for key: String, accessGroup: String? = nil) {
         var query = baseQuery(key, accessGroup: accessGroup)
         SecItemDelete(query as CFDictionary)
         query[kSecValueData as String] = data
-        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        // After-first-unlock is the ceiling here: the background refresh reads
+        // the session cookie and writes verification codes while the phone is
+        // locked. `ThisDeviceOnly` keeps both out of iCloud Keychain and out of
+        // a backup restored onto someone else's device.
+        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         SecItemAdd(query as CFDictionary, nil)
     }
 

@@ -46,6 +46,11 @@ nonisolated final class APIClient: Sendable {
         config.timeoutIntervalForRequest = 30
         config.waitsForConnectivity = true
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        // A mail body is decrypted content, and URLCache would write it to
+        // Caches/ where it outlives the session — the body route is served
+        // `private, immutable, max-age=1y`. The policy above already means it
+        // is never read back, so the store is exposure with no upside.
+        config.urlCache = nil
         self.session = URLSession(configuration: config)
 
         let streamConfig = URLSessionConfiguration.default
@@ -55,6 +60,7 @@ nonisolated final class APIClient: Sendable {
         streamConfig.timeoutIntervalForRequest = 3600
         streamConfig.timeoutIntervalForResource = 86400
         streamConfig.waitsForConnectivity = true
+        streamConfig.urlCache = nil
         self.streamSession = URLSession(configuration: streamConfig)
     }
 
@@ -230,10 +236,19 @@ nonisolated final class APIClient: Sendable {
         }
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("attachments", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(
+            at: dir, withIntermediateDirectories: true,
+            attributes: [.protectionKey: FileProtectionType.completeUnlessOpen]
+        )
         let dest = dir.appendingPathComponent(Self.safeFilename(suggestedName))
         try? FileManager.default.removeItem(at: dest)
         try FileManager.default.moveItem(at: temp, to: dest)
+        // A move carries the temp file's own class, so set it on the
+        // destination. `unlessOpen` rather than `complete`: Quick Look holds a
+        // preview open across a lock, and a video would stop mid-play.
+        try? FileManager.default.setAttributes(
+            [.protectionKey: FileProtectionType.completeUnlessOpen], ofItemAtPath: dest.path
+        )
         return dest
     }
 
