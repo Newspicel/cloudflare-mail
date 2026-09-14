@@ -584,7 +584,7 @@ struct FolderPickerRequest: Identifiable {
 /// Skeleton row shown while the first page loads.
 struct ThreadRowPlaceholder: View {
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             Circle().fill(.quaternary).frame(width: 40, height: 40)
             VStack(alignment: .leading, spacing: 7) {
                 RoundedRectangle(cornerRadius: 4).fill(.quaternary).frame(width: 140, height: 11)
@@ -593,6 +593,8 @@ struct ThreadRowPlaceholder: View {
             }
         }
         .padding(.vertical, 6)
+        .padding(.horizontal, MailRow.margin)
+        .mailRow()
         .redacted(reason: .placeholder)
         .listRowSeparator(.hidden)
         .allowsHitTesting(false)
