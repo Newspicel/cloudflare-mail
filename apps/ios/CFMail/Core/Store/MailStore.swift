@@ -132,7 +132,7 @@ final class MailStore {
 
     var title: String {
         if let folder = currentFolder { return folder.name }
-        if scope.isAllMail, view == .inbox, mailboxes.count > 1 { return "All Inboxes" }
+        if scope.isAllMail, view == .inbox { return "All Mail" }
         return view.title
     }
 

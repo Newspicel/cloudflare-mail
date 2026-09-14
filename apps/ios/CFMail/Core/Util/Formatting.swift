@@ -31,6 +31,19 @@ nonisolated enum Fmt {
         date.formatted(.relative(presentation: .named))
     }
 
+    /// Time left on a disposable mailbox, as the web app's `formatRemaining`
+    /// abbreviates it: "45s", "12m", "3h 5m", "2d 1h", or "expired".
+    static func remaining(until date: Date, now: Date = .now) -> String {
+        let seconds = Int(date.timeIntervalSince(now))
+        if seconds <= 0 { return "expired" }
+        if seconds < 60 { return "\(seconds)s" }
+        let minutes = seconds / 60
+        if minutes < 60 { return "\(minutes)m" }
+        let hours = minutes / 60
+        if hours < 24 { return "\(hours)h \(minutes % 60)m" }
+        return "\(hours / 24)d \(hours % 24)h"
+    }
+
     static func bytes(_ count: Int) -> String {
         count.formatted(.byteCount(style: .file))
     }
