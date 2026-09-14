@@ -42,11 +42,22 @@ final class MailStore {
         didSet { if scope != oldValue { scopeChanged() } }
     }
     var view: MailView = .inbox {
-        didSet { if view != oldValue { Task { await loadList(reset: true) } } }
+        didSet {
+            guard view != oldValue else { return }
+            resetList()
+            if !suppressLoads { Task { await loadList(reset: true) } }
+        }
     }
     var unreadOnly = false {
-        didSet { if unreadOnly != oldValue { Task { await loadList(reset: true) } } }
+        didSet {
+            guard unreadOnly != oldValue else { return }
+            resetList()
+            Task { await loadList(reset: true) }
+        }
     }
+    /// The conversation open in the reader, so the list can highlight it and
+    /// the reader can step to its neighbours.
+    var openThreadId: String?
     /// Mail's inbox category tabs. Filtering happens over the loaded page, so
     /// `loadUntilFilled` tops the list up when a narrow bucket looks empty.
     var category: MailCategory = .all {
@@ -85,6 +96,9 @@ final class MailStore {
     private var streamTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
     private var listTask: Task<Void, Never>?
+    /// Identifies the load that owns the loading flags; a superseded load must
+    /// not clear them on its way out.
+    private var loadToken = UUID()
 
     init(client: APIClient, app: AppModel) {
         self.client = client
@@ -118,7 +132,7 @@ final class MailStore {
 
     var title: String {
         if let folder = currentFolder { return folder.name }
-        if scope.isAllMail { return view == .inbox ? "All mail" : view.title }
+        if scope.isAllMail, view == .inbox, mailboxes.count > 1 { return "All Inboxes" }
         return view.title
     }
 
@@ -136,6 +150,18 @@ final class MailStore {
     }
 
     func mailbox(id: String) -> MailboxSummary? { mailboxes.first { $0.id == id } }
+
+    /// The conversations either side of one in the list as shown, for the
+    /// reader's previous/next arrows. Either is nil at the ends, or when the
+    /// thread isn't in the current list at all.
+    func neighbours(of threadId: String) -> (previous: MailThread?, next: MailThread?) {
+        let rows = visibleThreads
+        guard let index = rows.firstIndex(where: { $0.id == threadId }) else { return (nil, nil) }
+        return (
+            index > 0 ? rows[index - 1] : nil,
+            index + 1 < rows.count ? rows[index + 1] : nil
+        )
+    }
 
     func labels(for threadId: String) -> [MessageLabelRef] { threadLabels[threadId] ?? [] }
 
@@ -175,9 +201,12 @@ final class MailStore {
 
     func start() async {
         await refreshCatalogue()
-        // Restore the last place the reader was, when it still exists.
-        if let saved = Self.loadScope(), isValid(saved) { scope = saved }
-        applyFocusFilter()
+        // Restore the last place the reader was, when it still exists. One
+        // load for the whole start-up, not one per assignment.
+        withLoadsSuppressed {
+            if let saved = Self.loadScope(), isValid(saved) { scope = saved }
+            applyFocusFilter()
+        }
         await loadList(reset: true)
         await loadCounts()
         startStream()
@@ -201,13 +230,50 @@ final class MailStore {
     private func scopeChanged() {
         selectedThreadIds.removeAll()
         Self.saveScope(scope)
-        if scope.folderId != nil {
-            view = .inbox
+        resetList()
+        if scope.folderId != nil, view != .inbox {
+            // Folders have no views; land on the one list they do have.
+            withLoadsSuppressed { view = .inbox }
+        }
+        guard !suppressLoads else { return }
+        Task {
+            await loadList(reset: true)
+            await loadCounts()
+        }
+    }
+
+    /// Open a scope and a view together with one load — a tap on a mailbox
+    /// row means "show me *this* list", not two lists in a row.
+    func select(scope: MailScope, view: MailView) {
+        guard self.scope != scope || self.view != view else { return }
+        withLoadsSuppressed {
+            self.scope = scope
+            self.view = view
         }
         Task {
             await loadList(reset: true)
             await loadCounts()
         }
+    }
+
+    /// While true the selection `didSet`s update state but start no request.
+    private var suppressLoads = false
+
+    private func withLoadsSuppressed(_ change: () -> Void) {
+        let previous = suppressLoads
+        suppressLoads = true
+        change()
+        suppressLoads = previous
+    }
+
+    /// Drop the rows of the list that is about to be replaced, so a new scope
+    /// never shows the old one's mail under its title.
+    private func resetList() {
+        threads = []
+        drafts = []
+        nextCursor = nil
+        selectedThreadIds.removeAll()
+        listError = nil
     }
 
     // ─── Catalogue ──────────────────────────────────────────────────────────
@@ -295,6 +361,8 @@ final class MailStore {
     }
 
     private func performLoad(reset: Bool) async {
+        let token = UUID()
+        loadToken = token
         if reset {
             isLoadingList = true
             listError = nil
@@ -303,8 +371,12 @@ final class MailStore {
             isLoadingMore = true
         }
         defer {
-            isLoadingList = false
-            isLoadingMore = false
+            // A load that was cancelled in favour of a newer one must leave
+            // the newer one's flags alone, or the list flashes "empty".
+            if loadToken == token {
+                isLoadingList = false
+                isLoadingMore = false
+            }
         }
 
         do {
@@ -398,7 +470,7 @@ final class MailStore {
         if read { Notifications.shared.dismiss(threadId: thread.id) }
         do {
             try await client.patchThread(thread.id, read: read)
-            adjustUnread(mailboxId: thread.mailboxId, by: read ? -1 : 1, onlyIf: thread.isUnread != read)
+            adjustUnread(mailboxId: thread.mailboxId, by: read ? -1 : 1, onlyIf: thread.isUnread == read)
             await loadCounts()
         } catch {
             applyLocally(threadId: thread.id) { $0.unreadCount = thread.unreadCount }
@@ -471,6 +543,10 @@ final class MailStore {
 
     func markAllRead() async {
         guard let mailboxId = scope.mailboxId else { return }
+        await markAllRead(mailboxId: mailboxId, view: view)
+    }
+
+    func markAllRead(mailboxId: String, view: MailView = .inbox) async {
         do {
             try await client.markAllRead(mailboxId: mailboxId, view: view)
             await Notifications.shared.dismissAll(mailboxId: mailboxId)
@@ -489,8 +565,9 @@ final class MailStore {
             guard let newest = detail.messages.max(by: { $0.date < $1.date }) else { return }
             let starred = !newest.isStarred
             try await client.patchMessage(newest.id, starred: starred)
-            app.show(starred ? "Starred." : "Unstarred.", kind: .success)
-            if view == .marked { await loadList(reset: true) }
+            if view == .marked, !starred {
+                removeLocally(threadId: thread.id)
+            }
             await loadCounts()
         } catch {
             app.handle(error)
@@ -587,14 +664,57 @@ final class MailStore {
         }
     }
 
-    func bulkSpam() async {
+    func bulkStar() async {
+        let targets = selectedThreads
+        clearSelection()
+        do {
+            for thread in targets {
+                let detail = try await client.thread(thread.id)
+                guard let newest = detail.messages.max(by: { $0.date < $1.date }) else { continue }
+                try await client.patchMessage(newest.id, starred: true)
+            }
+            await loadCounts()
+        } catch {
+            app.handle(error)
+        }
+    }
+
+    func bulkRestore() async {
         let targets = selectedThreads
         clearSelection()
         for thread in targets { removeLocally(threadId: thread.id) }
         do {
-            for thread in targets { try await client.patchThread(thread.id, spam: true) }
+            for thread in targets { try await client.patchThread(thread.id, trashed: false, spam: false) }
             await loadCounts()
-            app.show("Reported \(targets.count) as spam.", kind: .success)
+            app.show("Restored \(targets.count).", kind: .success)
+        } catch {
+            app.handle(error)
+            await loadList(reset: true)
+        }
+    }
+
+    func bulkDeleteForever() async {
+        let targets = selectedThreads
+        clearSelection()
+        for thread in targets { removeLocally(threadId: thread.id) }
+        do {
+            for thread in targets { try await client.deleteThread(thread.id) }
+            await loadCounts()
+            app.show("Deleted \(targets.count) permanently.", kind: .success)
+        } catch {
+            app.handle(error)
+            await loadList(reset: true)
+        }
+    }
+
+    func bulkSpam(_ spam: Bool = true) async {
+        let targets = selectedThreads
+        clearSelection()
+        for thread in targets { removeLocally(threadId: thread.id) }
+        do {
+            for thread in targets { try await client.patchThread(thread.id, spam: spam) }
+            await loadCounts()
+            app.show(spam ? "Reported \(targets.count) as spam." : "Moved \(targets.count) to Inbox.", kind: .success)
         } catch {
             app.handle(error)
             await loadList(reset: true)

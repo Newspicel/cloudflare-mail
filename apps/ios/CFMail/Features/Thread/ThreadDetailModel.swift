@@ -68,10 +68,12 @@ final class ThreadDetailModel {
             if markRead, detail.thread.isUnread {
                 await setThreadRead()
             }
+        } catch is CancellationError {
+            return
         } catch {
             isLoading = false
             self.error = error.localizedDescription
-            app.handle(error)
+            if let apiError = error as? APIError, apiError.isAuthFailure { app.handle(error) }
         }
     }
 

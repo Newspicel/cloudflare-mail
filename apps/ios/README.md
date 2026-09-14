@@ -35,17 +35,22 @@ under `CFMail/` is enough — there is no file list to keep in sync.
   kept in the Keychain and restored on launch. Every request declares `Origin`:
   Better Auth runs its CSRF origin check on anything carrying a cookie, and a
   native client has no browser to set that header for it.
-- **Mail** — mailboxes with unread badges, the combined All-mail view, the seven
-  list views (inbox, starred, sent, drafts, spam, trash, all), cursor paging,
-  swipe actions, multi-select bulk actions, undo on every destructive move.
-- **Reader** — one card per message, sanitized HTML in a `WKWebView` (remote
-  images still routed through the server's proxy), plain-text fallback,
-  attachments via QuickLook, `.eml` export, and the banners the server's data
-  earns: spam verdict and reasons, PGP state, tracker count, calendar invite,
-  one-click unsubscribe.
-- **Compose** — recipient chips with contact completion, Cc/Bcc, attachments
-  (photos and files), server-side draft autosave, scheduled send, "remind me if
-  no reply", and a blocked-recipient warning before you hit send.
+- **Mail** — Mail's own shape: a Mailboxes screen with All Inboxes, Starred,
+  Drafts, Sent, Spam, Trash and All Mail across every mailbox plus a
+  collapsible section per mailbox; a large-title list with the category strip,
+  pull-to-reveal search, Mail's swipe set (read/unread, trash, star, move), an
+  edit mode with Mark / Move / Trash, cursor paging and undo on every
+  destructive move. iPad gets the three columns.
+- **Reader** — one card per message, previous/next arrows through the list,
+  sanitized HTML in a `WKWebView` (remote images still routed through the
+  server's proxy, text at the reader's Dynamic Type size), plain-text
+  fallback, attachments via QuickLook, `.eml` export, and the banners the
+  server's data earns: spam verdict and reasons, PGP state, tracker count,
+  calendar invite, one-click unsubscribe.
+- **Compose** — recipient tokens with contact completion and a ⊕ contact
+  picker, the folded Cc/Bcc/From line, attachments (photos and files),
+  server-side draft autosave, send later, "remind me if no reply", and a
+  blocked-recipient warning before you hit send.
 - **Organisation** — labels, personal folders, rules (full condition/action
   editor), reminders, and a contacts list built from who you actually
   correspond with (`GET /api/contacts`).
@@ -161,6 +166,7 @@ CFMail/
     Store/       AppModel (session) and MailStore (catalogue, list, realtime)
     Util/        formatting, local notifications, background refresh
   Features/      Auth, Mail, Thread, Compose, Intents, Settings, Shared
+                 (Shared/Navigation.swift is how any screen opens another)
   Resources/     asset catalog
 Shared/          code the app and the AutoFill extension both compile
 CFMailAutoFill/  the AutoFill Credential Provider extension

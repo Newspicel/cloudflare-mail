@@ -37,9 +37,9 @@ enum MailCategory: String, CaseIterable, Identifiable, Hashable {
 
     var symbol: String {
         switch self {
-        case .all: "tray.2"
-        case .primary: "person.crop.square"
-        case .transactions: "shippingbox"
+        case .all: "tray"
+        case .primary: "person"
+        case .transactions: "cart"
         case .updates: "megaphone"
         case .promotions: "tag"
         }
@@ -47,11 +47,11 @@ enum MailCategory: String, CaseIterable, Identifiable, Hashable {
 
     var tint: Color {
         switch self {
-        case .all: .accentColor
+        case .all: .gray
         case .primary: .blue
-        case .transactions: .teal
-        case .updates: .orange
-        case .promotions: .purple
+        case .transactions: .green
+        case .updates: .purple
+        case .promotions: .pink
         }
     }
 

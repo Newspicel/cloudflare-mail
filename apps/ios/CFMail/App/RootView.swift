@@ -24,17 +24,8 @@ struct RootView: View {
             }
         }
         .animation(.smooth(duration: 0.28), value: app.phase)
-        .overlay(alignment: .bottom) {
-            if let banner = app.banner {
-                BannerOverlay(
-                    banner: banner,
-                    onUndo: { app.performUndo() },
-                    onDismiss: { app.dismissBanner() }
-                )
-                .padding(.bottom, 12)
-            }
-        }
-        .animation(.snappy(duration: 0.25), value: app.banner)
+        // Lifted clear of the bottom toolbar once the mail UI is up.
+        .bannerHost(bottomPadding: app.phase == .ready ? 72 : 12)
     }
 }
 

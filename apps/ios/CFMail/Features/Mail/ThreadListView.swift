@@ -3,9 +3,10 @@ import SwiftUI
 struct ThreadListView: View {
     @Environment(AppModel.self) private var app
     @Environment(MailStore.self) private var mail
+    @Environment(\.mailNavigator) private var navigator
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     var onCompose: (ComposeContext) -> Void
-    var onOpen: (MailRoute) -> Void
 
     @State private var search = SearchModel()
     @State private var searchText = ""
@@ -31,13 +32,14 @@ struct ThreadListView: View {
         .listStyle(.plain)
         .accessibilityIdentifier("mail.list")
         .safeAreaInset(edge: .top, spacing: 0) {
-            if mail.showsCategories && !search.isActive {
+            if mail.showsCategories && !search.isActive && !isSelecting {
                 CategoryTabs(selection: $mail.category) { mail.count(in: $0) }
             }
         }
-        .navigationTitle(mail.title)
-        .navigationBarTitleDisplayMode(.inline)
-        .navigationSubtitle(subtitle)
+        .navigationTitle(isSelecting ? selectionTitle : mail.title)
+        .navigationBarTitleDisplayMode(isSelecting ? .inline : .large)
+        .navigationSubtitle(isSelecting || search.isActive ? "" : (mail.subtitle ?? ""))
+        .navigationBarBackButtonHidden(isSelecting)
         .refreshable {
             if search.isActive {
                 search.run(mail.client, debounce: false)
@@ -48,8 +50,8 @@ struct ThreadListView: View {
         .searchable(
             text: $searchText,
             isPresented: $isSearchPresented,
-            placement: .navigationBarDrawer(displayMode: .always),
-            prompt: "Search mail"
+            placement: .automatic,
+            prompt: "Search"
         )
         .onChange(of: searchText) { _, value in
             search.text = value
@@ -69,12 +71,12 @@ struct ThreadListView: View {
                 search.reset()
             }
         }
+        .onChange(of: mail.scope) { _, _ in endSelecting() }
+        .onChange(of: mail.view) { _, _ in endSelecting() }
         .toolbar { toolbarContent }
-        .safeAreaInset(edge: .bottom) {
-            if isSelecting && !mail.selectedThreadIds.isEmpty { selectionBar }
-        }
         .sheet(item: $folderPicker) { request in
             FolderPickerSheet(threadIds: request.threadIds)
+                .environment(app)
                 .environment(mail)
                 .presentationDetents([.medium, .large])
         }
@@ -88,6 +90,7 @@ struct ThreadListView: View {
             SearchFiltersSheet(search: search) {
                 search.run(mail.client, debounce: false)
             }
+            .environment(app)
             .environment(mail)
         }
         .confirmationDialog(
@@ -95,11 +98,12 @@ struct ThreadListView: View {
             isPresented: $confirmEmptyTrash,
             titleVisibility: .visible
         ) {
-            Button("Delete permanently", role: .destructive) { Task { await emptyTrash() } }
+            Button("Delete Permanently", role: .destructive) { Task { await emptyTrash() } }
         } message: {
             Text("This can't be undone.")
         }
         .animation(.snappy, value: mail.listGeneration)
+        .animation(.snappy(duration: 0.2), value: isSelecting)
     }
 
     // ─── Rows ───────────────────────────────────────────────────────────────
@@ -111,9 +115,9 @@ struct ThreadListView: View {
         } else if let error = mail.listError, mail.visibleThreads.isEmpty {
             EmptyState(
                 symbol: "exclamationmark.triangle",
-                title: "Couldn't load mail",
+                title: "Couldn't Load Mail",
                 message: error,
-                actionTitle: "Try again"
+                actionTitle: "Try Again"
             ) {
                 Task { await mail.loadList(reset: true) }
             }
@@ -131,12 +135,13 @@ struct ThreadListView: View {
                     showsAiSummary: app.prefs.showsAiSummaries,
                     isCompact: app.prefs.isCompact,
                     isSelecting: isSelecting,
-                    isSelected: mail.selectedThreadIds.contains(thread.id)
+                    isSelected: mail.selectedThreadIds.contains(thread.id),
+                    isOpen: sizeClass == .regular && mail.openThreadId == thread.id
                 ) {
                     if isSelecting {
                         mail.toggleSelection(thread.id)
                     } else {
-                        onOpen(.thread(id: thread.id, mailboxId: thread.mailboxId))
+                        navigator.showThread(thread.id, thread.mailboxId)
                     }
                 }
                 .swipeActions(edge: .leading, allowsFullSwipe: true) {
@@ -145,40 +150,62 @@ struct ThreadListView: View {
                     } label: {
                         Label(
                             thread.isUnread ? "Read" : "Unread",
-                            systemImage: thread.isUnread ? "envelope.open" : "envelope.badge"
+                            systemImage: thread.isUnread ? "envelope.open.fill" : "envelope.badge.fill"
                         )
                     }
-                    .tint(.accentColor)
+                    .tint(.blue)
                 }
                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                    if mail.view == .trash {
-                        Button(role: .destructive) {
-                            Task { await mail.deleteForever(thread) }
-                        } label: {
-                            Label("Delete", systemImage: "trash.fill")
-                        }
-                        Button { Task { await mail.restore(thread) } } label: {
-                            Label("Restore", systemImage: "arrow.uturn.backward")
-                        }
-                        .tint(.green)
-                    } else {
-                        Button(role: .destructive) {
-                            Task { await mail.trash(thread) }
-                        } label: {
-                            Label("Trash", systemImage: "trash")
-                        }
-                        Button {
-                            folderPicker = FolderPickerRequest(threadIds: [thread.id])
-                        } label: {
-                            Label("File", systemImage: "folder")
-                        }
-                        .tint(.indigo)
-                    }
+                    trailingSwipe(for: thread)
                 }
                 .contextMenu { contextMenu(for: thread) }
                 .task { await mail.loadMoreIfNeeded(currentItem: thread.id) }
             }
             if mail.isLoadingMore { LoadingFooter() }
+        }
+    }
+
+    /// Mail's trailing set: Trash nearest the edge (and on a full swipe),
+    /// then Flag, then a place to file it. Trash and Spam get their own.
+    @ViewBuilder
+    private func trailingSwipe(for thread: MailThread) -> some View {
+        switch mail.view {
+        case .trash:
+            Button(role: .destructive) {
+                Task { await mail.deleteForever(thread) }
+            } label: {
+                Label("Delete", systemImage: "trash.fill")
+            }
+            Button { Task { await mail.restore(thread) } } label: {
+                Label("Restore", systemImage: "arrow.uturn.backward.circle.fill")
+            }
+            .tint(.green)
+        case .spam:
+            Button(role: .destructive) {
+                Task { await mail.trash(thread) }
+            } label: {
+                Label("Trash", systemImage: "trash.fill")
+            }
+            Button { Task { await mail.markSpam(thread, spam: false) } } label: {
+                Label("Not Spam", systemImage: "hand.thumbsup.fill")
+            }
+            .tint(.green)
+        default:
+            Button(role: .destructive) {
+                Task { await mail.trash(thread) }
+            } label: {
+                Label("Trash", systemImage: "trash.fill")
+            }
+            Button { Task { await mail.toggleStar(thread) } } label: {
+                Label("Star", systemImage: "star.fill")
+            }
+            .tint(.orange)
+            Button {
+                folderPicker = FolderPickerRequest(threadIds: [thread.id])
+            } label: {
+                Label("Move", systemImage: "folder.fill")
+            }
+            .tint(.indigo)
         }
     }
 
@@ -188,10 +215,10 @@ struct ThreadListView: View {
             ForEach(0..<5, id: \.self) { _ in ThreadRowPlaceholder() }
         } else if mail.drafts.isEmpty {
             EmptyState(
-                symbol: "doc.text",
-                title: "No drafts",
+                symbol: "doc",
+                title: "No Drafts",
                 message: "Anything you start writing and leave is kept here.",
-                actionTitle: "New message"
+                actionTitle: "New Message"
             ) {
                 onCompose(ComposeContext(kind: .new, mailboxId: defaultComposeMailbox))
             }
@@ -205,7 +232,7 @@ struct ThreadListView: View {
                     Button(role: .destructive) {
                         Task { await mail.deleteDraft(draft) }
                     } label: {
-                        Label("Delete", systemImage: "trash")
+                        Label("Delete", systemImage: "trash.fill")
                     }
                     if draft.scheduledFor != nil {
                         Button { Task { await mail.cancelSchedule(draft) } } label: {
@@ -225,12 +252,12 @@ struct ThreadListView: View {
         if search.isLoading && search.results.isEmpty {
             ForEach(0..<6, id: \.self) { _ in ThreadRowPlaceholder() }
         } else if let error = search.error {
-            EmptyState(symbol: "exclamationmark.triangle", title: "Search failed", message: error)
+            EmptyState(symbol: "exclamationmark.triangle", title: "Search Failed", message: error)
                 .listRowSeparator(.hidden)
         } else if search.results.isEmpty && search.hasRun {
             EmptyState(
                 symbol: "magnifyingglass",
-                title: "No matches",
+                title: "No Results",
                 message: "Try fewer words, or widen the filters."
             )
             .listRowSeparator(.hidden)
@@ -244,7 +271,7 @@ struct ThreadListView: View {
             }
             ForEach(search.results) { result in
                 SearchResultRow(result: result) {
-                    onOpen(.thread(id: result.threadId, mailboxId: result.mailboxId))
+                    navigator.showThread(result.threadId, result.mailboxId)
                 }
                 .task {
                     if result.id == search.results.last?.id {
@@ -262,19 +289,19 @@ struct ThreadListView: View {
         case .inbox:
             EmptyState(
                 symbol: mail.unreadOnly ? "envelope.open" : "tray",
-                title: mail.unreadOnly ? "Nothing unread" : "Inbox zero",
+                title: mail.unreadOnly ? "No Unread Mail" : "No Mail",
                 message: mail.unreadOnly ? nil : "New mail lands here the moment it's delivered."
             )
         case .spam:
-            EmptyState(symbol: "checkmark.shield", title: "No spam", message: "Nothing was filtered out.")
+            EmptyState(symbol: "checkmark.shield", title: "No Spam", message: "Nothing was filtered out.")
         case .trash:
-            EmptyState(symbol: "trash", title: "Trash is empty")
+            EmptyState(symbol: "trash", title: "Trash Is Empty")
         case .marked:
-            EmptyState(symbol: "star", title: "Nothing starred", message: "Star a message to keep it here.")
+            EmptyState(symbol: "star", title: "Nothing Starred", message: "Star a message to keep it here.")
         case .sent:
-            EmptyState(symbol: "paperplane", title: "Nothing sent yet")
+            EmptyState(symbol: "paperplane", title: "Nothing Sent Yet")
         default:
-            EmptyState(symbol: "archivebox", title: "Nothing here")
+            EmptyState(symbol: "tray.full", title: "No Mail")
         }
     }
 
@@ -282,11 +309,70 @@ struct ThreadListView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
+        if isSelecting {
+            selectingToolbar
+        } else {
+            browsingToolbar
+        }
+    }
+
+    /// Mail's edit mode: the title counts the selection, Select All sits
+    /// where the back button was, and the bottom bar offers Mark / Move / Trash.
+    @ToolbarContentBuilder
+    private var selectingToolbar: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
-            if !search.isActive {
-                viewMenu
+            Button(allSelected ? "Deselect All" : "Select All") {
+                if allSelected {
+                    mail.clearSelection()
+                } else {
+                    for thread in mail.visibleThreads { mail.selectedThreadIds.insert(thread.id) }
+                }
             }
         }
+        ToolbarItem(placement: .topBarTrailing) {
+            Button("Done") { endSelecting() }
+                .fontWeight(.semibold)
+        }
+        ToolbarItem(placement: .bottomBar) {
+            Menu("Mark") {
+                Button("Mark as Read", systemImage: "envelope.open") { Task { await mail.bulkRead(true) } }
+                Button("Mark as Unread", systemImage: "envelope.badge") { Task { await mail.bulkRead(false) } }
+                Button("Star", systemImage: "star") { Task { await mail.bulkStar() } }
+                Divider()
+                if mail.view == .spam {
+                    Button("Not Spam", systemImage: "hand.thumbsup") { Task { await mail.bulkSpam(false) } }
+                } else {
+                    Button("Report Spam", systemImage: "xmark.bin") { Task { await mail.bulkSpam(true) } }
+                }
+            }
+            .disabled(mail.selectedThreadIds.isEmpty)
+        }
+        ToolbarSpacer(.flexible, placement: .bottomBar)
+        ToolbarItem(placement: .bottomBar) {
+            if mail.view == .trash {
+                Button("Restore") { Task { await mail.bulkRestore() } }
+                    .disabled(mail.selectedThreadIds.isEmpty)
+            } else {
+                Button("Move") {
+                    folderPicker = FolderPickerRequest(threadIds: Array(mail.selectedThreadIds))
+                }
+                .disabled(mail.selectedThreadIds.isEmpty)
+            }
+        }
+        ToolbarSpacer(.flexible, placement: .bottomBar)
+        ToolbarItem(placement: .bottomBar) {
+            if mail.view == .trash {
+                Button("Delete", role: .destructive) { Task { await mail.bulkDeleteForever() } }
+                    .disabled(mail.selectedThreadIds.isEmpty)
+            } else {
+                Button("Trash", role: .destructive) { Task { await mail.bulkTrash() } }
+                    .disabled(mail.selectedThreadIds.isEmpty)
+            }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var browsingToolbar: some ToolbarContent {
         ToolbarItem(placement: .topBarTrailing) {
             if search.isActive {
                 Button("Filters", systemImage: "line.3.horizontal.decrease.circle") {
@@ -301,7 +387,7 @@ struct ThreadListView: View {
                 mail.unreadOnly.toggle()
             } label: {
                 Label(
-                    mail.unreadOnly ? "Show all" : "Show unread only",
+                    mail.unreadOnly ? "Show All" : "Show Unread Only",
                     systemImage: mail.unreadOnly
                         ? "line.3.horizontal.decrease.circle.fill"
                         : "line.3.horizontal.decrease.circle"
@@ -311,66 +397,62 @@ struct ThreadListView: View {
         }
         ToolbarSpacer(.flexible, placement: .bottomBar)
         ToolbarItem(placement: .bottomBar) {
-            VStack(spacing: 1) {
-                Text(updatedLine)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                if mail.unreadOnly {
-                    Text("Filtered by: Unread")
-                        .font(.caption2)
-                        .foregroundStyle(Color.accentColor)
-                }
-            }
-            .fixedSize()
+            statusText
         }
         ToolbarSpacer(.flexible, placement: .bottomBar)
         ToolbarItem(placement: .bottomBar) {
-            Button("New message", systemImage: "square.and.pencil") {
+            Button("New Message", systemImage: "square.and.pencil") {
                 onCompose(ComposeContext(kind: .new, mailboxId: defaultComposeMailbox))
             }
             .disabled(mail.writableMailboxes.isEmpty)
         }
     }
 
-    private var viewMenu: some View {
-        Menu {
-            Picker("View", selection: Binding(get: { mail.view }, set: { mail.view = $0 })) {
-                ForEach(mail.availableViews) { view in
-                    Label(view.title, systemImage: view.symbol).tag(view)
+    /// Mail's reassurance line in the middle of the bottom bar: when the list
+    /// last came back, and what's unread. Re-evaluated each minute so "Just
+    /// Now" ages into a time on its own.
+    private var statusText: some View {
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            VStack(spacing: 1) {
+                Text(updatedLine(at: context.date))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                if mail.unreadOnly {
+                    Text("Filtered by: Unread")
+                        .font(.caption2)
+                        .foregroundStyle(Color.accentColor)
+                } else if let line = countLine {
+                    Text(line)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
             }
-            .pickerStyle(.inline)
-        } label: {
-            Label(mail.view.title, systemImage: mail.view.symbol)
+            .fixedSize()
+            .monospacedDigit()
         }
-        .disabled(mail.scope.folderId != nil)
     }
 
     private var overflowMenu: some View {
         Menu {
-            Button {
-                isSelecting.toggle()
-                if !isSelecting { mail.clearSelection() }
-            } label: {
-                Label(isSelecting ? "Done selecting" : "Select…", systemImage: "checkmark.circle")
+            Button("Select Messages", systemImage: "checkmark.circle") {
+                startSelecting()
             }
+            .disabled(mail.visibleThreads.isEmpty)
             Divider()
-            Button("Mark all read", systemImage: "envelope.open") {
+            Button("Mark All as Read", systemImage: "envelope.open") {
                 Task { await mail.markAllRead() }
             }
-            .disabled(mail.scope.folderId != nil)
+            .disabled(mail.scope.folderId != nil || mail.count(mail.view).unread == 0)
             if mail.view == .trash {
                 Button("Empty Trash", systemImage: "trash.slash", role: .destructive) {
                     confirmEmptyTrash = true
                 }
                 .disabled(mail.threads.isEmpty)
             }
-            Divider()
-            Button("Reminders", systemImage: "bell") { onOpen(.reminders) }
-            Button("Labels", systemImage: "tag") { onOpen(.labels) }
         } label: {
             Label("More", systemImage: "ellipsis")
         }
+        .disabled(mail.view == .drafts)
     }
 
     @ViewBuilder
@@ -378,15 +460,15 @@ struct ThreadListView: View {
         Button {
             Task { await mail.setRead(thread, read: thread.isUnread) }
         } label: {
-            Label(thread.isUnread ? "Mark read" : "Mark unread",
+            Label(thread.isUnread ? "Mark as Read" : "Mark as Unread",
                   systemImage: thread.isUnread ? "envelope.open" : "envelope.badge")
         }
         Button("Star", systemImage: "star") { Task { await mail.toggleStar(thread) } }
+        Button("Move to Folder…", systemImage: "folder") {
+            folderPicker = FolderPickerRequest(threadIds: [thread.id])
+        }
         if !mail.activeLabels.isEmpty {
             Button("Labels…", systemImage: "tag") { labelPicker = thread }
-        }
-        Button("File…", systemImage: "folder") {
-            folderPicker = FolderPickerRequest(threadIds: [thread.id])
         }
         if let folder = mail.currentFolder {
             Button("Remove from \(folder.name)", systemImage: "folder.badge.minus") {
@@ -395,11 +477,11 @@ struct ThreadListView: View {
         }
         Divider()
         if thread.spam {
-            Button("Not spam", systemImage: "hand.thumbsup") {
+            Button("Not Spam", systemImage: "hand.thumbsup") {
                 Task { await mail.markSpam(thread, spam: false) }
             }
         } else {
-            Button("Report spam", systemImage: "exclamationmark.octagon") {
+            Button("Report Spam", systemImage: "xmark.bin") {
                 Task { await mail.markSpam(thread, spam: true) }
             }
         }
@@ -407,7 +489,7 @@ struct ThreadListView: View {
             Button("Restore", systemImage: "arrow.uturn.backward") {
                 Task { await mail.restore(thread) }
             }
-            Button("Delete permanently", systemImage: "trash.fill", role: .destructive) {
+            Button("Delete Permanently", systemImage: "trash.fill", role: .destructive) {
                 Task { await mail.deleteForever(thread) }
             }
         } else {
@@ -417,40 +499,29 @@ struct ThreadListView: View {
         }
     }
 
-    private var selectionBar: some View {
-        HStack(spacing: 16) {
-            Text("\(mail.selectedThreadIds.count) selected")
-                .font(.subheadline.weight(.medium))
-                .monospacedDigit()
-            Spacer()
-            Button("Read", systemImage: "envelope.open") { Task { await mail.bulkRead(true) } }
-            Button("File", systemImage: "folder") {
-                folderPicker = FolderPickerRequest(threadIds: Array(mail.selectedThreadIds))
-            }
-            Button("Spam", systemImage: "exclamationmark.octagon") { Task { await mail.bulkSpam() } }
-            Button("Trash", systemImage: "trash", role: .destructive) { Task { await mail.bulkTrash() } }
-        }
-        .labelStyle(.iconOnly)
-        .buttonStyle(.borderless)
-        .padding(.horizontal, 18)
-        .padding(.vertical, 12)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
-        .padding(.horizontal, 14)
-        .padding(.bottom, 6)
-        .transition(.move(edge: .bottom).combined(with: .opacity))
-    }
-
     // ─── Helpers ────────────────────────────────────────────────────────────
 
-    /// Scope plus how much is in it — the list's own header has no room.
-    private var subtitle: String {
-        guard let scope = mail.subtitle else { return statusLine }
-        return search.isActive ? scope : "\(scope) · \(statusLine)"
+    private var allSelected: Bool {
+        !mail.visibleThreads.isEmpty && mail.selectedThreadIds.count == mail.visibleThreads.count
     }
 
-    /// Mail's reassurance line: when the list last came back from the server,
-    /// or what it's doing right now.
-    private var updatedLine: String {
+    private var selectionTitle: String {
+        let count = mail.selectedThreadIds.count
+        return count == 0 ? "Select Messages" : "\(count) Selected"
+    }
+
+    private func startSelecting() {
+        mail.clearSelection()
+        isSelecting = true
+    }
+
+    private func endSelecting() {
+        guard isSelecting else { return }
+        isSelecting = false
+        mail.clearSelection()
+    }
+
+    private func updatedLine(at now: Date) -> String {
         switch mail.connection {
         case .connecting: return "Connecting…"
         case .offline: return "Offline"
@@ -458,20 +529,21 @@ struct ThreadListView: View {
         }
         if mail.isLoadingList { return "Checking for Mail…" }
         guard let updated = mail.lastUpdated else { return "Updated" }
-        return Date.now.timeIntervalSince(updated) < 60
+        return now.timeIntervalSince(updated) < 60
             ? "Updated Just Now"
             : "Updated \(updated.formatted(date: .omitted, time: .shortened))"
     }
 
-    private var statusLine: String {
+    private var countLine: String? {
         if mail.view == .drafts {
-            return mail.drafts.isEmpty ? "No drafts" : "\(mail.drafts.count) drafts"
+            return mail.drafts.isEmpty ? nil : "\(mail.drafts.count) Drafts"
         }
+        guard mail.scope.folderId == nil else { return nil }
         let count = mail.count(mail.view)
-        if mail.view.badgeCountsUnread, count.unread > 0 {
-            return "\(count.unread) unread · \(count.total)"
+        if mail.view.badgeCountsUnread {
+            return count.unread > 0 ? "\(count.unread) Unread" : nil
         }
-        return count.total == 1 ? "1 conversation" : "\(count.total) conversations"
+        return count.total > 0 ? "\(count.total) Messages" : nil
     }
 
     private var defaultComposeMailbox: String? {

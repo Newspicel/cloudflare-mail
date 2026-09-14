@@ -15,6 +15,8 @@ struct ThreadRow: View {
     var isCompact: Bool
     var isSelecting: Bool
     var isSelected: Bool
+    /// Highlighted as the conversation showing beside the list (iPad only).
+    var isOpen = false
     var onTap: () -> Void
 
     private var lead: AddressObject {
@@ -27,38 +29,39 @@ struct ThreadRow: View {
                 // Mail's unread gutter: the dot sits outside the avatar, and the
                 // column stays reserved when read so rows never shift.
                 UnreadDot(isVisible: thread.isUnread && !isSelecting)
-                    .padding(.top, isCompact ? 11 : 15)
+                    .padding(.top, isCompact ? 8 : 9)
 
                 if isSelecting {
                     Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                        .font(.title3)
-                        .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
-                        .padding(.top, 8)
+                        .font(.title2)
+                        .foregroundStyle(isSelected ? Color.accentColor : Color(.tertiaryLabel))
+                        .padding(.top, 6)
+                        .contentTransition(.symbolEffect(.replace))
                 } else {
-                    Avatar(address: lead, size: isCompact ? 32 : 38)
-                        .padding(.top, 2)
+                    Avatar(address: lead, size: isCompact ? 32 : 40)
                 }
 
                 VStack(alignment: .leading, spacing: isCompact ? 1 : 2) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(Fmt.participants(thread.participants))
-                            .font(.subheadline.weight(thread.isUnread ? .bold : .semibold))
+                            .font(.headline)
                             .lineLimit(1)
                         if thread.msgCount > 1 {
-                            Text("\(thread.msgCount)")
-                                .font(.caption2.weight(.medium))
+                            Text(thread.msgCount.formatted())
+                                .font(.caption.weight(.medium))
                                 .monospacedDigit()
-                                .padding(.horizontal, 5)
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 6)
                                 .padding(.vertical, 1)
                                 .background(.quaternary, in: .capsule)
                         }
                         Spacer(minLength: 4)
                         Text(Fmt.listDate(thread.lastMsgAt))
-                            .font(.caption)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                         Image(systemName: "chevron.right")
-                            .font(.caption2.weight(.semibold))
+                            .font(.footnote.weight(.semibold))
                             .foregroundStyle(.tertiary)
                     }
 
@@ -96,7 +99,7 @@ struct ThreadRow: View {
                                     .lineLimit(1)
                             }
                             if thread.spam {
-                                Image(systemName: "exclamationmark.octagon.fill")
+                                Image(systemName: "xmark.bin.fill")
                                     .font(.caption2)
                                     .foregroundStyle(.orange)
                             }
@@ -109,13 +112,19 @@ struct ThreadRow: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .listRowBackground(isSelected ? Color.accentColor.opacity(0.08) : nil)
+        .listRowBackground(rowBackground)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityAddTraits(.isButton)
         // Stable handle for UI tests; the combined label above reads well for
         // VoiceOver but isn't something a test can match on.
         .accessibilityIdentifier(thread.subject)
+    }
+
+    private var rowBackground: Color? {
+        if isSelected { return Color.accentColor.opacity(0.10) }
+        if isOpen { return Color(.systemGray5) }
+        return nil
     }
 
     private var chipsAreEmpty: Bool {
@@ -148,11 +157,11 @@ struct DraftRow: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(alignment: .firstTextBaseline) {
                         Text(recipients)
-                            .font(.subheadline.weight(.medium))
+                            .font(.headline)
                             .lineLimit(1)
                         Spacer(minLength: 4)
                         Text(Fmt.listDate(draft.updatedAt))
-                            .font(.caption)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
                     Text(draft.displaySubject)
@@ -202,18 +211,21 @@ struct SearchResultRow: View {
     var body: some View {
         Button(action: onTap) {
             HStack(alignment: .top, spacing: 12) {
-                Avatar(address: AddressObject(name: result.fromName, address: result.fromAddr), size: 36)
+                Avatar(address: AddressObject(name: result.fromName, address: result.fromAddr), size: 40)
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(alignment: .firstTextBaseline) {
                         Text(AddressObject(name: result.fromName, address: result.fromAddr).displayName)
-                            .font(.subheadline.weight(result.isSeen ? .regular : .semibold))
+                            .font(.headline)
                             .lineLimit(1)
                         Spacer(minLength: 4)
                         if let date = result.date {
                             Text(Fmt.listDate(date))
-                                .font(.caption)
+                                .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.tertiary)
                     }
                     Text(result.displaySubject)
                         .font(.subheadline)

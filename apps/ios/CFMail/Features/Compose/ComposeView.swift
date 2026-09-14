@@ -14,7 +14,13 @@ struct ComposeView: View {
     @State private var showingFileImporter = false
     @State private var showingSchedule = false
     @State private var showingDiscardPrompt = false
+    @State private var contactPicker: RecipientSlot?
     @FocusState private var bodyFocused: Bool
+
+    private enum RecipientSlot: Identifiable {
+        case to, cc, bcc
+        var id: Self { self }
+    }
 
     var body: some View {
         NavigationStack {
@@ -62,32 +68,52 @@ struct ComposeView: View {
                 .presentationDetents([.medium])
             }
         }
-        .confirmationDialog("Discard this message?", isPresented: $showingDiscardPrompt, titleVisibility: .visible) {
-            Button("Save as draft") {
-                Task {
-                    await model?.saveDraft(silent: false)
-                    await mail.loadList(reset: true)
-                    dismiss()
+        .sheet(item: $contactPicker) { slot in
+            ContactPickerSheet(chosen: chosenAddresses) { person in
+                guard let model else { return }
+                switch slot {
+                case .to: model.to.append(person)
+                case .cc: model.cc.append(person)
+                case .bcc: model.bcc.append(person)
                 }
+                model.scheduleDraftSave()
+                Task { await model.checkRecipients() }
             }
-            Button("Discard", role: .destructive) {
+            .environment(mail)
+            .presentationDetents([.medium, .large])
+        }
+        .confirmationDialog("", isPresented: $showingDiscardPrompt, titleVisibility: .hidden) {
+            Button("Delete Draft", role: .destructive) {
                 Task {
                     await model?.discardDraft()
                     await mail.loadList(reset: true)
                     dismiss()
                 }
             }
-            Button("Keep writing", role: .cancel) {}
+            Button("Save Draft") {
+                Task {
+                    await model?.saveDraft(silent: false)
+                    await mail.loadList(reset: true)
+                    dismiss()
+                }
+            }
+            Button("Cancel", role: .cancel) {}
         }
+        .bannerHost()
     }
 
     private var title: String {
         switch context.kind {
-        case .new: "New message"
+        case .new: "New Message"
         case .reply: "Reply"
         case .forward: "Forward"
         case .draft: "Draft"
         }
+    }
+
+    private var chosenAddresses: Set<String> {
+        guard let model else { return [] }
+        return Set((model.to + model.cc + model.bcc).map { $0.address.lowercased() })
     }
 
     // ─── Form ───────────────────────────────────────────────────────────────
@@ -95,15 +121,16 @@ struct ComposeView: View {
     private func form(_ model: ComposeModel) -> some View {
         @Bindable var model = model
 
+        let blocked = Set(model.blockedRecipients.map { $0.lowercased() })
+
         return ScrollView {
             VStack(spacing: 0) {
-                if mail.writableMailboxes.count > 1 { fromRow(model) }
-
                 RecipientField(
                     title: "To",
                     people: $model.to,
                     contacts: mail.contacts,
-                    blocked: Set(model.blockedRecipients.map { $0.lowercased() })
+                    blocked: blocked,
+                    onPickContact: { contactPicker = .to }
                 ) {
                     model.scheduleDraftSave()
                     Task { await model.checkRecipients() }
@@ -112,32 +139,51 @@ struct ComposeView: View {
                 if model.showsCcBcc {
                     RecipientField(
                         title: "Cc", people: $model.cc, contacts: mail.contacts,
-                        blocked: Set(model.blockedRecipients.map { $0.lowercased() })
-                    ) { model.scheduleDraftSave() }
+                        blocked: blocked, onPickContact: { contactPicker = .cc }
+                    ) {
+                        model.scheduleDraftSave()
+                        Task { await model.checkRecipients() }
+                    }
                     RecipientField(
                         title: "Bcc", people: $model.bcc, contacts: mail.contacts,
-                        blocked: Set(model.blockedRecipients.map { $0.lowercased() })
-                    ) { model.scheduleDraftSave() }
-                } else {
-                    Button("Add Cc / Bcc") {
-                        withAnimation(.snappy) { model.showsCcBcc = true }
+                        blocked: blocked, onPickContact: { contactPicker = .bcc }
+                    ) {
+                        model.scheduleDraftSave()
+                        Task { await model.checkRecipients() }
                     }
-                    .font(.subheadline)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
+                    fromRow(model)
+                } else {
+                    // Mail's folded line: "Cc/Bcc, From: …" opens all three.
+                    Button {
+                        withAnimation(.snappy) { model.showsCcBcc = true }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("Cc/Bcc, From:")
+                                .foregroundStyle(.secondary)
+                            Text(model.fromMailbox?.address ?? "")
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                            Spacer()
+                        }
+                        .font(.body)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 11)
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
                     Divider().padding(.leading, 16)
                 }
 
-                HStack(spacing: 8) {
-                    Text("Subject")
-                        .font(.subheadline)
+                HStack(spacing: 6) {
+                    Text("Subject:")
+                        .font(.body)
                         .foregroundStyle(.secondary)
                     TextField("", text: $model.subject)
+                        .font(.body)
                         .onChange(of: model.subject) { _, _ in model.scheduleDraftSave() }
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 10)
+                .padding(.vertical, 11)
                 Divider().padding(.leading, 16)
 
                 if !model.blockedRecipients.isEmpty {
@@ -160,7 +206,7 @@ struct ComposeView: View {
                     .onChange(of: model.body) { _, _ in model.scheduleDraftSave() }
                     .overlay(alignment: .topLeading) {
                         if model.body.isEmpty {
-                            Text(model.format == .markdown ? "Write your message in Markdown…" : "Write your message…")
+                            Text(model.format == .markdown ? "Write in Markdown…" : "")
                                 .foregroundStyle(.tertiary)
                                 .padding(.horizontal, 17)
                                 .padding(.top, 14)
@@ -194,25 +240,31 @@ struct ComposeView: View {
         @Bindable var model = model
 
         return VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Text("From")
-                    .font(.subheadline)
+            HStack(spacing: 6) {
+                Text("From:")
+                    .font(.body)
                     .foregroundStyle(.secondary)
-                    .frame(width: 38, alignment: .leading)
-                Picker("From", selection: $model.mailboxId) {
-                    ForEach(mail.writableMailboxes) { mailbox in
-                        Text(mailbox.address).tag(mailbox.id)
+                if mail.writableMailboxes.count > 1 {
+                    Picker("From", selection: $model.mailboxId) {
+                        ForEach(mail.writableMailboxes) { mailbox in
+                            Text(mailbox.address).tag(mailbox.id)
+                        }
                     }
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .onChange(of: model.mailboxId) { _, _ in
-                    Task { await model.loadSignature() }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .tint(.primary)
+                    .onChange(of: model.mailboxId) { _, _ in
+                        Task { await model.loadSignature() }
+                    }
+                } else {
+                    Text(model.fromMailbox?.address ?? "")
+                        .font(.body)
+                        .lineLimit(1)
                 }
                 Spacer()
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 6)
+            .padding(.vertical, mail.writableMailboxes.count > 1 ? 5 : 11)
             Divider().padding(.leading, 16)
         }
     }
@@ -284,7 +336,7 @@ struct ComposeView: View {
                 Image(systemName: "textformat")
             }
             Menu {
-                Button("Schedule send…", systemImage: "clock") { showingSchedule = true }
+                Button("Send Later…", systemImage: "clock") { showingSchedule = true }
                 Divider()
                 Section("Remind me if no reply") {
                     Picker("Follow up", selection: $model.followUpDays) {
@@ -296,7 +348,7 @@ struct ComposeView: View {
                     .pickerStyle(.inline)
                 }
                 Divider()
-                Button("Save draft", systemImage: "tray.and.arrow.down") {
+                Button("Save Draft", systemImage: "tray.and.arrow.down") {
                     Task { await model.saveDraft(silent: false) }
                 }
             } label: {
@@ -324,10 +376,22 @@ struct ComposeView: View {
     private var toolbar: some ToolbarContent {
         ToolbarItem(placement: .cancellationAction) {
             Button("Cancel") {
-                if model?.hasContent == true {
+                guard let model else {
+                    dismiss()
+                    return
+                }
+                if model.hasContent {
                     showingDiscardPrompt = true
                 } else {
-                    dismiss()
+                    // Nothing left to keep — including a draft an earlier
+                    // autosave wrote before the text was deleted again.
+                    Task {
+                        if model.hasStaleDraft {
+                            await model.discardDraft()
+                            await mail.loadList(reset: true)
+                        }
+                        dismiss()
+                    }
                 }
             }
         }
@@ -340,10 +404,12 @@ struct ComposeView: View {
                 if model?.isSending == true {
                     ProgressView().controlSize(.small)
                 } else {
-                    Label("Send", systemImage: "paperplane.fill")
+                    Label("Send", systemImage: "arrow.up.circle.fill")
+                        .font(.title2)
                 }
             }
             .disabled(!(model?.canSend ?? false))
+            .accessibilityLabel("Send")
         }
     }
 
@@ -424,7 +490,7 @@ struct ScheduleSendSheet: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .navigationTitle("Schedule send")
+            .navigationTitle("Send Later")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }

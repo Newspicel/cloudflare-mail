@@ -103,7 +103,7 @@ final class MailFlowUITests: XCTestCase {
             attach(name: "03-compose-reply")
             app.buttons["Cancel"].firstMatch.tap()
             // Cancelling a reply with a quoted body asks what to do with it.
-            let discard = app.buttons["Discard"].firstMatch
+            let discard = app.buttons["Delete Draft"].firstMatch
             if discard.waitForExistence(timeout: 4) { discard.tap() }
         }
 
@@ -230,7 +230,7 @@ final class MailFlowUITests: XCTestCase {
     /// `app.navigationBars.buttons` spans every bar still in the hierarchy, so
     /// picking by index reaches the screen underneath instead.
     private func goBack() {
-        for title in ["All mail", "Inbox", "cfmail"] {
+        for title in ["All Inboxes", "Inbox", "Mailboxes"] {
             let named = app.navigationBars.buttons[title]
             if named.exists, named.isHittable {
                 named.tap()

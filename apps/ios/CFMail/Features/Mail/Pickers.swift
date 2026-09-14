@@ -3,6 +3,7 @@ import SwiftUI
 /// Filing is per-user: a thread sits in at most one folder for you, and filing
 /// it hides it from your mailbox views without touching anyone else's.
 struct FolderPickerSheet: View {
+    @Environment(AppModel.self) private var app
     @Environment(MailStore.self) private var mail
     @Environment(\.dismiss) private var dismiss
     let threadIds: [String]
@@ -36,7 +37,7 @@ struct FolderPickerSheet: View {
                         .buttonStyle(.plain)
                     }
                 } header: {
-                    Text(threadIds.count == 1 ? "Move to folder" : "Move \(threadIds.count) threads")
+                    Text(threadIds.count == 1 ? "Move to Folder" : "Move \(threadIds.count) Conversations")
                 } footer: {
                     Text("Folders are personal. Moving a thread here takes it out of your inbox view only.")
                 }
@@ -51,12 +52,13 @@ struct FolderPickerSheet: View {
                     }
                 }
             }
-            .navigationTitle("File")
+            .navigationTitle("Move")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             }
         }
+        .bannerHost()
     }
 
     private func createAndFile() async {
@@ -69,7 +71,7 @@ struct FolderPickerSheet: View {
             await mail.file(threadIds, into: folder)
             dismiss()
         } catch {
-            newName = ""
+            app.handle(error)
         }
     }
 }
@@ -125,12 +127,13 @@ struct LabelPickerSheet: View {
                     }
                 }
             }
-            .navigationTitle(thread.subject)
+            .navigationTitle("Labels")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
         }
+        .bannerHost()
     }
 
     private func isApplied(_ label: MailLabel) -> Bool {

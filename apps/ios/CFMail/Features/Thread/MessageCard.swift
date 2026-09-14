@@ -45,7 +45,7 @@ struct MessageCard: View {
         .alert("Ask an admin to block this sender?", isPresented: $showingBlockPrompt) {
             TextField("Why? (optional)", text: $blockNote)
             Button("Cancel", role: .cancel) {}
-            Button("Send request") {
+            Button("Send Request") {
                 Task { await model.requestBlock(message, note: blockNote) }
                 blockNote = ""
             }
@@ -82,10 +82,10 @@ struct MessageCard: View {
                     withAnimation(.snappy) { showingDetails.toggle() }
                 } label: {
                     HStack(spacing: 3) {
-                        Text("to \(recipientSummary)")
+                        Text("To: \(recipientSummary)")
                             .lineLimit(1)
                         Image(systemName: showingDetails ? "chevron.up" : "chevron.down")
-                            .font(.caption2)
+                            .font(.caption2.weight(.semibold))
                     }
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -135,7 +135,7 @@ struct MessageCard: View {
 
     private var recipientSummary: String {
         let all = message.toAddrs + (message.ccAddrs ?? [])
-        return all.isEmpty ? "undisclosed recipients" : Fmt.participants(all)
+        return all.isEmpty ? "undisclosed recipients" : Fmt.participants(all, fallback: "undisclosed recipients")
     }
 
     private var detailsBlock: some View {
@@ -182,46 +182,76 @@ struct MessageCard: View {
             .joined(separator: " · ")
     }
 
+    /// Mail's per-message reply arrow: a tap replies, a press offers the rest.
+    /// A read-only mailbox gets the rest under an ellipsis instead.
+    @ViewBuilder
     private var messageMenu: some View {
-        Menu {
+        if model.canWrite {
+            Menu {
+                messageMenuItems
+            } label: {
+                Image(systemName: "arrowshape.turn.up.left")
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 32, height: 32)
+                    .contentShape(.rect)
+            } primaryAction: {
+                onReply(.reply, false)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Reply")
+        } else {
+            Menu {
+                messageMenuItems
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 32, height: 32)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("More")
+        }
+    }
+
+    @ViewBuilder
+    private var messageMenuItems: some View {
+        if model.canWrite {
             Button("Reply", systemImage: "arrowshape.turn.up.left") { onReply(.reply, false) }
-            Button("Reply all", systemImage: "arrowshape.turn.up.left.2") { onReply(.reply, true) }
+            Button("Reply All", systemImage: "arrowshape.turn.up.left.2") { onReply(.reply, true) }
             Button("Forward", systemImage: "arrowshape.turn.up.right") { onReply(.forward, false) }
             Divider()
+        }
+        Group {
             Button(message.isStarred ? "Unstar" : "Star", systemImage: message.isStarred ? "star.slash" : "star") {
                 Task { await model.toggleStar(message) }
             }
-            Button("Copy address", systemImage: "doc.on.doc") {
+            Button("Copy Address", systemImage: "doc.on.doc") {
                 UIPasteboard.general.string = message.fromAddr
             }
             if body_?.html?.nilIfBlank != nil, body_?.text?.nilIfBlank != nil {
                 Button(
-                    showsRemoteHTML ? "View as plain text" : "View formatted",
+                    showsRemoteHTML ? "View as Plain Text" : "View Formatted",
                     systemImage: showsRemoteHTML ? "text.alignleft" : "doc.richtext"
                 ) {
                     showsRemoteHTML.toggle()
                 }
             }
-            Button("Export .eml", systemImage: "square.and.arrow.down") {
+            Button("Export as .eml", systemImage: "square.and.arrow.down") {
                 Task { await exportRaw() }
             }
             if message.isInbound {
-                Button("Report sender…", systemImage: "hand.raised") { showingBlockPrompt = true }
+                Button("Report Sender…", systemImage: "hand.raised") { showingBlockPrompt = true }
             }
             Divider()
             Button("Move to Trash", systemImage: "trash", role: .destructive) {
                 Task { await model.trashMessage(message) }
             }
-            Button("Delete permanently", systemImage: "trash.fill", role: .destructive) {
+            Button("Delete Permanently", systemImage: "trash.fill", role: .destructive) {
                 Task { await model.deleteMessage(message) }
             }
-        } label: {
-            Image(systemName: "ellipsis.circle")
-                .font(.title3)
-                .foregroundStyle(.secondary)
-                .padding(.leading, 2)
         }
-        .buttonStyle(.plain)
     }
 
     // ─── Banners ────────────────────────────────────────────────────────────
