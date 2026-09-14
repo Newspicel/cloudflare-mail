@@ -14,6 +14,9 @@
       "!**/.wrangler",
       "!**/.claude",
       "!**/drizzle",
+      // Xcode owns the asset-catalog JSON in the iOS app and rewrites it on
+      // every edit; there is nothing else here for Biome to check.
+      "!apps/ios",
       "!apps/web/src/components/ui",
       "!apps/web/src/routeTree.gen.ts"
     ]

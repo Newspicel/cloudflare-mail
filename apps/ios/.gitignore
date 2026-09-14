@@ -1,0 +1,7 @@
+# Xcode build products and per-user state. The project file itself is checked
+# in; everything here is regenerated.
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcresult

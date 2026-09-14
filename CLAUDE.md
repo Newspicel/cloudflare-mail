@@ -11,6 +11,7 @@ Guidance for AI assistants. Only rules and intent you *can't* recover by reading
 - **IMAP** → `apps/worker/src/imap/*` (`protocol` wire, `session` state machine, `store` mail semantics)
 - **RBAC** → `apps/worker/src/permissions.ts`
 - **Deploy/bindings** → `apps/worker/wrangler.jsonc`
+- **iOS client** → `apps/ios/` (`README.md` there; `CFMail/Core/Models` mirrors `packages/shared`)
 - **Commands** → `package.json` scripts + `README.md`
 
 ## Invariants (don't break without approval)
@@ -46,5 +47,6 @@ Edit `schema.ts`, then `pnpm --filter @cfmail/db generate` to emit the `drizzle/
 - Push directly to `main`.
 - When a change touches an invariant above, ask before coding.
 - New rule worth keeping? Add it here as a rule, never as a state snapshot.
+- The iOS app has no dependencies and no generated project files; keep it that way.
 - Always use Shadcn wherever possible for UI consistency. Don't invent new components or styles. (Also Search online for Components if missing before implementing new ones.)
 - Ignore changes you didn't make. Because multiple parrallel agents can run. Only commit your changes.

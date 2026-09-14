@@ -14,6 +14,8 @@ A self-hostable, Gmail-style mail client that runs entirely on Cloudflare — on
 - **Inbound pipeline** — threading, spam scoring (auth + heuristics + optional Spamhaus and Workers AI), gateway PGP decrypt, one-click unsubscribe, calendar (`.ics`) parsing, blocklist
 - **IMAP4rev1 server** — read your mail in Apple Mail, Thunderbird or Outlook, with `IDLE` push, per-mailbox app passwords, and the same RBAC as the web app
 - **Push notifications** and a tracking-pixel image proxy
+- **Sender brand logos** — BIMI lookups, sanitized and cached, shown in the web app and on iOS
+- **Native iOS app** — SwiftUI client on the same API and SSE stream (`apps/ios`)
 - **Everything on Cloudflare** — no external database, no SMTP servers to run
 
 > Status: actively developed. Auth, RBAC, inbound/outbound mail, threading, search, labels/folders/rules, spam, PGP, reminders, calendar, push, temp GC, and SSE are wired end-to-end, with a Vitest suite covering the worker pipelines. Contributions welcome.
@@ -97,6 +99,7 @@ Bindings the Worker depends on (see `wrangler.jsonc`):
 
 ```
 apps/
+  ios/       # Native SwiftUI client (Xcode project, no dependencies)
   web/       # Vite + React 19 SPA (served as Static Assets from the Worker)
   worker/    # Cloudflare Worker — fetch + email + scheduled + UserHub DO
 packages/
@@ -112,6 +115,7 @@ Key files to orient from:
 - `apps/worker/src/permissions.ts` — single RBAC checker
 - `apps/worker/src/hub.ts` — SSE fan-out Durable Object
 - `packages/db/src/schema.ts` — data model
+- `apps/ios/README.md` — the iOS app (same API, same SSE stream, nothing extra to deploy)
 
 ## Quick start
 
