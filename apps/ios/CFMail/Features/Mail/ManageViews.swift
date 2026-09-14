@@ -4,6 +4,7 @@ import SwiftUI
 struct RemindersView: View {
     @Environment(AppModel.self) private var app
     @Environment(MailStore.self) private var mail
+    @Environment(\.mailNavigator) private var navigator
 
     @State private var rescheduling: Reminder?
 
@@ -44,7 +45,9 @@ struct RemindersView: View {
     }
 
     private func row(_ reminder: Reminder) -> some View {
-        NavigationLink(value: MailRoute.thread(id: reminder.threadId, mailboxId: reminder.mailboxId)) {
+        Button {
+            navigator.showThread(reminder.threadId, reminder.mailboxId)
+        } label: {
             HStack(alignment: .top, spacing: 11) {
                 Image(systemName: reminder.kind == .followUp ? "arrow.uturn.left.circle" : "bell.fill")
                     .foregroundStyle(reminder.status == .fired ? .orange : .secondary)
@@ -66,9 +69,15 @@ struct RemindersView: View {
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                 }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.tertiary)
             }
             .padding(.vertical, 3)
+            .contentShape(.rect)
         }
+        .buttonStyle(.plain)
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             Button(role: .destructive) {
                 Task { await mail.deleteReminder(reminder) }
@@ -407,6 +416,7 @@ struct EditNamedColorSheet: View {
 
 /// Disposable addresses: random local part, TTL, collected by the Worker's cron.
 struct TempMailboxSheet: View {
+    @Environment(AppModel.self) private var app
     @Environment(MailStore.self) private var mail
     @Environment(\.dismiss) private var dismiss
 
@@ -452,7 +462,7 @@ struct TempMailboxSheet: View {
                     Text(error).font(.footnote).foregroundStyle(.red)
                 }
             }
-            .navigationTitle("Disposable address")
+            .navigationTitle("Disposable Address")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
@@ -470,6 +480,7 @@ struct TempMailboxSheet: View {
                 }
             }
         }
+        .bannerHost()
     }
 
     private func create() async {
@@ -480,6 +491,7 @@ struct TempMailboxSheet: View {
                 domainId: domainId, ttlSeconds: ttl, displayName: label
             )
             await mail.refreshCatalogue()
+            app.show("Disposable address created.", kind: .success)
             dismiss()
         } catch {
             self.error = error.localizedDescription

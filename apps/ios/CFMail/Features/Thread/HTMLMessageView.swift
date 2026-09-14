@@ -76,9 +76,9 @@ struct HTMLMessageView: UIViewRepresentable {
             overflow-x: hidden;
           }
           body {
+            /* The system body font at the reader's Dynamic Type size. */
             font: -apple-system-body;
-            font-family: -apple-system, system-ui, "SF Pro Text", sans-serif;
-            font-size: 16px; line-height: 1.45;
+            line-height: 1.45;
             color: light-dark(#1c1c1e, #f2f2f7);
             word-break: break-word; overflow-wrap: anywhere;
           }

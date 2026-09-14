@@ -60,6 +60,9 @@ final class ComposeModel {
 
     private var saveTask: Task<Void, Never>?
     private var loadedSignatureFor: String?
+    /// Set once the message is sent or discarded: an autosave that was already
+    /// in flight must not resurrect it as a fresh draft.
+    private var isClosed = false
 
     init(context: ComposeContext, client: APIClient, app: AppModel, mail: MailStore) {
         self.context = context
@@ -88,13 +91,23 @@ final class ComposeModel {
             quote = MessageQuoteRef(messageId: message.id, kind: .reply)
             inReplyTo = message.messageIdHdr
             references = (message.references ?? []) + [message.messageIdHdr].compactMap(\.self)
-            // Reply goes back to the sender; reply-all adds the other recipients
-            // minus this mailbox's own address.
+            // Reply goes back to the sender — or, replying to something this
+            // mailbox sent, back to whoever it was sent to. Reply-all adds the
+            // other recipients minus this mailbox's own address.
             let own = mail.mailbox(id: message.mailboxId)?.address.lowercased()
-            to = [message.sender]
+            if message.isInbound {
+                to = [message.sender]
+            } else {
+                to = Self.deduplicated(message.toAddrs)
+                if to.isEmpty { to = [message.sender] }
+            }
             if replyAll {
+                let chosen = Set(to.map { $0.address.lowercased() })
                 let others = (message.toAddrs + (message.ccAddrs ?? []))
-                    .filter { $0.address.lowercased() != own && $0.address.lowercased() != message.fromAddr.lowercased() }
+                    .filter {
+                        let address = $0.address.lowercased()
+                        return address != own && address != message.fromAddr.lowercased() && !chosen.contains(address)
+                    }
                 cc = Self.deduplicated(others)
                 showsCcBcc = !cc.isEmpty
             }
@@ -242,7 +255,7 @@ final class ComposeModel {
 
     @discardableResult
     func saveDraft(silent: Bool) async -> Bool {
-        guard hasContent, !mailboxId.isEmpty else { return false }
+        guard !isClosed, hasContent, !mailboxId.isEmpty else { return false }
         isSavingDraft = true
         defer { isSavingDraft = false }
         let input = DraftInput(
@@ -263,6 +276,11 @@ final class ComposeModel {
                 _ = try await client.updateDraft(draftId, input)
             } else {
                 let created = try await client.createDraft(input)
+                if isClosed {
+                    // Sent or discarded while this save was on the wire.
+                    try? await client.deleteDraft(created.id)
+                    return false
+                }
                 draftId = created.id
             }
             if !silent { app.show("Draft saved.", kind: .success) }
@@ -276,6 +294,7 @@ final class ComposeModel {
 
     func discardDraft() async {
         saveTask?.cancel()
+        isClosed = true
         guard let draftId else { return }
         do {
             try await client.deleteDraft(draftId)
@@ -284,6 +303,10 @@ final class ComposeModel {
             app.handle(error)
         }
     }
+
+    /// Whether closing without a prompt would still leave a draft behind —
+    /// everything typed was deleted again, but an autosave already ran.
+    var hasStaleDraft: Bool { draftId != nil && !hasContent }
 
     // ─── Sending ────────────────────────────────────────────────────────────
 
@@ -310,9 +333,10 @@ final class ComposeModel {
         guard canSend else { return false }
         isSending = true
         defer { isSending = false }
+        saveTask?.cancel()
         do {
             let result = try await client.sendMessage(payload())
-            saveTask?.cancel()
+            isClosed = true
             if let draftId { try? await client.deleteDraft(draftId) }
             if let warning = result.pgpWarning {
                 app.show(warning, kind: .info)
@@ -339,6 +363,7 @@ final class ComposeModel {
         }
         do {
             try await client.scheduleDraft(draftId, sendAt: date, payload: payload())
+            isClosed = true
             app.show("Scheduled for \(date.formatted(date: .abbreviated, time: .shortened)).", kind: .success)
             await mail.refreshEverything()
             return true

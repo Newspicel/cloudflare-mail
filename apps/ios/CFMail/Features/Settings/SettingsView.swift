@@ -159,6 +159,7 @@ struct SettingsView: View {
                     .presentationDetents([.medium])
             }
         }
+        .bannerHost()
     }
 
     private static var version: String {

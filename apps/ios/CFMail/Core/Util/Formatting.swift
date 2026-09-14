@@ -60,15 +60,18 @@ nonisolated enum Fmt {
         return palette[Int(hash % UInt64(palette.count))]
     }
 
-    /// Participant summary for a thread row ("Ada, Grace" / "Ada + 3").
+    /// Participant summary for a thread row, the way Mail abbreviates: one
+    /// correspondent by full name ("Ada Lovelace"), two by first names ("Ada,
+    /// Grace"), more as "Ada, Grace & 2 more".
     static func participants(_ people: [AddressObject], fallback: String = "(unknown)") -> String {
+        guard !people.isEmpty else { return fallback }
+        if people.count == 1 { return people[0].displayName }
         let names = people.map { person -> String in
             if let name = person.name?.nilIfBlank { return name.split(separator: " ").first.map(String.init) ?? name }
             return String(person.address.prefix(while: { $0 != "@" }))
         }
-        guard !names.isEmpty else { return fallback }
-        if names.count <= 2 { return names.joined(separator: ", ") }
-        return "\(names[0]) + \(names.count - 1)"
+        if names.count == 2 { return names.joined(separator: ", ") }
+        return "\(names[0]), \(names[1]) & \(names.count - 2) more"
     }
 
     /// `YYYY-MM-DD` for the search API's date filters.

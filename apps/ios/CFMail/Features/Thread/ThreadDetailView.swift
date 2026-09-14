@@ -4,7 +4,7 @@ struct ThreadDetailView: View {
     @Environment(AppModel.self) private var app
     @Environment(MailStore.self) private var mail
     @Environment(\.composeAction) private var composeAction
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.mailNavigator) private var navigator
 
     let threadId: String
     let mailboxId: String
@@ -16,23 +16,47 @@ struct ThreadDetailView: View {
 
     var body: some View {
         Group {
-            if let model {
+            if let model, model.threadId == threadId {
                 content(model)
             } else {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .background(Color(.systemGroupedBackground))
-        .navigationTitle(model?.subject ?? "Conversation")
+        .background(Color(.systemBackground))
+        // Mail keeps the bar clear of the subject — it's the first line of the
+        // page, and the arrows to step through the list are what belong up here.
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
-        .task {
-            guard model == nil else { return }
+        .toolbar { toolbar }
+        // Stepping to a neighbour changes `threadId` in place; a fresh model
+        // loads the new conversation without re-pushing the screen.
+        .task(id: threadId) {
             let created = ThreadDetailModel(
                 threadId: threadId, mailboxId: mailboxId,
                 client: mail.client, app: app, mail: mail
             )
             model = created
             await created.load(markRead: app.prefs.marksReadOnOpen)
+        }
+        .sheet(isPresented: $showingRemind) {
+            RemindSheet(threadId: threadId, mailboxId: mailboxId, messageId: model?.newest?.id)
+                .environment(app)
+                .environment(mail)
+                .presentationDetents([.medium])
+        }
+        .sheet(isPresented: $showingLabels) {
+            if let thread = model?.thread {
+                LabelPickerSheet(thread: thread)
+                    .environment(app)
+                    .environment(mail)
+                    .presentationDetents([.medium])
+            }
+        }
+        .sheet(item: $folderPicker) { request in
+            FolderPickerSheet(threadIds: request.threadIds)
+                .environment(app)
+                .environment(mail)
+                .presentationDetents([.medium, .large])
         }
     }
 
@@ -66,9 +90,9 @@ struct ThreadDetailView: View {
                 if let error = model.error, model.messages.isEmpty {
                     EmptyState(
                         symbol: "exclamationmark.triangle",
-                        title: "Couldn't open this conversation",
+                        title: "Couldn't Open This Conversation",
                         message: error,
-                        actionTitle: "Try again"
+                        actionTitle: "Try Again"
                     ) {
                         Task { await model.reload() }
                     }
@@ -82,7 +106,6 @@ struct ThreadDetailView: View {
                 }
             }
         }
-        .background(Color(.systemBackground))
         .refreshable { await model.reload() }
         .userActivity(ThreadActivity.type, isActive: !model.messages.isEmpty) { activity in
             let built = ThreadActivity.make(
@@ -95,27 +118,6 @@ struct ThreadDetailView: View {
             activity.isEligibleForHandoff = true
             activity.webpageURL = built.webpageURL
         }
-        .toolbar { toolbar(model) }
-
-        .sheet(isPresented: $showingRemind) {
-            RemindSheet(threadId: threadId, mailboxId: mailboxId, messageId: model.newest?.id)
-                .environment(app)
-                .environment(mail)
-                .presentationDetents([.medium])
-        }
-        .sheet(isPresented: $showingLabels) {
-            if let thread = model.thread {
-                LabelPickerSheet(thread: thread)
-                    .environment(app)
-                    .environment(mail)
-                    .presentationDetents([.medium])
-            }
-        }
-        .sheet(item: $folderPicker) { request in
-            FolderPickerSheet(threadIds: request.threadIds)
-                .environment(mail)
-                .presentationDetents([.medium, .large])
-        }
     }
 
     // ─── Header ─────────────────────────────────────────────────────────────
@@ -123,30 +125,35 @@ struct ThreadDetailView: View {
     private func headerBlock(_ model: ThreadDetailModel) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(model.subject)
-                .font(.title3.weight(.bold))
+                .font(.title3.weight(.semibold))
                 .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
 
-            HStack(spacing: 6) {
-                if let mailbox = model.mailbox, mail.scope.isAllMail || mail.scope.folderId != nil {
-                    Text(mailbox.address)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                if model.messages.count > 1 {
-                    Text("\(model.messages.count) messages")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                ForEach(mail.labels(for: threadId)) { label in
-                    ColorChip(text: label.name, hex: label.color)
+            let labels = mail.labels(for: threadId)
+            let showsMailbox = model.mailbox != nil && (mail.scope.isAllMail || mail.scope.folderId != nil)
+            if model.messages.count > 1 || showsMailbox || !labels.isEmpty {
+                HStack(spacing: 6) {
+                    if showsMailbox, let mailbox = model.mailbox {
+                        Text(mailbox.address)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    if model.messages.count > 1 {
+                        Text("\(model.messages.count) messages")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(labels) { label in
+                        ColorChip(text: label.name, hex: label.color)
+                    }
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
-        .padding(.top, 12)
-        .padding(.bottom, 14)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
     }
 
     // ─── AI ─────────────────────────────────────────────────────────────────
@@ -155,7 +162,7 @@ struct ThreadDetailView: View {
     private func aiBlock(_ model: ThreadDetailModel) -> some View {
         if let bullets = model.summaryBullets, !bullets.isEmpty {
             VStack(alignment: .leading, spacing: 7) {
-                Label("Catch-up", systemImage: "sparkles")
+                Label("Summary", systemImage: "sparkles")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.purple)
                 ForEach(Array(bullets.enumerated()), id: \.offset) { _, bullet in
@@ -178,7 +185,7 @@ struct ThreadDetailView: View {
                     } else {
                         Image(systemName: "sparkles")
                     }
-                    Text(model.isSummarizing ? "Summarizing…" : "Catch me up on this thread")
+                    Text(model.isSummarizing ? "Summarizing…" : "Summarize this conversation")
                     Spacer()
                 }
                 .font(.subheadline)
@@ -192,7 +199,7 @@ struct ThreadDetailView: View {
 
     private func smartReplyBlock(_ model: ThreadDetailModel) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("Suggested replies", systemImage: "sparkles")
+            Label("Suggested Replies", systemImage: "sparkles")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.purple)
             ForEach(Array(model.smartReplies.enumerated()), id: \.offset) { _, suggestion in
@@ -221,104 +228,145 @@ struct ThreadDetailView: View {
 
     // ─── Chrome ─────────────────────────────────────────────────────────────
 
+    /// Mail's message chrome: previous/next arrows up top; Trash, Move, then
+    /// the reply menu and Compose along the bottom.
     @ToolbarContentBuilder
-    private func toolbar(_ model: ThreadDetailModel) -> some ToolbarContent {
-        if let thread = model.thread {
-            ToolbarItem(placement: .bottomBar) {
-                Button("Move to Trash", systemImage: "trash", role: .destructive) {
-                    Task {
-                        await mail.trash(thread)
-                        dismiss()
+    private var toolbar: some ToolbarContent {
+        let neighbours = mail.neighbours(of: threadId)
+        if neighbours.previous != nil || neighbours.next != nil {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button("Previous", systemImage: "chevron.up") {
+                    if let previous = neighbours.previous {
+                        navigator.showThread(previous.id, previous.mailboxId)
                     }
                 }
-            }
-            ToolbarItem(placement: .bottomBar) {
-                Button("File", systemImage: "folder") {
-                    folderPicker = FolderPickerRequest(threadIds: [threadId])
+                .disabled(neighbours.previous == nil)
+                Button("Next", systemImage: "chevron.down") {
+                    if let next = neighbours.next {
+                        navigator.showThread(next.id, next.mailboxId)
+                    }
                 }
+                .disabled(neighbours.next == nil)
+            }
+        }
+
+        ToolbarItem(placement: .bottomBar) {
+            Button("Move to Trash", systemImage: "trash") {
+                guard let thread = model?.thread else { return }
+                Task {
+                    await mail.trash(thread)
+                    navigator.closeThread()
+                }
+            }
+            .disabled(model?.thread == nil)
+        }
+        ToolbarItem(placement: .bottomBar) {
+            Button("Move", systemImage: "folder") {
+                folderPicker = FolderPickerRequest(threadIds: [threadId])
             }
         }
         ToolbarSpacer(.flexible, placement: .bottomBar)
-        if model.canWrite, let target = model.latestInbound ?? model.newest {
+        ToolbarItem(placement: .bottomBar) {
+            actionsMenu
+        }
+        if model?.canWrite == true {
             ToolbarItem(placement: .bottomBar) {
-                Menu {
-                    Button("Reply", systemImage: "arrowshape.turn.up.left") {
-                        reply(to: target, kind: .reply, replyAll: false)
-                    }
-                    Button("Reply all", systemImage: "arrowshape.turn.up.left.2") {
-                        reply(to: target, kind: .reply, replyAll: true)
-                    }
-                    Button("Forward", systemImage: "arrowshape.turn.up.right") {
-                        reply(to: target, kind: .forward, replyAll: false)
-                    }
-                    if model.hasAI {
-                        Divider()
-                        Button("Suggest replies", systemImage: "sparkles") {
-                            Task { await model.draftReplies() }
-                        }
-                    }
-                } label: {
-                    Label("Reply", systemImage: "arrowshape.turn.up.left")
-                } primaryAction: {
-                    reply(to: target, kind: .reply, replyAll: app.prefs.replyAllDefault ?? false)
-                }
-            }
-            ToolbarItem(placement: .bottomBar) {
-                Button("New message", systemImage: "square.and.pencil") {
+                Button("New Message", systemImage: "square.and.pencil") {
                     composeAction(ComposeContext(kind: .new, mailboxId: mailboxId))
                 }
             }
         }
-        ToolbarItem(placement: .topBarTrailing) {
+    }
+
+    /// Mail folds every message action into the reply button's menu; the
+    /// button itself replies. A read-only mailbox keeps the menu, minus the
+    /// parts that would send.
+    @ViewBuilder
+    private var actionsMenu: some View {
+        let canWrite = model?.canWrite == true
+        let target = model.flatMap { $0.latestInbound ?? $0.newest }
+        if canWrite, let target {
             Menu {
-                Button("Mark unread", systemImage: "envelope.badge") {
-                    Task {
-                        await model.markUnread()
-                        dismiss()
-                    }
-                }
-                Button("Remind me…", systemImage: "bell") { showingRemind = true }
-                if !mail.activeLabels.isEmpty {
-                    Button("Labels…", systemImage: "tag") { showingLabels = true }
-                }
-                Button("File…", systemImage: "folder") {
-                    folderPicker = FolderPickerRequest(threadIds: [threadId])
-                }
-                if model.hasAI {
-                    Button("Catch me up", systemImage: "sparkles") {
-                        Task { await model.summarize() }
-                    }
-                }
-                if let web = ThreadActivity.webURL(
-                    threadId: threadId, mailboxId: mailboxId, baseURL: mail.client.baseURL
-                ) {
-                    ShareLink(item: web) {
-                        Label("Share link", systemImage: "square.and.arrow.up")
-                    }
-                }
-                Divider()
-                if let thread = model.thread {
-                    if thread.spam {
-                        Button("Not spam", systemImage: "hand.thumbsup") {
-                            Task {
-                                await mail.markSpam(thread, spam: false)
-                                dismiss()
-                            }
-                        }
-                    } else {
-                        Button("Report spam", systemImage: "exclamationmark.octagon") {
-                            Task {
-                                await mail.markSpam(thread, spam: true)
-                                dismiss()
-                            }
-                        }
-                    }
-                    Button("Star", systemImage: "star") {
-                        Task { await mail.toggleStar(thread) }
-                    }
-                }
+                menuItems(canWrite: true, target: target)
             } label: {
-                Label("More", systemImage: "ellipsis")
+                Label("Reply", systemImage: "arrowshape.turn.up.left")
+            } primaryAction: {
+                reply(to: target, kind: .reply, replyAll: app.prefs.replyAllDefault ?? false)
+            }
+            .disabled(model?.messages.isEmpty ?? true)
+        } else {
+            Menu {
+                menuItems(canWrite: false, target: nil)
+            } label: {
+                Label("More", systemImage: "ellipsis.circle")
+            }
+            .disabled(model?.messages.isEmpty ?? true)
+        }
+    }
+
+    @ViewBuilder
+    private func menuItems(canWrite: Bool, target: Message?) -> some View {
+        if canWrite, let target {
+            Button("Reply", systemImage: "arrowshape.turn.up.left") {
+                reply(to: target, kind: .reply, replyAll: false)
+            }
+            Button("Reply All", systemImage: "arrowshape.turn.up.left.2") {
+                reply(to: target, kind: .reply, replyAll: true)
+            }
+            Button("Forward", systemImage: "arrowshape.turn.up.right") {
+                reply(to: target, kind: .forward, replyAll: false)
+            }
+            Divider()
+        }
+        if let thread = model?.thread {
+            Button("Star", systemImage: "star") {
+                Task { await mail.toggleStar(thread) }
+            }
+        }
+        Button("Mark as Unread", systemImage: "envelope.badge") {
+            Task {
+                await model?.markUnread()
+                navigator.closeThread()
+            }
+        }
+        Button("Remind Me…", systemImage: "bell") { showingRemind = true }
+        if !mail.activeLabels.isEmpty {
+            Button("Labels…", systemImage: "tag") { showingLabels = true }
+        }
+        if model?.hasAI == true {
+            Divider()
+            Button("Summarize", systemImage: "sparkles") {
+                Task { await model?.summarize() }
+            }
+            if canWrite {
+                Button("Suggest Replies", systemImage: "text.bubble") {
+                    Task { await model?.draftReplies() }
+                }
+            }
+        }
+        Divider()
+        if let thread = model?.thread {
+            if thread.spam {
+                Button("Not Spam", systemImage: "hand.thumbsup") {
+                    Task {
+                        await mail.markSpam(thread, spam: false)
+                        navigator.closeThread()
+                    }
+                }
+            } else {
+                Button("Report Spam", systemImage: "xmark.bin") {
+                    Task {
+                        await mail.markSpam(thread, spam: true)
+                        navigator.closeThread()
+                    }
+                }
+            }
+        }
+        if let web = ThreadActivity.webURL(
+            threadId: threadId, mailboxId: mailboxId, baseURL: mail.client.baseURL
+        ) {
+            ShareLink(item: web) {
+                Label("Share Link", systemImage: "square.and.arrow.up")
             }
         }
     }
@@ -395,7 +443,7 @@ struct RemindSheet: View {
                         .lineLimit(1...4)
                 }
             }
-            .navigationTitle("Remind me")
+            .navigationTitle("Remind Me")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
@@ -405,6 +453,7 @@ struct RemindSheet: View {
                 }
             }
         }
+        .bannerHost()
     }
 
     private func create() async {

@@ -91,19 +91,16 @@ struct CategoryChip: View {
     }
 }
 
-struct CountBadge: View {
+/// Mail's mailbox count: plain secondary digits to the right of the row.
+struct SidebarCount: View {
     let count: Int
-    var tint: Color = .accentColor
 
     var body: some View {
         if count > 0 {
-            Text(count > 999 ? "999+" : "\(count)")
-                .font(.caption2.weight(.semibold))
+            Text(count.formatted())
+                .font(.body)
+                .foregroundStyle(.secondary)
                 .monospacedDigit()
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(tint, in: .capsule)
-                .foregroundStyle(.white)
         }
     }
 }
@@ -217,28 +214,37 @@ struct LoadingFooter: View {
     }
 }
 
-/// Live/reconnecting pip for the SSE connection, shown only when not live.
-struct ConnectionPip: View {
-    let state: ConnectionState
+/// Shows the app's transient banner over whatever it is attached to. The root
+/// view hosts one, and so does every sheet — a sheet covers the root's, and a
+/// failure raised inside the composer has to land somewhere the reader can
+/// see it.
+private struct BannerHost: ViewModifier {
+    @Environment(AppModel.self) private var app
+    var bottomPadding: CGFloat
 
-    var body: some View {
-        if state != .live {
-            HStack(spacing: 5) {
-                if state == .connecting {
-                    ProgressView().controlSize(.mini)
-                } else {
-                    Image(systemName: "bolt.horizontal.circle")
+    func body(content: Content) -> some View {
+        content
+            .overlay(alignment: .bottom) {
+                if let banner = app.banner {
+                    BannerOverlay(
+                        banner: banner,
+                        onUndo: { app.performUndo() },
+                        onDismiss: { app.dismissBanner() }
+                    )
+                    .padding(.bottom, bottomPadding)
                 }
-                Text(state == .connecting ? "Reconnecting" : "Offline")
             }
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-            .transition(.opacity)
-        }
+            .animation(.snappy(duration: 0.25), value: app.banner)
     }
 }
 
 extension View {
+    /// Host the transient banner here. `bottomPadding` lifts it clear of a
+    /// bottom toolbar when the screen has one.
+    func bannerHost(bottomPadding: CGFloat = 12) -> some View {
+        modifier(BannerHost(bottomPadding: bottomPadding))
+    }
+
     /// Applies a modifier only when a condition holds — used sparingly, for
     /// platform-shaped layout differences.
     @ViewBuilder

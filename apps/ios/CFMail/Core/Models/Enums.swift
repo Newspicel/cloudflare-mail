@@ -195,21 +195,24 @@ nonisolated enum MailView: String, Codable, Sendable, CaseIterable, Identifiable
         case .marked: "Starred"
         case .spam: "Spam"
         case .trash: "Trash"
-        case .all: "All mail"
+        case .all: "All Mail"
         }
     }
 
     var symbol: String {
         switch self {
         case .inbox: "tray"
-        case .drafts: "doc.text"
+        case .drafts: "doc"
         case .sent: "paperplane"
         case .marked: "star"
-        case .spam: "exclamationmark.octagon"
+        case .spam: "xmark.bin"
         case .trash: "trash"
-        case .all: "archivebox"
+        case .all: "tray.full"
         }
     }
+
+    /// Mail tints every mailbox glyph with the app colour except Flagged.
+    var tintIsOrange: Bool { self == .marked }
 
     /// Views whose badge counts unread rather than total.
     var badgeCountsUnread: Bool { self == .inbox || self == .spam }

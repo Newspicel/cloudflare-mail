@@ -54,6 +54,8 @@ struct RecipientField: View {
     @Binding var people: [AddressObject]
     var contacts: [Contact]
     var blocked: Set<String> = []
+    /// Mail's ⊕ at the end of the row, opening a contact list.
+    var onPickContact: (() -> Void)?
     var onChange: () -> Void
 
     @State private var input = ""
@@ -76,10 +78,9 @@ struct RecipientField: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 8) {
-                Text(title)
-                    .font(.subheadline)
+                Text("\(title):")
+                    .font(.body)
                     .foregroundStyle(.secondary)
-                    .frame(width: 38, alignment: .leading)
                     .padding(.top, 7)
 
                 VStack(alignment: .leading, spacing: 6) {
@@ -90,7 +91,7 @@ struct RecipientField: View {
                             }
                         }
                     }
-                    TextField(people.isEmpty ? "Email address" : "", text: $input)
+                    TextField("", text: $input)
                         .textContentType(.emailAddress)
                         .keyboardType(.emailAddress)
                         .textInputAutocapitalization(.never)
@@ -99,13 +100,27 @@ struct RecipientField: View {
                         .focused($focused)
                         .onSubmit { commit() }
                         .onChange(of: input) { _, value in
-                            // Typing a separator finishes the address, the way
-                            // every mail client behaves.
-                            if value.hasSuffix(",") || value.hasSuffix(" ") || value.hasSuffix(";") {
-                                commit()
-                            }
+                            // A separator after something address-shaped
+                            // finishes it, the way every mail client behaves.
+                            // A space inside a name ("Ada Lovelace <…>") is
+                            // just typing.
+                            let separator = value.hasSuffix(",") || value.hasSuffix(";")
+                                || (value.hasSuffix(" ") && value.contains("@") && !value.contains("<"))
+                            if separator { commit() }
                         }
                         .padding(.vertical, 6)
+                        .accessibilityLabel(title)
+                }
+
+                if let onPickContact {
+                    Button(action: onPickContact) {
+                        Image(systemName: "plus.circle")
+                            .font(.title3)
+                            .foregroundStyle(Color.accentColor)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 5)
+                    .accessibilityLabel("Add contact")
                 }
             }
             .padding(.horizontal, 16)
@@ -144,35 +159,51 @@ struct RecipientField: View {
         }
     }
 
+    /// A recipient token. Tapping it shows the full address and offers to
+    /// remove it, rather than removing on the first touch.
     private func chip(_ person: AddressObject) -> some View {
         let isBlocked = blocked.contains(person.address.lowercased())
-        return HStack(spacing: 4) {
-            Text(person.displayName)
-                .font(.subheadline)
-                .lineLimit(1)
-            Image(systemName: "xmark.circle.fill")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        return Menu {
+            Section(person.formatted) {
+                Button("Copy Address", systemImage: "doc.on.doc") {
+                    UIPasteboard.general.string = person.address
+                }
+                Button("Remove", systemImage: "minus.circle", role: .destructive) {
+                    people.removeAll { $0.address == person.address }
+                    onChange()
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                if isBlocked {
+                    Image(systemName: "hand.raised.fill").font(.caption2)
+                }
+                Text(person.displayName)
+                    .font(.subheadline)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(
+                (isBlocked ? Color.red.opacity(0.16) : Color.accentColor.opacity(0.13)),
+                in: .capsule
+            )
+            .foregroundStyle(isBlocked ? Color.red : Color.accentColor)
+            .contentShape(.capsule)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(
-            (isBlocked ? Color.red.opacity(0.16) : Color.accentColor.opacity(0.13)),
-            in: .capsule
-        )
-        .foregroundStyle(isBlocked ? Color.red : Color.primary)
-        .contentShape(.capsule)
-        .onTapGesture {
-            people.removeAll { $0.address == person.address }
-            onChange()
-        }
-        .accessibilityLabel("\(person.formatted), tap to remove")
+        .buttonStyle(.plain)
+        .accessibilityLabel(person.formatted)
     }
 
     private func commit() {
         let raw = input.trimmingCharacters(in: CharacterSet(charactersIn: " ,;"))
+        guard let parsed = Self.parse(raw) else {
+            // Not an address yet — keep what was typed so it can be finished,
+            // minus the separator that triggered the attempt.
+            input = raw
+            return
+        }
         input = ""
-        guard let parsed = Self.parse(raw) else { return }
         add(parsed)
     }
 
