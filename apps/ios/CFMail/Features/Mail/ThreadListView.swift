@@ -37,8 +37,8 @@ struct ThreadListView: View {
             }
         }
         .navigationTitle(isSelecting ? selectionTitle : mail.title)
-        .navigationBarTitleDisplayMode(isSelecting ? .inline : .large)
-        .navigationSubtitle(isSelecting || search.isActive ? "" : (mail.subtitle ?? ""))
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationSubtitle(isSelecting ? "" : subtitle)
         .navigationBarBackButtonHidden(isSelecting)
         .refreshable {
             if search.isActive {
@@ -50,8 +50,8 @@ struct ThreadListView: View {
         .searchable(
             text: $searchText,
             isPresented: $isSearchPresented,
-            placement: .automatic,
-            prompt: "Search"
+            placement: .navigationBarDrawer(displayMode: .always),
+            prompt: "Search mail"
         )
         .onChange(of: searchText) { _, value in
             search.text = value
@@ -373,6 +373,11 @@ struct ThreadListView: View {
 
     @ToolbarContentBuilder
     private var browsingToolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            if !search.isActive {
+                viewMenu
+            }
+        }
         ToolbarItem(placement: .topBarTrailing) {
             if search.isActive {
                 Button("Filters", systemImage: "line.3.horizontal.decrease.circle") {
@@ -399,6 +404,7 @@ struct ThreadListView: View {
         ToolbarItem(placement: .bottomBar) {
             statusText
         }
+        .sharedBackgroundVisibility(.hidden)
         ToolbarSpacer(.flexible, placement: .bottomBar)
         ToolbarItem(placement: .bottomBar) {
             Button("New Message", systemImage: "square.and.pencil") {
@@ -409,27 +415,33 @@ struct ThreadListView: View {
     }
 
     /// Mail's reassurance line in the middle of the bottom bar: when the list
-    /// last came back, and what's unread. Re-evaluated each minute so "Just
-    /// Now" ages into a time on its own.
+    /// last came back from the server, or what it's doing right now.
     private var statusText: some View {
-        TimelineView(.periodic(from: .now, by: 60)) { context in
-            VStack(spacing: 1) {
-                Text(updatedLine(at: context.date))
+        VStack(spacing: 1) {
+            Text(updatedLine)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            if mail.unreadOnly {
+                Text("Filtered by: Unread")
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
-                if mail.unreadOnly {
-                    Text("Filtered by: Unread")
-                        .font(.caption2)
-                        .foregroundStyle(Color.accentColor)
-                } else if let line = countLine {
-                    Text(line)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.accentColor)
+            }
+        }
+        .fixedSize()
+    }
+
+    private var viewMenu: some View {
+        Menu {
+            Picker("View", selection: Binding(get: { mail.view }, set: { mail.view = $0 })) {
+                ForEach(mail.availableViews) { view in
+                    Label(view.title, systemImage: view.symbol).tag(view)
                 }
             }
-            .fixedSize()
-            .monospacedDigit()
+            .pickerStyle(.inline)
+        } label: {
+            Label(mail.view.title, systemImage: mail.view.symbol)
         }
+        .disabled(mail.scope.folderId != nil)
     }
 
     private var overflowMenu: some View {
@@ -521,7 +533,13 @@ struct ThreadListView: View {
         mail.clearSelection()
     }
 
-    private func updatedLine(at now: Date) -> String {
+    /// Scope plus how much is in it — the list's own header has no room.
+    private var subtitle: String {
+        guard let scope = mail.subtitle else { return statusLine }
+        return search.isActive ? scope : "\(scope) · \(statusLine)"
+    }
+
+    private var updatedLine: String {
         switch mail.connection {
         case .connecting: return "Connecting…"
         case .offline: return "Offline"
@@ -529,21 +547,20 @@ struct ThreadListView: View {
         }
         if mail.isLoadingList { return "Checking for Mail…" }
         guard let updated = mail.lastUpdated else { return "Updated" }
-        return now.timeIntervalSince(updated) < 60
+        return Date.now.timeIntervalSince(updated) < 60
             ? "Updated Just Now"
             : "Updated \(updated.formatted(date: .omitted, time: .shortened))"
     }
 
-    private var countLine: String? {
+    private var statusLine: String {
         if mail.view == .drafts {
-            return mail.drafts.isEmpty ? nil : "\(mail.drafts.count) Drafts"
+            return mail.drafts.isEmpty ? "No drafts" : "\(mail.drafts.count) drafts"
         }
-        guard mail.scope.folderId == nil else { return nil }
         let count = mail.count(mail.view)
-        if mail.view.badgeCountsUnread {
-            return count.unread > 0 ? "\(count.unread) Unread" : nil
+        if mail.view.badgeCountsUnread, count.unread > 0 {
+            return "\(count.unread) unread · \(count.total)"
         }
-        return count.total > 0 ? "\(count.total) Messages" : nil
+        return count.total == 1 ? "1 conversation" : "\(count.total) conversations"
     }
 
     private var defaultComposeMailbox: String? {
