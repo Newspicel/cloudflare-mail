@@ -18,6 +18,7 @@ import { openCompose } from "@/components/compose-dock.tsx";
 import { EmailFrame } from "@/components/email-frame.tsx";
 import { LabelChips } from "@/components/labels-menu.tsx";
 import { MessageMenu } from "@/components/message-menu.tsx";
+import { SenderAvatar } from "@/components/sender-avatar.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
@@ -205,7 +206,8 @@ export function MessageCard({
       className="overflow-hidden rounded-lg border bg-card shadow-black/[0.02] shadow-sm"
     >
       <header className="flex items-start justify-between gap-4 border-b px-4 py-2.5">
-        <div className="min-w-0">
+        <SenderAvatar name={msg.fromName ?? undefined} address={msg.fromAddr} size={32} />
+        <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5 font-semibold text-[13px]">
             <SenderLock msg={msg} />
             <span className="truncate">

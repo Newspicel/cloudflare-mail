@@ -15,6 +15,7 @@ import {
 } from "@/lib/queries.ts";
 import { formatStamp } from "@/lib/time.ts";
 import { useSwipeRow } from "@/lib/use-swipe-row.ts";
+import { SenderAvatar } from "./sender-avatar.tsx";
 import { LabelChip } from "./ui.tsx";
 
 /** One side of a swipe gesture: the reveal colour/icon and the action to run. */
@@ -163,7 +164,13 @@ export function ThreadRowView({
   const body = (
     <>
       <div className="flex items-center justify-between gap-2">
-        <span className={cn("truncate", unread && "font-semibold")}>{label}</span>
+        <SenderAvatar
+          name={firstParticipant?.name}
+          address={firstParticipant?.address ?? ""}
+          size={compact ? 22 : 26}
+          className="mr-0.5"
+        />
+        <span className={cn("min-w-0 flex-1 truncate", unread && "font-semibold")}>{label}</span>
         <span className="ml-2 shrink-0 text-[11px] text-muted-foreground">
           {formatStamp(thread.lastMsgAt, fmt)}
         </span>

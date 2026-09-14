@@ -1047,3 +1047,33 @@ export const imapUid = sqliteTable(
     index("imap_uid_message_idx").on(t.messageId),
   ],
 );
+
+// ─── BIMI ───────────────────────────────────────────────────────────────────
+
+// Cached Brand Indicators for Message Identification (RFC 9162-adjacent; the
+// BIMI draft) logos, keyed by the sender's organizational domain. A lookup is a
+// DNS TXT query plus an HTTPS fetch of an SVG, so it is cached rather than done
+// per message — including negative results, which are the common case.
+//
+// `svg` holds the sanitized document inline: BIMI caps a logo at 32 KB, which
+// is well inside a D1 row, and keeping it here means no second store to keep in
+// step with the TTL. Null `svg` with status "none" is a remembered miss.
+export const bimiLogo = sqliteTable(
+  "bimi_logo",
+  {
+    // Organizational domain the record was found on ("github.com").
+    domain: text("domain").primaryKey(),
+    // "ok" when a logo was fetched, "none" when the domain publishes none (or
+    // published something unusable).
+    status: text("status", { enum: ["ok", "none"] }).notNull(),
+    svg: text("svg"),
+    // The `l=` URL the logo came from, kept for debugging a wrong logo.
+    source: text("source"),
+    // Whether the record carried an `a=` VMC. Not verified — surfacing that a
+    // mark is merely *asserted* is honest; claiming it is verified would not be.
+    hasAuthority: integer("has_authority", { mode: "boolean" }).notNull().default(false),
+    fetchedAt: integer("fetched_at", { mode: "timestamp" }).notNull().default(now),
+    expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+  },
+  (t) => [index("bimi_logo_expires_idx").on(t.expiresAt)],
+);
