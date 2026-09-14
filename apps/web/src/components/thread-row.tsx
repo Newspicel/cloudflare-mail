@@ -16,6 +16,7 @@ import {
 import { formatStamp } from "@/lib/time.ts";
 import { useSwipeRow } from "@/lib/use-swipe-row.ts";
 import { SenderAvatar } from "./sender-avatar.tsx";
+import { Checkbox } from "./ui/checkbox.tsx";
 import { LabelChip } from "./ui.tsx";
 
 /** One side of a swipe gesture: the reveal colour/icon and the action to run. */
@@ -65,8 +66,8 @@ interface Props {
   selected?: boolean;
   /** Distinct labels across the thread's messages, shown as chips. */
   labels?: MessageLabel[];
-  /** Leading column, e.g. the select checkbox. */
-  leading?: React.ReactNode;
+  /** Multi-select checkbox, drawn over the avatar (mailbox lists only). */
+  select?: { selecting: boolean; onToggle: () => void };
   /** Hover action cluster; omit to hide it (e.g. while selecting). */
   actions?: React.ReactNode;
   /** Virtualizer measurement ref + position; set together when windowed. */
@@ -85,7 +86,7 @@ export function ThreadRowView({
   active,
   selected = false,
   labels,
-  leading,
+  select,
   actions,
   rowRef,
   style,
@@ -154,22 +155,57 @@ export function ThreadRowView({
     disabled: !swipe,
   });
 
-  // Without a leading column the body provides its own left padding.
+  const rowPadding = compact ? "py-1.5" : "py-2.5";
+  const avatarSize = compact ? 22 : 26;
   const linkClassName = cn(
-    "flex min-w-0 flex-1 flex-col gap-0.5 pr-4 text-[13px]",
-    compact ? "py-1.5" : "py-2.5",
-    !leading && "pl-3",
+    "flex min-w-0 flex-1 flex-col gap-0.5 pl-2.5 pr-4 text-[13px]",
+    rowPadding,
+  );
+
+  // The checkbox shares the avatar's footprint instead of a column of its own:
+  // the avatar is the resting face and the checkbox takes over while selecting,
+  // on hover (pointer devices) or on focus. Below md there is no hover, so the
+  // avatar itself is the tap target that starts a selection.
+  const showCheck = !!select && (select.selecting || selected);
+  const lead = (
+    <div className={cn("group/lead relative flex shrink-0 items-start pl-3", rowPadding)}>
+      <span className="relative block" style={{ width: avatarSize, height: avatarSize }}>
+        <SenderAvatar
+          name={firstParticipant?.name}
+          address={firstParticipant?.address ?? ""}
+          size={avatarSize}
+          className={cn(
+            "transition-opacity",
+            showCheck
+              ? "opacity-0"
+              : select && "group-focus-within/lead:opacity-0 md:group-hover:opacity-0",
+          )}
+        />
+        {select && (
+          <span
+            className={cn(
+              "absolute inset-0 flex items-center justify-center transition-opacity",
+              showCheck
+                ? "opacity-100"
+                : "opacity-0 group-focus-within/lead:opacity-100 md:group-hover:opacity-100",
+            )}
+          >
+            <Checkbox
+              checked={selected}
+              onCheckedChange={select.onToggle}
+              aria-label={selected ? "Deselect" : "Select"}
+              // The pseudo-element widens the hit area to the whole avatar.
+              className="relative before:absolute before:-inset-1.5"
+            />
+          </span>
+        )}
+      </span>
+    </div>
   );
 
   const body = (
     <>
-      <div className="flex items-center justify-between gap-2">
-        <SenderAvatar
-          name={firstParticipant?.name}
-          address={firstParticipant?.address ?? ""}
-          size={compact ? 22 : 26}
-          className="mr-0.5"
-        />
+      <div className="flex items-center justify-between gap-2" style={{ minHeight: avatarSize }}>
         <span className={cn("min-w-0 flex-1 truncate", unread && "font-semibold")}>{label}</span>
         <span className="ml-2 shrink-0 text-[11px] text-muted-foreground">
           {formatStamp(thread.lastMsgAt, fmt)}
@@ -263,7 +299,7 @@ export function ThreadRowView({
         onClickCapture={handlers.onClickCapture}
       >
         {active && <span aria-hidden className="absolute inset-y-0 left-0 z-10 w-0.5 bg-primary" />}
-        {leading}
+        {lead}
         {link.kind === "mailbox" ? (
           <Link
             to="/app/m/$mailboxId/t/$threadId"
