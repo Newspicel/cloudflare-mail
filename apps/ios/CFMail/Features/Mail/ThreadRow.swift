@@ -23,6 +23,8 @@ struct ThreadRow: View {
         thread.participants.first ?? AddressObject(name: nil, address: "unknown")
     }
 
+    private var avatarSize: CGFloat { isCompact ? 32 : 40 }
+
     var body: some View {
         Button(action: onTap) {
             HStack(alignment: .top, spacing: 8) {
@@ -31,15 +33,18 @@ struct ThreadRow: View {
                 UnreadDot(isVisible: thread.isUnread && !isSelecting)
                     .padding(.top, isCompact ? 8 : 9)
 
-                if isSelecting {
-                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                        .font(.title2)
-                        .foregroundStyle(isSelected ? Color.accentColor : Color(.tertiaryLabel))
-                        .padding(.top, 6)
-                        .contentTransition(.symbolEffect(.replace))
-                } else {
-                    Avatar(address: lead, size: isCompact ? 32 : 40)
+                // The check takes the avatar's own footprint rather than a
+                // column of its own, so entering selection never shifts the text.
+                ZStack {
+                    Avatar(address: lead, size: avatarSize)
+                        .opacity(isSelecting ? 0 : 1)
+                    if isSelecting {
+                        SelectionMark(isSelected: isSelected, size: avatarSize)
+                            .transition(.scale(scale: 0.6).combined(with: .opacity))
+                    }
                 }
+                .frame(width: avatarSize, height: avatarSize)
+                .animation(.snappy(duration: 0.2), value: isSelected)
 
                 VStack(alignment: .leading, spacing: isCompact ? 1 : 2) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -137,6 +142,32 @@ struct ThreadRow: View {
         if thread.isUnread { parts.insert("Unread", at: 0) }
         parts.append(Fmt.listDate(thread.lastMsgAt))
         return parts.joined(separator: ", ")
+    }
+}
+
+/// Stands in for the avatar while selecting: an empty ring that fills with
+/// the tint once the row is picked.
+private struct SelectionMark: View {
+    var isSelected: Bool
+    var size: CGFloat
+
+    var body: some View {
+        Circle()
+            .fill(isSelected ? Color.accentColor : Color(.quaternarySystemFill))
+            .overlay {
+                Circle()
+                    .strokeBorder(Color(.tertiaryLabel), lineWidth: 1.5)
+                    .opacity(isSelected ? 0 : 1)
+            }
+            .overlay {
+                Image(systemName: "checkmark")
+                    .font(.system(size: size * 0.42, weight: .bold))
+                    .foregroundStyle(.white)
+                    .opacity(isSelected ? 1 : 0)
+                    .scaleEffect(isSelected ? 1 : 0.5)
+            }
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
     }
 }
 

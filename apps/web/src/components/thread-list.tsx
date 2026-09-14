@@ -44,7 +44,6 @@ import {
 } from "./thread-context-menu.tsx";
 import { type RowSwipe, ThreadRowView } from "./thread-row.tsx";
 import { Button } from "./ui/button.tsx";
-import { Checkbox } from "./ui/checkbox.tsx";
 import { useConfirmHelpers } from "./ui/confirm.tsx";
 import {
   DropdownMenu,
@@ -593,24 +592,7 @@ function ThreadRowItem({
           remeasure={remeasure}
           style={style}
           dataIndex={dataIndex}
-          leading={
-            <div
-              className={cn(
-                "flex w-9 shrink-0 items-center justify-center transition-opacity",
-                selecting || selected
-                  ? "opacity-100"
-                  : // No hover on touch: keep the checkbox visible below md (the
-                    // full-width mobile list) so multi-select is reachable.
-                    "opacity-100 md:opacity-0 md:focus-within:opacity-100 md:group-hover:opacity-100",
-              )}
-            >
-              <Checkbox
-                checked={selected}
-                onCheckedChange={onToggleSelect}
-                aria-label={selected ? "Deselect" : "Select"}
-              />
-            </div>
-          }
+          select={{ selecting, onToggle: onToggleSelect }}
           actions={
             selecting ? undefined : (
               <>
