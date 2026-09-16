@@ -54,6 +54,25 @@ const messageId = z
   .max(998)
   .regex(/^<[^\s<>]+@[^\s<>]+>$/, "invalid Message-ID");
 
+// References / In-Reply-To are msg-id *lists*. RFC 5322 separates the ids with
+// whitespace, but plenty of clients emit "<a>,<b>" and the obsolete syntax
+// allows a leading phrase, so pull the bracketed ids out instead of splitting
+// on a separator. Anything that isn't a well-formed msg-id is dropped: a chain
+// is an advisory threading hint, and a peer's junk header must not fail a send.
+export function splitMessageIds(header: string): string[] {
+  return header.match(/<[^\s<>]+@[^\s<>]+>/g) ?? [];
+}
+
+// Clients build a reply's chain from the parent's stored `references`, which
+// can still hold an unsplit header in one entry; flatten before validating.
+const referencesList = z
+  .preprocess(
+    (v) =>
+      Array.isArray(v) ? v.flatMap((e) => (typeof e === "string" ? splitMessageIds(e) : e)) : v,
+    z.array(messageId).max(100),
+  )
+  .optional();
+
 // Attachment filename: mimetext interpolates this unescaped into the quoted
 // Content-Disposition fil="…", so reject control chars, quotes and backslash.
 const attachmentFilename = z
@@ -207,7 +226,7 @@ export const createDraft = z.object({
   markdown: z.boolean().default(false),
   format: z.enum(EDITOR_FORMATS).default("text"),
   inReplyTo: messageId.optional(),
-  references: z.array(messageId).max(100).optional(),
+  references: referencesList,
   quote: messageQuoteRef.nullish(),
   attachments: z.array(draftAttachment).max(20).default([]),
 });
@@ -223,7 +242,7 @@ export const updateDraft = z.object({
   markdown: z.boolean().optional(),
   format: z.enum(EDITOR_FORMATS).optional(),
   inReplyTo: messageId.optional(),
-  references: z.array(messageId).max(100).optional(),
+  references: referencesList,
   quote: messageQuoteRef.nullish(),
   attachments: z.array(draftAttachment).max(20).optional(),
 });
@@ -523,7 +542,7 @@ export const sendMessage = z.object({
   text: z.string().max(1_000_000).optional(),
   html: z.string().max(5_000_000).optional(),
   inReplyTo: messageId.optional(),
-  references: z.array(messageId).max(100).optional(),
+  references: referencesList,
   // Reply/forward: the original message to quote below the composed body. The
   // server fetches its raw `.eml` and appends a formatted quote at send time.
   quote: messageQuoteRef.optional(),

@@ -2,6 +2,7 @@ import type { DB } from "@cfmail/db";
 import type { PgpKeyEvent, PgpVerify } from "@cfmail/db/enums";
 import { attachment, message, thread } from "@cfmail/db/schema";
 import { Flag } from "@cfmail/shared/flags";
+import { splitMessageIds } from "@cfmail/shared/schemas";
 import { eq } from "drizzle-orm";
 import type { Env } from "../env.ts";
 import {
@@ -91,11 +92,15 @@ export async function ingestRaw(env: Env, db: DB, opts: IngestOptions): Promise<
   if (fromName) fromParticipant.name = fromName;
   const participants = [fromParticipant, ...toAddrs, ...ccAddrs].filter((p) => p.address);
 
-  const references = parsed.references ? parsed.references.split(/\s+/).filter(Boolean) : null;
+  // Both headers are msg-id lists; In-Reply-To gets one column, so keep the
+  // first id. Splitting here is what lets threading match them at all, and what
+  // keeps the chain a later reply copies out of this row valid.
+  const references = parsed.references ? splitMessageIds(parsed.references) : null;
+  const inReplyTo = parsed.inReplyTo ? (splitMessageIds(parsed.inReplyTo)[0] ?? null) : null;
   const { threadId, joinedByHeader } = await resolveThreadId(db, {
     mailboxId,
     subject: parsed.subject ?? "",
-    inReplyTo: parsed.inReplyTo ?? null,
+    inReplyTo,
     references,
     participants,
     fromAddr,
@@ -127,7 +132,7 @@ export async function ingestRaw(env: Env, db: DB, opts: IngestOptions): Promise<
     threadId,
     direction: opts.direction,
     messageIdHdr: parsed.messageId ?? null,
-    inReplyTo: parsed.inReplyTo ?? null,
+    inReplyTo,
     references,
     fromName: fromName ?? null,
     fromAddr,

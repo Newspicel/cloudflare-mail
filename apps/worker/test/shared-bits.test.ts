@@ -11,6 +11,7 @@ import {
   Perm,
   revoke,
 } from "@cfmail/shared/permissions";
+import { sendMessage, splitMessageIds } from "@cfmail/shared/schemas";
 import { describe, expect, it } from "vitest";
 
 describe("message flags", () => {
@@ -80,5 +81,28 @@ describe("mailbox kinds", () => {
     expect(describeKinds(ALL_MAILBOX_KINDS)).toEqual(["personal", "group", "service", "temp"]);
     expect(describeKinds(MailboxKind.GROUP | MailboxKind.SERVICE)).toEqual(["group", "service"]);
     expect(describeKinds(0)).toEqual([]);
+  });
+});
+
+describe("msg-id lists", () => {
+  it("splits a References header on whitespace or commas", () => {
+    expect(splitMessageIds("<a@x> <b@y>")).toEqual(["<a@x>", "<b@y>"]);
+    expect(splitMessageIds("<a@x>,<b@y>")).toEqual(["<a@x>", "<b@y>"]);
+    expect(splitMessageIds("<a@x>, <b@y>")).toEqual(["<a@x>", "<b@y>"]);
+  });
+
+  it("ignores phrases and malformed ids", () => {
+    expect(splitMessageIds("Fred <fred@x>")).toEqual(["<fred@x>"]);
+    expect(splitMessageIds("<no-at-sign> <b@y>")).toEqual(["<b@y>"]);
+    expect(splitMessageIds("garbage")).toEqual([]);
+  });
+
+  it("flattens an unsplit chain a client copied out of a stored message", () => {
+    const parsed = sendMessage.parse({
+      mailboxId: "mailbox-1",
+      to: [{ address: "peer@example.com" }],
+      references: ["<a@x>,<b@y>", "<c@z>"],
+    });
+    expect(parsed.references).toEqual(["<a@x>", "<b@y>", "<c@z>"]);
   });
 });

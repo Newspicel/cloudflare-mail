@@ -41,7 +41,14 @@ async function seed(): Promise<void> {
 }
 
 function eml(
-  opts: { from?: string; to?: string; subject?: string; messageId?: string; body?: string } = {},
+  opts: {
+    from?: string;
+    to?: string;
+    subject?: string;
+    messageId?: string;
+    body?: string;
+    headers?: string[];
+  } = {},
 ): ArrayBuffer {
   const lines = [
     `From: ${opts.from ?? `Sender <sender@elsewhere.com>`}`,
@@ -49,6 +56,7 @@ function eml(
     `Subject: ${opts.subject ?? "Imported"}`,
   ];
   if (opts.messageId) lines.push(`Message-ID: ${opts.messageId}`);
+  if (opts.headers) lines.push(...opts.headers);
   lines.push("", opts.body ?? "Hello from an import.", "");
   return new TextEncoder().encode(lines.join("\r\n")).buffer as ArrayBuffer;
 }
@@ -98,6 +106,26 @@ describe("ingestRaw — inbound import", () => {
     const th = (await db.query.thread.findMany({ where: eq(thread.mailboxId, MAILBOX_ID) }))[0]!;
     expect(th.msgCount).toBe(1);
     expect(th.lastMsgAt).toEqual(new Date("2024-01-02T03:04:05Z"));
+  });
+
+  it("splits a comma-separated References header and keeps one In-Reply-To id", async () => {
+    await ingestRaw(
+      e,
+      db,
+      importOpts({
+        raw: eml({
+          messageId: "<child@elsewhere.com>",
+          headers: [
+            "References: <root@example.com>,<mid@outlook.com>",
+            "In-Reply-To: Sender <mid@outlook.com>",
+          ],
+        }),
+      }),
+    );
+
+    const row = (await db.query.message.findMany({ where: eq(message.mailboxId, MAILBOX_ID) }))[0]!;
+    expect(row.references).toEqual(["<root@example.com>", "<mid@outlook.com>"]);
+    expect(row.inReplyTo).toBe("<mid@outlook.com>");
   });
 
   it("counts an unseen inbound message as unread", async () => {
