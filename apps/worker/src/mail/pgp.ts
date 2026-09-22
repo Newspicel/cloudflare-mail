@@ -2,7 +2,7 @@
 // mailbox's private key (wrapped at rest, see config.ts#getOrCreatePgpMasterKey)
 // and signs/encrypts outbound + decrypts/verifies inbound, so search/spam/
 // threading keep working on plaintext. This is NOT end-to-end — the server can
-// read mail. See CLAUDE.md invariant 17.
+// read mail. See AGENTS.md invariant 7.
 import type * as OpenPGP from "openpgp";
 
 // openpgp is ~377 KB and PGP is opt-in per mailbox, so most isolates never run

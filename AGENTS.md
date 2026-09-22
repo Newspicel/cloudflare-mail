@@ -1,19 +1,3 @@
-# CLAUDE.md
-
-Guidance for AI assistants. Only rules and intent you *can't* recover by reading the code. Keep it small; point at code instead of restating it.
-
-## Discover, don't memorize
-
-- **Stack/versions** → `package.json` (root + per-app)
-- **Data model** → `packages/db/src/schema.ts`
-- **API** → `apps/worker/src/api/*`
-- **Mail pipelines** → `apps/worker/src/mail/{receive,send,mime,threads,spam,dnsbl,pgp,push}.ts`
-- **IMAP** → `apps/worker/src/imap/*` (`protocol` wire, `session` state machine, `store` mail semantics)
-- **RBAC** → `apps/worker/src/permissions.ts`
-- **Deploy/bindings** → `apps/worker/wrangler.jsonc`
-- **iOS client** → `apps/ios/` (`README.md` there; `CFMail/Core/Models` mirrors `packages/shared`)
-- **Commands** → `package.json` scripts + `README.md`
-
 ## Invariants (don't break without approval)
 
 1. **One Worker.** `apps/worker` is the only runtime (`fetch`, `email`, `scheduled`, `connect`, `UserHub` DO). Don't add a separate service — a new protocol is a new handler, not a new script.

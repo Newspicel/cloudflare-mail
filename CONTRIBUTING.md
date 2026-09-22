@@ -4,9 +4,8 @@ Thanks for considering a contribution. The codebase is small and opinionated —
 
 ## Ground rules
 
-- **Read `CLAUDE.md` first.** It captures the invariants (single Worker, RBAC on every route, R2 key namespaces, etc.) that keep the project safe to change. They apply to humans too.
+- **Read `AGENTS.md` first.** It captures the invariants (single Worker, RBAC on every route, R2 key namespaces, etc.) that keep the project safe to change. They apply to humans too.
 - **One Worker.** Don't split `apps/worker` into multiple Workers or add a separate API service.
-- **Discover, don't memorize.** `package.json`, `wrangler.jsonc`, and `packages/db/src/schema.ts` are the source of truth for stack, bindings, and data model. Don't duplicate those facts in prose.
 
 ## Branching and PRs
 

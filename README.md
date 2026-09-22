@@ -209,7 +209,7 @@ Issues and PRs welcome — see [`CONTRIBUTING.md`](./CONTRIBUTING.md) for branch
 
 - Keep the toolchain (tsc / Biome / oxlint / pnpm / Turborepo) — don't swap pieces without discussion.
 - Run `pnpm typecheck && pnpm lint && pnpm build && pnpm test` before opening a PR.
-- If you use Claude Code or similar AI tooling, read `CLAUDE.md` first — it captures the invariants that make the project safe to change.
+- If you use AI tooling, read `AGENTS.md` first — it captures the invariants that make the project safe to change.
 
 ## License
 
