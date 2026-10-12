@@ -93,9 +93,13 @@ export async function handleInbound(
   if (!mb) {
     // No direct mailbox — fall back to an inbound-only redirect/alias. An exact
     // local part wins over the domain catch-all ("*"), which only fires when no
-    // mailbox and no specific redirect match.
+    // mailbox and no specific redirect match — and never for a no-reply address,
+    // which bounces unless something is explicitly set up to receive it.
     const reds = await db.query.redirect.findMany({
-      where: and(eq(redirect.domainId, dom.id), inArray(redirect.localPart, [baseLocal, "*"])),
+      where: and(
+        eq(redirect.domainId, dom.id),
+        inArray(redirect.localPart, isNoReply(baseLocal) ? [baseLocal] : [baseLocal, "*"]),
+      ),
       columns: { localPart: true, targetMailboxId: true },
     });
     const red =
@@ -455,6 +459,12 @@ function splitAddr(addr: string): [string | null, string | null] {
   const at = addr.lastIndexOf("@");
   if (at <= 0) return [null, null];
   return [addr.slice(0, at), addr.slice(at + 1)];
+}
+
+// no-reply, noreply, no_reply, do-not-reply, donotreply, …
+function isNoReply(local: string): boolean {
+  const bare = local.replace(/[^a-z0-9]/g, "");
+  return bare === "noreply" || bare === "donotreply";
 }
 
 // Store an auto-discovered (WKD) key for a sender we have none for. Returns true
