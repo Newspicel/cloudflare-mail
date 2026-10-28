@@ -17,9 +17,9 @@
     "db:migrate": "pnpm --filter @cfmail/db migrate"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.15",
-    "oxlint": "1.87.0",
-    "turbo": "2.11.7",
+    "@biomejs/biome": "2.6.3",
+    "oxlint": "1.90.0",
+    "turbo": "2.11.10",
     "typescript": "7.0.2"
   }
 }

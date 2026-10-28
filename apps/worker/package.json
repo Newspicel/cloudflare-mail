@@ -17,23 +17,23 @@
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
-    "@better-auth/passkey": "1.7.7",
+    "@better-auth/passkey": "1.7.14",
     "@cfmail/db": "workspace:*",
     "@cfmail/shared": "workspace:*",
     "@hono/zod-validator": "0.9.1",
-    "better-auth": "1.7.7",
+    "better-auth": "1.7.14",
     "drizzle-orm": "0.45.4",
-    "hono": "4.13.13",
+    "hono": "4.13.14",
     "mimetext": "3.0.28",
     "openpgp": "^6.3.2",
-    "postal-mime": "4.0.5",
-    "zod": "4.6.5"
+    "postal-mime": "4.1.4",
+    "zod": "4.6.7"
   },
   "devDependencies": {
-    "@cloudflare/vitest-plugin": "1.4.0",
-    "@cloudflare/workers-types": "5.20261011.1",
+    "@cloudflare/vitest-plugin": "1.4.8",
+    "@cloudflare/workers-types": "5.20261027.1",
     "typescript": "7.0.2",
-    "vitest": "5.0.3",
-    "wrangler": "4.149.0"
+    "vitest": "5.0.5",
+    "wrangler": "4.153.0"
   }
 }
