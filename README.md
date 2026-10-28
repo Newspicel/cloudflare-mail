@@ -13,12 +13,13 @@ A self-hostable, Gmail-style mail client that runs entirely on Cloudflare — on
 - **Organization** — labels, folders, reminders, and per-mailbox automation rules
 - **Inbound pipeline** — threading, spam scoring (auth + heuristics + optional Spamhaus and Workers AI), gateway PGP decrypt, one-click unsubscribe, calendar (`.ics`) parsing, blocklist
 - **IMAP4rev1 server** — read your mail in Apple Mail, Thunderbird or Outlook, with `IDLE` push, per-mailbox app passwords, and the same RBAC as the web app
+- **MCP server** — point Claude or any MCP client at your mailbox to search, read, label and send, authenticated with the same per-mailbox app password as IMAP
 - **Push notifications** and a tracking-pixel image proxy
 - **Sender brand logos** — BIMI lookups, sanitized and cached, shown in the web app and on iOS
 - **Native iOS app** — SwiftUI client on the same API and SSE stream (`apps/ios`)
 - **Everything on Cloudflare** — no external database, no SMTP servers to run
 
-> Status: actively developed. Auth, RBAC, inbound/outbound mail, threading, search, labels/folders/rules, spam, PGP, reminders, calendar, push, temp GC, and SSE are wired end-to-end, with a Vitest suite covering the worker pipelines. Contributions welcome.
+> Status: actively developed. Auth, RBAC, inbound/outbound mail, threading, search, labels/folders/rules, spam, PGP, reminders, calendar, push, temp GC, SSE, and MCP are wired end-to-end, with a Vitest suite covering the worker pipelines. Contributions welcome.
 >
 > IMAP is built and tested but needs Cloudflare's **inbound TCP for Workers** (private beta at time of writing) plus a Spectrum application to reach it — see [IMAP access](#6-imap-access-optional).
 
@@ -30,6 +31,7 @@ A self-hostable, Gmail-style mail client that runs entirely on Cloudflare — on
 | Storage       | D1 (SQLite, metadata), R2 (raw MIME + attachments), DO (SSE fan-out) |
 | Inbound       | Cloudflare Email Routing → Worker `email()` handler                |
 | IMAP          | Cloudflare Spectrum (TLS terminated) → Worker `connect()` handler  |
+| MCP           | Streamable HTTP (JSON-RPC 2.0) on the Worker's `fetch()` handler   |
 | Outbound      | Cloudflare Email Service (`env.EMAIL.send()`)                      |
 | Auth          | [Better Auth](https://better-auth.com) on D1                       |
 | MIME          | [postal-mime](https://github.com/postalsys/postal-mime) (parse), [mimetext](https://github.com/muratgozel/MIMEText) (build for archived copy) |
@@ -46,6 +48,7 @@ flowchart LR
   Browser["Browser SPA<br/>(apps/web)"]
   Inbound["Cloudflare<br/>Email Routing"]
   MailApp["Mail app<br/>(IMAP client)"]
+  McpClient["AI client<br/>(MCP)"]
   Cron["Cloudflare<br/>Cron Trigger"]
   Sender["Outbound recipient<br/>(env.EMAIL.send)"]
 
@@ -63,6 +66,7 @@ flowchart LR
   Assets[("ASSETS<br/>Vite build")]
 
   Browser -- "/api/* (fetch + SSE)" --> Fetch
+  McpClient -- "/api/mcp (JSON-RPC)" --> Fetch
   Browser -- "/ (static)" --> Assets
   Assets --> Fetch
   Inbound --> Email
@@ -112,6 +116,7 @@ Key files to orient from:
 - `apps/worker/src/index.ts` — handler exports
 - `apps/worker/src/mail/receive.ts`, `apps/worker/src/mail/send.ts` — mail pipelines
 - `apps/worker/src/imap/` — IMAP wire protocol, session state machine, mail-model bridge
+- `apps/worker/src/api/mcp.ts`, `apps/worker/src/mcp/` — MCP transport, tool surface, mail-model bridge
 - `apps/worker/src/permissions.ts` — single RBAC checker
 - `apps/worker/src/hub.ts` — SSE fan-out Durable Object
 - `packages/db/src/schema.ts` — data model
@@ -187,7 +192,31 @@ Client settings are then: server = the Spectrum hostname, port `993`, SSL/TLS, u
 
 Folders map onto the app's own model: `INBOX`, `Sent`, `Spam`, `Trash`, plus each of your custom folders. Moving mail, flagging it, and deleting it in a mail app shows up in the web UI live, and vice versa.
 
-### 7. Local dev
+### 7. MCP access (optional)
+
+The Worker also speaks [MCP](https://modelcontextprotocol.io) at `/api/mcp`, so an AI client can work your mail: search it, read threads, label and star, and send or reply. It is the same Worker, the same RBAC and the same credential as IMAP — no extra deployment, and nothing to enable.
+
+Authenticate with an app password from **Settings → IMAP access**. One password unlocks one mailbox, so one MCP connection sees exactly one mailbox; deleting the password cuts the client off on its next call, and losing access to a shared mailbox does the same.
+
+Credentials go in an `Authorization` header, either as Basic auth (`<mailbox-address>:<app-password>`) or, for clients that only send an opaque token, as `Bearer <mailbox-address>:<app-password>`. For a client that speaks MCP over stdio, bridge it with [`mcp-remote`](https://github.com/geelen/mcp-remote):
+
+```json
+{
+  "mcpServers": {
+    "cfmail": {
+      "command": "npx",
+      "args": [
+        "-y", "mcp-remote", "https://mail.example.com/api/mcp",
+        "--header", "Authorization: Bearer you@example.com:your-app-password"
+      ]
+    }
+  }
+}
+```
+
+Tools: `get_mailbox`, `list_threads`, `read_thread`, `search_mail` and `list_labels` need READ; `send_mail`, `reply_to_thread`, `update_thread`, `star_message` and `set_thread_label` need WRITE, so a read-only share stays read-only. Writes broadcast on the same SSE hub as everything else, so the web app and any open IMAP session see them immediately. Mail sent this way draws on the same hourly send budget as the web app.
+
+### 8. Local dev
 
 ```bash
 pnpm --filter @cfmail/db migrate:local

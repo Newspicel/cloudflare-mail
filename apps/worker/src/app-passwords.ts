@@ -39,11 +39,26 @@ export function hashAppPassword(password: string): Promise<string> {
 }
 
 export interface AppPasswordLogin {
+  // The app_password row that matched — callers that cache a verified login
+  // re-check this id instead of paying for scrypt again.
+  id: string;
   userId: string;
   mailboxId: string;
   address: string;
   perms: number;
 }
+
+// Which transport is logging in. Scrypt makes every attempt expensive, so each
+// transport throttles under its own bucket: IMAP logs in once per session and
+// wants a tight ceiling, while a stateless transport re-authenticates far more
+// often and would trip IMAP's limit within a minute.
+export interface LoginThrottle {
+  scope: string;
+  max: number;
+  ipMax: number;
+}
+
+const IMAP_THROTTLE: LoginThrottle = { scope: "imap-login", max: 10, ipMax: 30 };
 
 // IMAP login: `username` is the mailbox address (or the user's sign-in email),
 // `password` an app password issued for that user+mailbox. Access is
@@ -54,13 +69,14 @@ export async function loginWithAppPassword(
   username: string,
   password: string,
   clientIp: string | null,
+  throttle: LoginThrottle = IMAP_THROTTLE,
 ): Promise<AppPasswordLogin | null> {
   const name = username.trim().toLowerCase();
   const secret = normalizeAppPassword(password);
   if (!name || !secret) return null;
-  await enforceRateLimit(db, "imap-login", name, 10, 15 * 60 * 1000);
+  await enforceRateLimit(db, throttle.scope, name, throttle.max, 15 * 60 * 1000);
   if (clientIp) {
-    await enforceRateLimit(db, "imap-login-ip", clientIp, 30, 15 * 60 * 1000);
+    await enforceRateLimit(db, `${throttle.scope}-ip`, clientIp, throttle.ipMax, 15 * 60 * 1000);
     // Spamhaus AuthBL: hosts seen brute-forcing mail credentials elsewhere. Our
     // own rate limit only reacts after 30 attempts from this IP; AuthBL turns
     // those away on the first one. Best-effort — an unset key or a failed lookup
@@ -101,6 +117,7 @@ export async function loginWithAppPassword(
     }
     await db.update(appPassword).set({ lastUsedAt: new Date() }).where(eq(appPassword.id, c.id));
     return {
+      id: c.id,
       userId: c.userId,
       mailboxId: c.mailboxId,
       address: `${c.localPart}@${c.domainName}`,

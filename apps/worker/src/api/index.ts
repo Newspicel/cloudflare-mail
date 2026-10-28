@@ -20,6 +20,7 @@ import { draftsRoutes } from "./drafts.ts";
 import { foldersRoutes } from "./folders.ts";
 import { labelsRoutes } from "./labels.ts";
 import { mailboxesRoutes } from "./mailboxes.ts";
+import { mcpRoutes } from "./mcp.ts";
 import { messagesRoutes } from "./messages.ts";
 import { pushRoutes } from "./push.ts";
 import { remindersRoutes } from "./reminders.ts";
@@ -57,6 +58,10 @@ export function buildApi() {
     // Service-mailbox API is bearer-key authed, not session authed — mount it
     // before the session middleware so it never touches cookies.
     .route("/api/svc", svcRoutes())
+    // MCP authenticates with an app password, not a cookie, so mount it above
+    // the session middleware too — below it every tool call would pay for a
+    // Better Auth session lookup whose result MCP never reads.
+    .route("/api/mcp", mcpRoutes())
     // Public HTTP sign-up is closed via `disableSignUp: true` in auth.ts.
     // All account creation flows through /api/bootstrap (first admin) or
     // /api/users (admin-created) or /api/invites/accept (invited user).
