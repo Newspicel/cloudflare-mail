@@ -206,7 +206,12 @@ export function threadsRoutes() {
         .select()
         .from(message)
         .where(and(eq(message.threadId, id), eq(message.mailboxId, th.mailboxId)))
-        .orderBy(asc(message.createdAt));
+        // By the time each card shows, so imported/backfilled mail (created
+        // later than it was sent) still reads in conversation order.
+        .orderBy(
+          asc(sql`coalesce(${message.sentAt}, ${message.receivedAt}, ${message.createdAt})`),
+          asc(message.createdAt),
+        );
 
       // Attach the stored correspondent key for each inbound sender so the reader
       // can show which key verified a signature and its trust state. One batched

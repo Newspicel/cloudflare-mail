@@ -5,13 +5,15 @@ import {
   ArchiveRestore,
   ArrowLeft,
   ChevronDown,
+  ChevronsDownUp,
+  ChevronsUpDown,
   ChevronUp,
   Inbox,
   MailMinus,
   ShieldAlert,
   Trash2,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { rpc, unwrap } from "@/lib/api.ts";
 import {
@@ -25,13 +27,14 @@ import { listSearch, type MailView, type MessageRow, type ThreadRow } from "@/li
 import { keys } from "@/lib/query-keys.ts";
 import { useThreadListMutation } from "@/lib/thread-mutations.ts";
 import { LabelsMenu } from "./labels-menu.tsx";
-import { MessageCard } from "./message/message-card.tsx";
+import { CollapsedMessage, MessageCard } from "./message/message-card.tsx";
 import { ThreadAiActions, ThreadAiResults, useThreadAi } from "./message/use-thread-ai.tsx";
 import { MoveToFolderMenu } from "./move-to-folder-menu.tsx";
 import { ReminderMenu } from "./reminder-menu.tsx";
 import { Button } from "./ui/button.tsx";
 import { useConfirmHelpers } from "./ui/confirm.tsx";
 import { IconButton } from "./ui/icon-button.tsx";
+import { Separator } from "./ui/separator.tsx";
 import { TooltipProvider } from "./ui/tooltip.tsx";
 
 interface Props {
@@ -44,7 +47,13 @@ interface Props {
   // Set when the thread is being viewed inside a custom folder, enabling the
   // "move back to mailbox" action in the move-to-folder menu.
   folderId?: string;
+  /** Open the thread at this message (a search hit) rather than the newest. */
+  focusMessageId?: string;
 }
+
+// Folded messages between the first and the last folded one collapse further
+// into a single "N more messages" divider once there are at least this many.
+const MIN_FOLD = 2;
 
 export function MessageView({
   thread,
@@ -53,6 +62,7 @@ export function MessageView({
   unread,
   readOnly = false,
   folderId,
+  focusMessageId,
 }: Props) {
   const nav = useNavigate();
   const backSearch = listSearch(view, unread);
@@ -217,110 +227,6 @@ export function MessageView({
     if (last) setMsg.mutate({ id: last.id, patch: { seen: false } });
   }
 
-  // Open a thread positioned at the newest message's header, and keep it pinned
-  // there while older messages' bodies stream in (their height changes shift the
-  // anchor) — until the user scrolls, after which we leave the position alone.
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const lastCardRef = useRef<HTMLElement>(null);
-  const spacerRef = useRef<HTMLDivElement>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-pin when a new thread opens
-  useEffect(() => {
-    const container = scrollRef.current;
-    if (!container) return;
-    let pinned = true;
-    const align = () => {
-      const card = lastCardRef.current;
-      const spacer = spacerRef.current;
-      if (!card) return;
-      const rect = container.getBoundingClientRect();
-      const scrollTop = container.scrollTop;
-      const cs = getComputedStyle(container);
-      const padTop = Number.parseFloat(cs.paddingTop) || 0;
-      const padBottom = Number.parseFloat(cs.paddingBottom) || 0;
-      // The scroll offset at which the newest message rests at the top: just below
-      // the previous message (showing only the inter-message gap), or below the
-      // container padding when it leads the thread. Measured straight from layout
-      // so it's exact regardless of margins/padding/subpixel rounding.
-      const prev = card.previousElementSibling;
-      const ref = prev
-        ? prev.getBoundingClientRect().bottom
-        : card.getBoundingClientRect().top - padTop;
-      const target = ref - rect.top + scrollTop;
-      // Size the trailing spacer so that rest offset is also the furthest you can
-      // scroll, leaving no empty space below the newest message to overscroll into.
-      // Derive the true content height from the spacer's own rect — scrollHeight is
-      // clamped to clientHeight when the whole thread already fits in the viewport.
-      if (spacer) {
-        const contentBottom =
-          spacer.getBoundingClientRect().bottom - rect.top + scrollTop + padBottom;
-        const room = Math.max(
-          0,
-          spacer.offsetHeight + target + container.clientHeight - contentBottom,
-        );
-        if (Math.abs(spacer.offsetHeight - room) > 0.5) spacer.style.height = `${room}px`;
-      }
-      if (pinned) container.scrollTop = target;
-    };
-    align();
-    // A resize can fire one callback per observed child in a single frame;
-    // coalesce them into a single align() on the next animation frame so the
-    // layout reads/writes run once, not once per message.
-    let raf = 0;
-    const schedule = () => {
-      if (raf) return;
-      raf = requestAnimationFrame(() => {
-        raf = 0;
-        align();
-      });
-    };
-    const ro = new ResizeObserver(schedule);
-    // The spacer is sized by `align`; observing it would feed its own resize
-    // back in, so only watch the message cards.
-    for (const child of Array.from(container.children))
-      if (child !== spacerRef.current) ro.observe(child);
-    const release = () => {
-      pinned = false;
-      ro.disconnect();
-      if (raf) cancelAnimationFrame(raf);
-    };
-    const opts: AddEventListenerOptions = { passive: true };
-    container.addEventListener("wheel", release, opts);
-    container.addEventListener("touchstart", release, opts);
-    container.addEventListener("keydown", release);
-    return () => {
-      ro.disconnect();
-      if (raf) cancelAnimationFrame(raf);
-      container.removeEventListener("wheel", release, opts);
-      container.removeEventListener("touchstart", release, opts);
-      container.removeEventListener("keydown", release);
-    };
-  }, [thread.id]);
-
-  // Side nav arrows: "up" reveals older messages, "down" returns to the newest.
-  // Each shows only while there's room to travel that way.
-  const [canUp, setCanUp] = useState(false);
-  const [canDown, setCanDown] = useState(false);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-bind when a new thread opens
-  useEffect(() => {
-    const container = scrollRef.current;
-    if (!container) return;
-    const update = () => {
-      setCanUp(container.scrollTop > 8);
-      setCanDown(container.scrollTop < container.scrollHeight - container.clientHeight - 8);
-    };
-    // eslint-disable-next-line react-doctor/no-adjust-state-on-prop-change -- reads live scroll offsets from the DOM; not derivable during render
-    update();
-    const opts: AddEventListenerOptions = { passive: true };
-    container.addEventListener("scroll", update, opts);
-    const ro = new ResizeObserver(update);
-    ro.observe(container);
-    return () => {
-      container.removeEventListener("scroll", update, opts);
-      ro.disconnect();
-    };
-  }, [thread.id]);
-  const scrollTo = (top: number) => scrollRef.current?.scrollTo({ top, behavior: "smooth" });
-
   // Individually-trashed messages are hidden from the active folders. The Trash
   // view shows the whole conversation when the thread itself is trashed, else
   // only its deleted messages; "All" shows everything.
@@ -334,6 +240,84 @@ export function MessageView({
         : messages.filter((m) => !hasFlag(m.flags, Flag.TRASH));
 
   const ai = useThreadAi(thread, visibleMessages);
+
+  // Which messages open expanded. Snapshotted when the thread opens (the view
+  // is keyed per thread), so marking them read doesn't fold them away: a
+  // linked message alone, else every unread one plus the newest. Mail that
+  // arrives while the thread is open opens expanded too.
+  const [initial] = useState(() => {
+    const target = focusMessageId && visibleMessages.find((m) => m.id === focusMessageId);
+    const open = target
+      ? [target]
+      : visibleMessages.filter(
+          (m, i) =>
+            i === visibleMessages.length - 1 ||
+            (m.direction === "in" && !hasFlag(m.flags, Flag.SEEN)),
+        );
+    return {
+      ids: new Set(visibleMessages.map((m) => m.id)),
+      open: new Set(open.map((m) => m.id)),
+      focus: open[0]?.id,
+    };
+  });
+  const [overrides, setOverrides] = useState<Map<string, boolean>>(() => new Map());
+  const [unfolded, setUnfolded] = useState(false);
+  const isOpen = (m: MessageRow) =>
+    overrides.get(m.id) ?? (initial.open.has(m.id) || !initial.ids.has(m.id));
+  const setOpen = (id: string, open: boolean) =>
+    setOverrides((prev) => new Map(prev).set(id, open));
+  const allOpen = visibleMessages.every(isOpen);
+  const setAll = (open: boolean) => {
+    setUnfolded(true);
+    setOverrides(new Map(visibleMessages.map((m) => [m.id, open])));
+  };
+
+  // Keep the first message and the one just before the first open message as
+  // context; fold the run between them into one divider.
+  const firstOpen = visibleMessages.findIndex(isOpen);
+  const foldEnd = (firstOpen === -1 ? visibleMessages.length : firstOpen) - 1;
+  const foldCount = unfolded ? 0 : Math.max(0, foldEnd - 1);
+  const folded = foldCount >= MIN_FOLD;
+
+  // Land on the first open message, with only folded rows above it, so the
+  // position holds while bodies stream in below.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const container = scrollRef.current;
+    const card = container?.querySelector<HTMLElement>(
+      `[data-message-id="${initial.focus ?? ""}"]`,
+    );
+    if (!container || !card || card === container.firstElementChild) return;
+    const padTop = Number.parseFloat(getComputedStyle(container).paddingTop) || 0;
+    container.scrollTop =
+      card.getBoundingClientRect().top - container.getBoundingClientRect().top - padTop;
+  }, [initial.focus]);
+
+  // Side nav arrows: "up" goes to the oldest message, "down" to the newest.
+  // Each shows only while there's room to travel that way.
+  const [canUp, setCanUp] = useState(false);
+  const [canDown, setCanDown] = useState(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-observe the cards when they fold or unfold
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+    const update = () => {
+      setCanUp(container.scrollTop > 8);
+      setCanDown(container.scrollTop < container.scrollHeight - container.clientHeight - 8);
+    };
+    // eslint-disable-next-line react-doctor/no-adjust-state-on-prop-change -- reads live scroll offsets from the DOM; not derivable during render
+    update();
+    const opts: AddEventListenerOptions = { passive: true };
+    container.addEventListener("scroll", update, opts);
+    const ro = new ResizeObserver(update);
+    ro.observe(container);
+    for (const child of Array.from(container.children)) ro.observe(child);
+    return () => {
+      container.removeEventListener("scroll", update, opts);
+      ro.disconnect();
+    };
+  }, [overrides, unfolded, visibleMessages.length]);
+  const scrollTo = (top: number) => scrollRef.current?.scrollTo({ top, behavior: "smooth" });
 
   // Per-message actions depend on its state: a trashed message can be restored or
   // permanently deleted; a live message in a trashed thread can only be purged;
@@ -354,6 +338,13 @@ export function MessageView({
           <h1 className="flex-1 truncate font-semibold text-[14px] tracking-tight">
             {messages[0]?.subject || thread.subjectNorm || "(no subject)"}
           </h1>
+          {visibleMessages.length > 1 && (
+            <IconButton
+              icon={allOpen ? ChevronsDownUp : ChevronsUpDown}
+              label={allOpen ? "Collapse all" : "Expand all"}
+              onClick={() => setAll(!allOpen)}
+            />
+          )}
           {!readOnly && ai.aiOn && <ThreadAiActions ai={ai} />}
           {!readOnly && messages.at(-1) && (
             <LabelsMenu
@@ -444,29 +435,50 @@ export function MessageView({
 
         <div className="relative flex min-h-0 flex-1 flex-col">
           <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-3 sm:space-y-4 sm:p-4">
-            {visibleMessages.map((m, i) => (
-              <MessageCard
-                key={m.id}
-                cardRef={i === visibleMessages.length - 1 ? lastCardRef : undefined}
-                msg={m}
-                readOnly={readOnly}
-                busy={setMsg.isPending || delMsg.isPending}
-                {...messageActions(m)}
-                onToggleStar={() =>
-                  setMsg.mutate({
-                    id: m.id,
-                    patch: { starred: !hasFlag(m.flags, Flag.STARRED) },
-                  })
-                }
-              />
-            ))}
-            <div ref={spacerRef} aria-hidden className="shrink-0" />
+            {visibleMessages.map((m, i) => {
+              if (folded && i >= 1 && i < foldEnd) {
+                if (i > 1) return null;
+                return (
+                  <div key="fold" className="flex items-center gap-3">
+                    <Separator className="flex-1" />
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setUnfolded(true)}
+                      className="rounded-full"
+                    >
+                      {foldCount} more {foldCount === 1 ? "message" : "messages"}
+                    </Button>
+                    <Separator className="flex-1" />
+                  </div>
+                );
+              }
+              if (!isOpen(m))
+                return <CollapsedMessage key={m.id} msg={m} onExpand={() => setOpen(m.id, true)} />;
+              return (
+                <MessageCard
+                  key={m.id}
+                  msg={m}
+                  readOnly={readOnly}
+                  highlight={m.id === focusMessageId}
+                  onCollapse={visibleMessages.length > 1 ? () => setOpen(m.id, false) : undefined}
+                  busy={setMsg.isPending || delMsg.isPending}
+                  {...messageActions(m)}
+                  onToggleStar={() =>
+                    setMsg.mutate({
+                      id: m.id,
+                      patch: { starred: !hasFlag(m.flags, Flag.STARRED) },
+                    })
+                  }
+                />
+              );
+            })}
           </div>
           {canUp && (
             <Button
               variant="secondary"
               size="icon-sm"
-              aria-label="Older messages"
+              aria-label="Oldest message"
               onClick={() => scrollTo(0)}
               className="absolute top-2 right-3 z-10 rounded-full bg-background/80 text-muted-foreground shadow-sm backdrop-blur hover:text-foreground"
             >

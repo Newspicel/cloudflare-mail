@@ -36,6 +36,7 @@ function FolderThreadPage() {
       <section className="flex flex-1 flex-col overflow-hidden">
         {threadData ? (
           <MessageView
+            key={threadId}
             thread={threadData.thread}
             messages={threadData.messages}
             folderId={folderId}

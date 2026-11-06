@@ -63,6 +63,7 @@ import {
 import { Badge } from "./ui/badge.tsx";
 import { Button } from "./ui/button.tsx";
 import { ButtonGroup } from "./ui/button-group.tsx";
+import { useConfirm } from "./ui/confirm.tsx";
 import { Field, FieldContent, FieldGroup, FieldLabel } from "./ui/field.tsx";
 import { IconButton } from "./ui/icon-button.tsx";
 import { Spinner } from "./ui/spinner.tsx";
@@ -104,6 +105,7 @@ export function ComposeForm({
   const isWindow = variant === "window";
   const qc = useQueryClient();
   const { prefs } = useUserPrefs();
+  const confirm = useConfirm();
   const { data: mailboxes } = useQuery(mailboxesQuery);
   const { data: contactsData } = useQuery(contactsQuery);
   const { data: meData } = useQuery(meQuery);
@@ -474,32 +476,50 @@ export function ComposeForm({
     })();
   }
 
-  // Guard against the classic "forgot the attachment". Only the body the user
-  // actually composed is scanned — the quoted reply/forward original lives
-  // server-side and never reaches here, so it can't trip a false warning.
-  function passesSendGuards(): boolean {
+  // Last checks before mail leaves: a missing subject, the classic "forgot the
+  // attachment", and a blocked recipient. Only the body the user actually
+  // composed is scanned — the quoted reply/forward original lives server-side
+  // and never reaches here, so it can't trip a false warning.
+  async function passesSendGuards(): Promise<boolean> {
+    if (
+      !subject.trim() &&
+      !(await confirm({
+        title: "Send without a subject?",
+        description: "This message has no subject, so it's easy to miss in the recipient's inbox.",
+        confirmLabel: "Send anyway",
+      }))
+    )
+      return false;
     const composed = mode === "html" ? htmlToText(html) : text;
-    if (attachments.length === 0 && uploading === 0 && mentionsAttachment(composed)) {
-      const ok = window.confirm(
-        "It looks like you mentioned an attachment, but nothing is attached.\n\nSend anyway?",
-      );
-      if (!ok) return false;
-    }
-    if (blockedRecipients.length > 0) {
-      const ok = window.confirm(
-        `You've blocked ${blockedRecipients.join(", ")}. They can't reach this server, so you won't receive any reply.\n\nSend anyway?`,
-      );
-      if (!ok) return false;
-    }
+    if (
+      attachments.length === 0 &&
+      uploading === 0 &&
+      mentionsAttachment(composed) &&
+      !(await confirm({
+        title: "Send without an attachment?",
+        description: "It looks like you mentioned an attachment, but nothing is attached.",
+        confirmLabel: "Send anyway",
+      }))
+    )
+      return false;
+    if (
+      blockedRecipients.length > 0 &&
+      !(await confirm({
+        title: "Send to a blocked address?",
+        description: `You've blocked ${blockedRecipients.join(", ")}. They can't reach this server, so you won't receive any reply.`,
+        confirmLabel: "Send anyway",
+      }))
+    )
+      return false;
     return true;
   }
 
-  function attemptSend() {
-    if (passesSendGuards()) send.mutate();
+  async function attemptSend() {
+    if (await passesSendGuards()) send.mutate();
   }
 
   // Schedule the send for `when`, applying the same pre-send guards.
-  function scheduleSend(when: Date) {
+  async function scheduleSend(when: Date) {
     if (Number.isNaN(when.getTime())) {
       toast.error("Pick a valid date and time");
       return;
@@ -508,7 +528,7 @@ export function ComposeForm({
       toast.error("Pick a time at least a minute from now");
       return;
     }
-    if (!passesSendGuards()) return;
+    if (!(await passesSendGuards())) return;
     setScheduleOpen(false);
     schedule.mutate(when.getTime());
   }
@@ -519,7 +539,7 @@ export function ComposeForm({
     if (!prefs.sendShortcut) return;
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
       e.preventDefault();
-      if (!send.isPending && uploading === 0 && mailboxId && hasRecipients(to)) attemptSend();
+      if (!send.isPending && uploading === 0 && mailboxId && hasRecipients(to)) void attemptSend();
     }
   }
 
@@ -809,7 +829,7 @@ export function ComposeForm({
           <ButtonGroup>
             <Button
               variant="primary"
-              onClick={attemptSend}
+              onClick={() => void attemptSend()}
               disabled={
                 send.isPending ||
                 schedule.isPending ||
@@ -832,7 +852,7 @@ export function ComposeForm({
                 !hasRecipients(to)
               }
               pending={schedule.isPending}
-              onSchedule={scheduleSend}
+              onSchedule={(when) => void scheduleSend(when)}
             />
           </ButtonGroup>
           <IconButton

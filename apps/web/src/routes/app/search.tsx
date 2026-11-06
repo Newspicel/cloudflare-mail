@@ -43,6 +43,7 @@ import {
   hasSearchCriteria,
   mailboxesQuery,
   type SearchFilterInput,
+  searchHitView,
   searchQuery,
 } from "@/lib/queries.ts";
 import { type DateTimeFmt, formatStamp } from "@/lib/time.ts";
@@ -655,7 +656,7 @@ function ResultRow({ r }: { r: SearchResultDto }) {
       <Link
         to="/app/m/$mailboxId/t/$threadId"
         params={{ mailboxId: r.mailboxId, threadId: r.threadId }}
-        search={{ view: "inbox" }}
+        search={{ view: searchHitView(r), msg: r.messageId }}
         className="flex flex-col gap-0.5 px-4 py-2.5 text-[13px] hover:bg-muted/60"
       >
         <div className="flex items-center justify-between gap-2">

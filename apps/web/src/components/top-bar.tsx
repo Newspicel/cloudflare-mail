@@ -17,7 +17,7 @@ import { useEffect, useRef, useState } from "react";
 import { authClient } from "@/lib/auth-client.ts";
 import { cn } from "@/lib/cn.ts";
 import { useDateTimeFmt } from "@/lib/prefs.ts";
-import { meQuery, type SearchResult, searchQuery } from "@/lib/queries.ts";
+import { meQuery, type SearchResult, searchHitView, searchQuery } from "@/lib/queries.ts";
 import { useStreamStatus } from "@/lib/sse.ts";
 import { type Theme, useTheme } from "@/lib/theme.ts";
 import { type DateTimeFmt, formatStamp } from "@/lib/time.ts";
@@ -190,7 +190,7 @@ function SearchBox() {
     nav({
       to: "/app/m/$mailboxId/t/$threadId",
       params: { mailboxId: result.mailboxId, threadId: result.threadId },
-      search: { view: "inbox" },
+      search: { view: searchHitView(result), msg: result.messageId },
     });
   }
 

@@ -3,6 +3,7 @@ import type { AttachmentDto } from "@cfmail/shared/responses";
 import { useQuery } from "@tanstack/react-query";
 import {
   Download,
+  Ellipsis,
   FileText,
   Forward,
   Image,
@@ -29,6 +30,7 @@ import { useDateTimeFmt } from "@/lib/prefs.ts";
 import type { MessageRow } from "@/lib/queries.ts";
 import { messageBodyQuery } from "@/lib/queries.ts";
 import { sanitizeEmailHtml } from "@/lib/sanitize-email.ts";
+import { splitQuotedHtml, splitQuotedText } from "@/lib/split-quote.ts";
 import { formatDateTime } from "@/lib/time.ts";
 import { AttachmentPreview, attachmentUrl, isPreviewable } from "./attachment-preview.tsx";
 import { PgpBanner, SpamBanner, UnsubscribeBanner } from "./banners.tsx";
@@ -173,10 +175,86 @@ function MessageAttachments({
   );
 }
 
+export function messageTime(msg: MessageRow): Date {
+  return new Date(msg.sentAt ?? msg.receivedAt ?? msg.createdAt);
+}
+
+// A folded message: one line of who, what and when. Clicking opens it.
+export function CollapsedMessage({
+  msg,
+  cardRef,
+  onExpand,
+}: {
+  msg: MessageRow;
+  cardRef?: React.Ref<HTMLElement>;
+  onExpand: () => void;
+}) {
+  const fmt = useDateTimeFmt();
+  const unread = msg.direction === "in" && !hasFlag(msg.flags, Flag.SEEN);
+  const when = messageTime(msg);
+  return (
+    <article
+      ref={cardRef}
+      data-message-id={msg.id}
+      className="overflow-hidden rounded-lg border bg-card shadow-black/[0.02] shadow-sm"
+    >
+      <button
+        type="button"
+        onClick={onExpand}
+        className="flex w-full items-center gap-3 px-4 py-2 text-left transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none"
+      >
+        <SenderAvatar name={msg.fromName ?? undefined} address={msg.fromAddr} size={24} />
+        <span
+          className={cn(
+            "w-40 shrink-0 truncate text-[13px]",
+            unread ? "font-semibold" : "font-medium",
+          )}
+        >
+          {msg.direction === "out" ? "You" : (msg.fromName ?? msg.fromAddr)}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-[12px] text-muted-foreground">
+          {msg.snippet}
+        </span>
+        {hasFlag(msg.flags, Flag.STARRED) && (
+          <Star className="size-3.5 shrink-0 fill-current text-amber-500" aria-label="Starred" />
+        )}
+        <time
+          className="shrink-0 text-[11px] text-muted-foreground"
+          title={when.toLocaleString(undefined, { hour12: fmt.hour12 })}
+        >
+          {formatDateTime(when, fmt)}
+        </time>
+      </button>
+    </article>
+  );
+}
+
+// "•••" under a reply whose quoted history is folded away.
+function QuoteToggle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  return (
+    <div className="px-4 pb-3">
+      <Tooltip label={open ? "Hide quoted text" : "Show quoted text"}>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={onToggle}
+          aria-label={open ? "Hide quoted text" : "Show quoted text"}
+          aria-expanded={open}
+          className="h-5 px-1.5"
+        >
+          <Ellipsis />
+        </Button>
+      </Tooltip>
+    </div>
+  );
+}
+
 export function MessageCard({
   msg,
   cardRef,
   readOnly,
+  highlight,
+  onCollapse,
   onTrash,
   onRestore,
   onDelete,
@@ -186,6 +264,10 @@ export function MessageCard({
   msg: MessageRow;
   cardRef?: React.Ref<HTMLElement>;
   readOnly: boolean;
+  /** The message a link pointed at (e.g. a search hit). */
+  highlight?: boolean;
+  /** Folds the card back to a one-line summary; clicking the header calls it. */
+  onCollapse?: () => void;
   onTrash?: () => void;
   onRestore?: () => void;
   onDelete?: () => void;
@@ -196,16 +278,41 @@ export function MessageCard({
   // fetch the full parsed body lazily when the card mounts.
   const { data: bodyData, isPending: bodyPending } = useQuery(messageBodyQuery(msg.id));
   const fmt = useDateTimeFmt();
+  const [showQuote, setShowQuote] = useState(false);
   const bodyHtml = bodyData?.html ? sanitizeEmailHtml(bodyData.html) : null;
+  const bodyText = bodyData?.text ?? msg.snippet;
+  // Earlier messages already have their own cards, so a reply's quoted
+  // history is folded behind "•••" rather than repeated.
+  const split = bodyHtml ? splitQuotedHtml(bodyHtml) : splitQuotedText(bodyText);
+  const folded = split.quote !== null && !showQuote;
   const starred = hasFlag(msg.flags, Flag.STARRED);
-  const when = new Date(msg.sentAt ?? msg.receivedAt ?? msg.createdAt);
+  const when = messageTime(msg);
+
+  // Clicks on the header's controls (buttons, links, menus) keep the card open.
+  function onHeaderClick(e: React.MouseEvent) {
+    if (!onCollapse) return;
+    if ((e.target as Element).closest("button, a, [role='menu'], [role='menuitem']")) return;
+    if (window.getSelection()?.toString()) return;
+    onCollapse();
+  }
 
   return (
     <article
       ref={cardRef}
-      className="overflow-hidden rounded-lg border bg-card shadow-black/[0.02] shadow-sm"
+      data-message-id={msg.id}
+      className={cn(
+        "overflow-hidden rounded-lg border bg-card shadow-black/[0.02] shadow-sm",
+        highlight && "ring-2 ring-primary/40",
+      )}
     >
-      <header className="flex items-start justify-between gap-4 border-b px-4 py-2.5">
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: mouse shortcut; the header's controls and "Collapse all" cover the keyboard */}
+      <header
+        onClick={onHeaderClick}
+        className={cn(
+          "flex items-start justify-between gap-4 border-b px-4 py-2.5",
+          onCollapse && "cursor-pointer",
+        )}
+      >
         <SenderAvatar name={msg.fromName ?? undefined} address={msg.fromAddr} size={32} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5 font-semibold text-[13px]">
@@ -302,12 +409,15 @@ export function MessageCard({
       ) : bodyHtml ? (
         // Untrusted HTML renders in a sandboxed, scriptless iframe so a
         // sanitizer bypass can't reach the app origin or the session.
-        <EmailFrame html={bodyHtml} />
+        <EmailFrame html={folded ? split.main : bodyHtml} />
       ) : (
         // Plain-text body once loaded (or the snippet if parsing yields neither).
         <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] px-4 py-3 font-sans text-[13px]">
-          {linkifyText(bodyData?.text ?? msg.snippet)}
+          {linkifyText(folded ? split.main : bodyText)}
         </pre>
+      )}
+      {!bodyPending && split.quote !== null && (
+        <QuoteToggle open={showQuote} onToggle={() => setShowQuote((v) => !v)} />
       )}
       {bodyData?.attachments && bodyData.attachments.length > 0 && (
         <MessageAttachments

@@ -14,6 +14,7 @@ import type {
   SearchResultDto,
   ThreadDto,
 } from "@cfmail/shared";
+import { Flag, hasFlag } from "@cfmail/shared/flags";
 import { MAIL_VIEWS } from "@cfmail/shared/schemas";
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { rpc, unwrap } from "./api.ts";
@@ -88,6 +89,12 @@ export function listSearch(view: MailView, unread?: boolean): MailListSearch {
 
 export function parseMailListSearch(search: Record<string, unknown>): MailListSearch {
   return listSearch(parseMailView(search.view), search.unread === true);
+}
+
+// The list a search hit opens beside its thread: where the message lives.
+export function searchHitView(hit: { flags: number; direction: "in" | "out" }): MailView {
+  if (hasFlag(hit.flags, Flag.TRASH)) return "trash";
+  return hit.direction === "out" ? "sent" : "inbox";
 }
 
 // Page size for the infinite thread lists. The worker caps at 200; 50 keeps the

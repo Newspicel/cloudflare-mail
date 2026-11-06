@@ -7,6 +7,9 @@ import { mailboxesQuery, threadQuery } from "@/lib/queries.ts";
 import { useThreadFeed } from "@/lib/use-feeds.ts";
 
 export const Route = createFileRoute("/app/m/$mailboxId/t/$threadId")({
+  // `msg` opens the thread at one message (a search hit) instead of the newest.
+  validateSearch: (search: Record<string, unknown>): { msg?: string } =>
+    typeof search.msg === "string" && search.msg ? { msg: search.msg } : {},
   loader: ({ params, context }) =>
     context.queryClient.ensureQueryData(threadQuery(params.threadId)),
   component: ThreadPage,
@@ -14,7 +17,7 @@ export const Route = createFileRoute("/app/m/$mailboxId/t/$threadId")({
 
 function ThreadPage() {
   const { mailboxId, threadId } = Route.useParams();
-  const { view, unread } = Route.useSearch();
+  const { view, unread, msg } = Route.useSearch();
   const feed = useThreadFeed(mailboxId, view, true, unread);
   const { data: threadData } = useQuery(threadQuery(threadId));
   const { data: mailboxesData } = useQuery(mailboxesQuery);
@@ -39,7 +42,9 @@ function ThreadPage() {
       <section className="flex flex-1 flex-col overflow-hidden">
         {threadData ? (
           <MessageView
+            key={`${threadId}:${msg ?? ""}`}
             thread={threadData.thread}
+            focusMessageId={msg}
             messages={threadData.messages}
             view={view}
             unread={unread}
