@@ -63,12 +63,13 @@ describe("resolveThreadId", () => {
     from: string;
     lastMsgAt?: Date;
     parentId?: string;
+    subject?: string;
   }): Promise<string> {
     const threadId = crypto.randomUUID();
     await db.insert(thread).values({
       id: threadId,
       mailboxId: MAILBOX_ID,
-      subjectNorm: "hello",
+      subjectNorm: (opts.subject ?? "Hello").toLowerCase(),
       lastMsgAt: opts.lastMsgAt ?? new Date(),
       msgCount: 1,
       participants: [{ address: opts.from }],
@@ -80,10 +81,41 @@ describe("resolveThreadId", () => {
       direction: "in",
       messageIdHdr: opts.parentId ?? "<parent@example.com>",
       fromAddr: opts.from,
-      subject: "Hello",
+      subject: opts.subject ?? "Hello",
     });
     return threadId;
   }
+
+  const subjectOf = async (id: string) =>
+    (await db.query.thread.findFirst({ where: eq(thread.id, id) }))?.subjectNorm;
+
+  it("a thread that started without a subject takes the first one a reply brings", async () => {
+    const threadId = await seedThread({ from: "x@example.com", subject: "" });
+    const reply = {
+      mailboxId: MAILBOX_ID,
+      subject: "Re: Lunch plans",
+      inReplyTo: "<parent@example.com>",
+      participants: [{ address: "x@example.com" }],
+      fromAddr: "x@example.com",
+    };
+    expect((await resolveThreadId(db, reply)).threadId).toBe(threadId);
+    expect(await subjectOf(threadId)).toBe("lunch plans");
+
+    await resolveThreadId(db, { ...reply, subject: "Re: Something else" });
+    expect(await subjectOf(threadId)).toBe("lunch plans");
+  });
+
+  it("a reply with a different subject does not rename a thread that has one", async () => {
+    const threadId = await seedThread({ from: "x@example.com" });
+    await resolveThreadId(db, {
+      mailboxId: MAILBOX_ID,
+      subject: "New topic",
+      inReplyTo: "<parent@example.com>",
+      participants: [{ address: "x@example.com" }],
+      fromAddr: "x@example.com",
+    });
+    expect(await subjectOf(threadId)).toBe("hello");
+  });
 
   it("reuses an existing thread when a known participant replies to a stored ancestor", async () => {
     const threadId = await seedThread({ from: "x@example.com" });

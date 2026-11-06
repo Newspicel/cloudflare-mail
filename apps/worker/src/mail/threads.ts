@@ -1,12 +1,8 @@
 import type { DB } from "@cfmail/db";
 import { message, thread } from "@cfmail/db/schema";
 import { Flag } from "@cfmail/shared/flags";
+import { normalizeSubject, REPLY_PREFIX } from "@cfmail/shared/subject";
 import { and, count, desc, eq, gte, inArray, sql } from "drizzle-orm";
-import { normalizeSubject } from "./mime.ts";
-
-// Same prefixes normalizeSubject strips — used to tell a reply ("Re: X") from a
-// bare first-contact message whose subject merely happens to collide.
-const REPLY_PREFIX = /^\s*(?:(?:re|fwd?|aw|wg)\s*:\s*)+/i;
 
 const SUBJECT_WINDOW_SECONDS = 60 * 60 * 24 * 7;
 // In-Reply-To/References are attacker-controlled, so a header match into an
@@ -39,6 +35,7 @@ export async function resolveThreadId(
   db: DB,
   input: ResolveThreadInput,
 ): Promise<ResolveThreadResult> {
+  const norm = normalizeSubject(input.subject);
   const headerIds = [
     ...(input.references ?? []),
     ...(input.inReplyTo ? [input.inReplyTo] : []),
@@ -61,14 +58,17 @@ export async function resolveThreadId(
     ];
     if (candidates.length) {
       // Our own outbound mail is trusted; inbound must be corroborated.
-      if (input.trustHeaders) return { threadId: candidates[0]!, joinedByHeader: true };
-      const corroborated = await corroboratedThreadIds(db, candidates, input);
+      const corroborated = input.trustHeaders
+        ? new Set(candidates)
+        : await corroboratedThreadIds(db, candidates, input);
       const hit = candidates.find((tid) => corroborated.has(tid));
-      if (hit) return { threadId: hit, joinedByHeader: true };
+      if (hit) {
+        await adoptSubject(db, hit, norm);
+        return { threadId: hit, joinedByHeader: true };
+      }
     }
   }
 
-  const norm = normalizeSubject(input.subject);
   // When we have a header chain, derive a deterministic thread id from the
   // chain root. Two concurrent inbounds with the same parent then collide on
   // the same id instead of each inserting a fresh random-UUID thread. This only
@@ -89,6 +89,7 @@ export async function resolveThreadId(
         unreadCount: 0,
       })
       .onConflictDoNothing();
+    await adoptSubject(db, id, norm);
     return { threadId: id, joinedByHeader: false };
   }
 
@@ -133,6 +134,17 @@ export async function resolveThreadId(
     unreadCount: 0,
   });
   return { threadId: id, joinedByHeader: false };
+}
+
+// A conversation that started without a subject takes the first one a later
+// message brings, so it stops listing as "(no subject)". One that already has a
+// subject keeps it.
+async function adoptSubject(db: DB, threadId: string, norm: string): Promise<void> {
+  if (!norm) return;
+  await db
+    .update(thread)
+    .set({ subjectNorm: norm })
+    .where(and(eq(thread.id, threadId), eq(thread.subjectNorm, "")));
 }
 
 // A header match is only trusted when the inbound sender is already a known

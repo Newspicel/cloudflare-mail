@@ -148,13 +148,6 @@ function uint8ToBase64(bytes: Uint8Array): string {
   return btoa(bin);
 }
 
-export function normalizeSubject(subject: string): string {
-  return subject
-    .trim()
-    .replace(/^(?:(?:re|fwd?|aw|wg)\s*:\s*)+/i, "")
-    .toLowerCase();
-}
-
 export function snippet(body: string, len = 180): string {
   return body.replace(/\s+/g, " ").trim().slice(0, len);
 }

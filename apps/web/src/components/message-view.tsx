@@ -1,4 +1,5 @@
 import { Flag, hasFlag, setFlag } from "@cfmail/shared/flags";
+import { normalizeSubject } from "@cfmail/shared/subject";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
@@ -241,18 +242,35 @@ export function MessageView({
 
   const ai = useThreadAi(thread, visibleMessages);
 
+  // A conversation that started without a subject takes the first one a reply
+  // brought; a reply that changes it shows its own on its card.
+  const title = messages.find((m) => m.subject.trim())?.subject ?? thread.subjectNorm;
+  const titleNorm = normalizeSubject(title);
+  const changesSubject = (m: MessageRow, i: number) =>
+    i > 0 && !!m.subject.trim() && normalizeSubject(m.subject) !== titleNorm;
+
+  // The message the thread is "about" from where it was opened: from Sent, your
+  // latest message; from a received list, the latest one you received, so a
+  // conversation you replied to opens on their mail, not your reply. Lists
+  // that hold both (All, Marked, Trash) take the newest.
+  const anchor =
+    view === "sent"
+      ? visibleMessages.findLast((m) => m.direction === "out")
+      : view === "inbox" || view === "spam"
+        ? visibleMessages.findLast((m) => m.direction === "in")
+        : undefined;
+
   // Which messages open expanded. Snapshotted when the thread opens (the view
   // is keyed per thread), so marking them read doesn't fold them away: a
-  // linked message alone, else every unread one plus the newest. Mail that
+  // linked message alone, else every unread one plus the anchor. Mail that
   // arrives while the thread is open opens expanded too.
   const [initial] = useState(() => {
     const target = focusMessageId && visibleMessages.find((m) => m.id === focusMessageId);
+    const last = anchor ?? visibleMessages.at(-1);
     const open = target
       ? [target]
       : visibleMessages.filter(
-          (m, i) =>
-            i === visibleMessages.length - 1 ||
-            (m.direction === "in" && !hasFlag(m.flags, Flag.SEEN)),
+          (m) => m === last || (m.direction === "in" && !hasFlag(m.flags, Flag.SEEN)),
         );
     return {
       ids: new Set(visibleMessages.map((m) => m.id)),
@@ -336,7 +354,7 @@ export function MessageView({
         <div className="flex h-11 shrink-0 items-center gap-1 border-b bg-card px-2 sm:px-4">
           <IconButton icon={ArrowLeft} label="Back" onClick={() => history.back()} />
           <h1 className="flex-1 truncate font-semibold text-[14px] tracking-tight">
-            {messages[0]?.subject || thread.subjectNorm || "(no subject)"}
+            {title || "(no subject)"}
           </h1>
           {visibleMessages.length > 1 && (
             <IconButton
@@ -454,13 +472,21 @@ export function MessageView({
                 );
               }
               if (!isOpen(m))
-                return <CollapsedMessage key={m.id} msg={m} onExpand={() => setOpen(m.id, true)} />;
+                return (
+                  <CollapsedMessage
+                    key={m.id}
+                    msg={m}
+                    showSubject={changesSubject(m, i)}
+                    onExpand={() => setOpen(m.id, true)}
+                  />
+                );
               return (
                 <MessageCard
                   key={m.id}
                   msg={m}
                   readOnly={readOnly}
                   highlight={m.id === focusMessageId}
+                  showSubject={changesSubject(m, i)}
                   onCollapse={visibleMessages.length > 1 ? () => setOpen(m.id, false) : undefined}
                   busy={setMsg.isPending || delMsg.isPending}
                   {...messageActions(m)}
