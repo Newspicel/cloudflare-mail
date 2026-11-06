@@ -30,7 +30,7 @@ import { useDateTimeFmt } from "@/lib/prefs.ts";
 import type { MessageRow } from "@/lib/queries.ts";
 import { messageBodyQuery } from "@/lib/queries.ts";
 import { sanitizeEmailHtml } from "@/lib/sanitize-email.ts";
-import { splitQuotedHtml, splitQuotedText } from "@/lib/split-quote.ts";
+import { splitQuotedHtml, splitQuotedText, stripQuotedSnippet } from "@/lib/split-quote.ts";
 import { formatDateTime } from "@/lib/time.ts";
 import { AttachmentPreview, attachmentUrl, isPreviewable } from "./attachment-preview.tsx";
 import { PgpBanner, SpamBanner, UnsubscribeBanner } from "./banners.tsx";
@@ -213,7 +213,7 @@ export function CollapsedMessage({
           {msg.direction === "out" ? "You" : (msg.fromName ?? msg.fromAddr)}
         </span>
         <span className="min-w-0 flex-1 truncate text-[12px] text-muted-foreground">
-          {msg.snippet}
+          {stripQuotedSnippet(msg.snippet)}
         </span>
         {hasFlag(msg.flags, Flag.STARRED) && (
           <Star className="size-3.5 shrink-0 fill-current text-amber-500" aria-label="Starred" />

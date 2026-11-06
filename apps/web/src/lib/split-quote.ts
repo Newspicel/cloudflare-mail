@@ -90,3 +90,21 @@ export function splitQuotedText(text: string): SplitBody {
   if (!main || !quote) return { main: text, quote: null };
   return { main, quote };
 }
+
+// The stored snippet is the body flattened to one line, so the quote can only
+// be found by its intro: "On … wrote:" (and its translations) or Outlook's
+// header block.
+const SNIPPET_QUOTE_RE = new RegExp(
+  [
+    String.raw`\b(On|Am|Le|El|Il|Op)\s.{1,200}?\b(wrote|schrieb|a écrit|escribió|ha scritto|schreef)\s*:`,
+    String.raw`-{2,}\s*Original Message\s*-{2,}`,
+    String.raw`\bFrom:\s.{1,200}?\bSent:\s`,
+  ].join("|"),
+  "i",
+);
+
+export function stripQuotedSnippet(snippet: string): string {
+  const at = snippet.search(SNIPPET_QUOTE_RE);
+  const main = at === -1 ? snippet : snippet.slice(0, at).trimEnd();
+  return main || snippet;
+}

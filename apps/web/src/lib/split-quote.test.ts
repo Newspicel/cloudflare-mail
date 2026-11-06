@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { splitQuotedHtml, splitQuotedText } from "./split-quote.ts";
+import { splitQuotedHtml, splitQuotedText, stripQuotedSnippet } from "./split-quote.ts";
 
 describe("splitQuotedHtml", () => {
   it("folds our own reply quote", () => {
@@ -70,5 +70,27 @@ describe("splitQuotedText", () => {
   it("leaves inline quoting alone", () => {
     const text = "> question\nanswer\n> another\nanswer two";
     expect(splitQuotedText(text).quote).toBeNull();
+  });
+});
+
+describe("stripQuotedSnippet", () => {
+  it("cuts at the reply attribution", () => {
+    expect(
+      stripQuotedSnippet("Good idea, I'll book it. On Mon, 3 Nov 2026, Alice <a@b.c> wrote: hi"),
+    ).toBe("Good idea, I'll book it.");
+  });
+
+  it("cuts at Outlook's header block", () => {
+    expect(stripQuotedSnippet("Yes. From: Alice Sent: Monday To: Bob Subject: x")).toBe("Yes.");
+  });
+
+  it("keeps a snippet that is only a quote", () => {
+    const s = "On Mon, Alice wrote: hi";
+    expect(stripQuotedSnippet(s)).toBe(s);
+  });
+
+  it("leaves ordinary text alone", () => {
+    const s = "On Monday we ship the release, as I wrote earlier.";
+    expect(stripQuotedSnippet(s)).toBe(s);
   });
 });
