@@ -186,14 +186,14 @@ describe("MCP tools — reading", () => {
   });
 
   it("lists threads in the inbox view and hides trashed ones", async () => {
-    await seedThread(db(), MAILBOX_ID, { subjectNorm: "live one" });
-    await seedThread(db(), MAILBOX_ID, { subjectNorm: "binned", trashed: true });
+    await seedThread(db(), MAILBOX_ID, { subject: "Live one", subjectNorm: "live one" });
+    await seedThread(db(), MAILBOX_ID, { subject: "Binned", subjectNorm: "binned", trashed: true });
 
     const inbox = payload((await call("list_threads")).json);
-    expect(inbox.threads.map((t: any) => t.subject)).toEqual(["live one"]);
+    expect(inbox.threads.map((t: any) => t.subject)).toEqual(["Live one"]);
 
     const trash = payload((await call("list_threads", { view: "trash" })).json);
-    expect(trash.threads.map((t: any) => t.subject)).toEqual(["binned"]);
+    expect(trash.threads.map((t: any) => t.subject)).toEqual(["Binned"]);
   });
 
   it("reads a thread with its messages and bodies", async () => {

@@ -398,6 +398,9 @@ export const thread = sqliteTable(
     mailboxId: text("mailbox_id")
       .notNull()
       .references(() => mailbox.id, { onDelete: "cascade" }),
+    // The conversation's subject as people wrote it: the first non-automatic
+    // message that had one. `subjectNorm` is its matching key.
+    subject: text("subject").notNull().default(""),
     subjectNorm: text("subject_norm").notNull().default(""),
     lastMsgAt: integer("last_msg_at", { mode: "timestamp" }).notNull().default(now),
     msgCount: integer("msg_count").notNull().default(0),
@@ -451,6 +454,9 @@ export const message = sqliteTable(
     ccAddrs: text("cc_addrs", { mode: "json" }).$type<{ name?: string; address: string }[]>(),
     bccAddrs: text("bcc_addrs", { mode: "json" }).$type<{ name?: string; address: string }[]>(),
     subject: text("subject").notNull().default(""),
+    // A vacation/out-of-office responder wrote it, not a person. Such replies
+    // never stand in for a conversation (where it opens, its subject).
+    autoReply: integer("auto_reply", { mode: "boolean" }).notNull().default(false),
     snippet: text("snippet").notNull().default(""),
     // Full plaintext body (HTML normalized to text), capped, for FTS body search.
     // Null on pre-migration rows; the raw message always lives in R2.

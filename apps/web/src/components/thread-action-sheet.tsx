@@ -1,3 +1,4 @@
+import { displaySubject } from "@cfmail/shared/subject";
 import {
   ArchiveRestore,
   CheckSquare,
@@ -8,6 +9,7 @@ import {
   Trash2,
 } from "lucide-react";
 import type { MailView, ThreadRow } from "@/lib/queries.ts";
+import { counterpart, useOwnAddresses } from "@/lib/thread-label.ts";
 import { Sheet, SheetContent } from "./ui/sheet.tsx";
 
 interface Action {
@@ -79,8 +81,8 @@ export function ThreadActionSheet({
     actions.push({ icon: Trash2, label: "Trash", run: act(onTrash), danger: true });
   }
 
-  const title = thread.subjectNorm || "(no subject)";
-  const from = thread.participants[0];
+  const title = displaySubject(thread.subject) || "(no subject)";
+  const from = counterpart(thread.participants, useOwnAddresses());
   const sender = from?.name ?? from?.address ?? "";
 
   return (

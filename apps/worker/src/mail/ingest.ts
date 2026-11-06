@@ -9,6 +9,7 @@ import {
   addrsToText,
   bodyForIndex,
   extractUnsubscribe,
+  isAutoReply,
   type ParsedEmail,
   parseMime,
   snippet,
@@ -98,9 +99,11 @@ export async function ingestRaw(env: Env, db: DB, opts: IngestOptions): Promise<
   // keeps the chain a later reply copies out of this row valid.
   const references = parsed.references ? splitMessageIds(parsed.references) : null;
   const inReplyTo = parsed.inReplyTo ? (splitMessageIds(parsed.inReplyTo)[0] ?? null) : null;
+  const autoReply = opts.direction === "in" && isAutoReply(parsed);
   const { threadId, joinedByHeader } = await resolveThreadId(db, {
     mailboxId,
     subject: parsed.subject ?? "",
+    autoReply,
     inReplyTo,
     references,
     participants,
@@ -146,6 +149,7 @@ export async function ingestRaw(env: Env, db: DB, opts: IngestOptions): Promise<
     ccAddrs: ccAddrs.length ? ccAddrs : null,
     bccAddrs: null,
     subject: parsed.subject ?? "",
+    autoReply,
     snippet: snippet(bodyIndex),
     bodyText: bodyIndex,
     toText: addrsToText([...toAddrs, ...ccAddrs]),

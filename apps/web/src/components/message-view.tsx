@@ -1,5 +1,5 @@
 import { Flag, hasFlag, setFlag } from "@cfmail/shared/flags";
-import { normalizeSubject } from "@cfmail/shared/subject";
+import { displaySubject, normalizeSubject } from "@cfmail/shared/subject";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
@@ -244,33 +244,39 @@ export function MessageView({
 
   // A conversation that started without a subject takes the first one a reply
   // brought; a reply that changes it shows its own on its card.
-  const title = messages.find((m) => m.subject.trim())?.subject ?? thread.subjectNorm;
+  const title = displaySubject(
+    thread.subject || (messages.find((m) => !m.autoReply && m.subject.trim())?.subject ?? ""),
+  );
   const titleNorm = normalizeSubject(title);
   const changesSubject = (m: MessageRow, i: number) =>
-    i > 0 && !!m.subject.trim() && normalizeSubject(m.subject) !== titleNorm;
+    i > 0 && !m.autoReply && !!m.subject.trim() && normalizeSubject(m.subject) !== titleNorm;
 
   // The message the thread is "about" from where it was opened: from Sent, your
   // latest message; from a received list, the latest one you received, so a
   // conversation you replied to opens on their mail, not your reply. Lists
-  // that hold both (All, Marked, Trash) take the newest.
+  // that hold both (All, Marked, Trash) take the newest. An out-of-office reply
+  // is never what a thread is about.
+  const people = visibleMessages.filter((m) => !m.autoReply);
   const anchor =
     view === "sent"
-      ? visibleMessages.findLast((m) => m.direction === "out")
+      ? people.findLast((m) => m.direction === "out")
       : view === "inbox" || view === "spam"
-        ? visibleMessages.findLast((m) => m.direction === "in")
-        : undefined;
+        ? people.findLast((m) => m.direction === "in")
+        : people.at(-1);
 
   // Which messages open expanded. Snapshotted when the thread opens (the view
   // is keyed per thread), so marking them read doesn't fold them away: a
   // linked message alone, else every unread one plus the anchor. Mail that
-  // arrives while the thread is open opens expanded too.
+  // arrives while the thread is open opens expanded too. Auto-replies stay
+  // folded unless they're all there is.
   const [initial] = useState(() => {
     const target = focusMessageId && visibleMessages.find((m) => m.id === focusMessageId);
     const last = anchor ?? visibleMessages.at(-1);
     const open = target
       ? [target]
       : visibleMessages.filter(
-          (m) => m === last || (m.direction === "in" && !hasFlag(m.flags, Flag.SEEN)),
+          (m) =>
+            m === last || (m.direction === "in" && !m.autoReply && !hasFlag(m.flags, Flag.SEEN)),
         );
     return {
       ids: new Set(visibleMessages.map((m) => m.id)),
@@ -281,7 +287,7 @@ export function MessageView({
   const [overrides, setOverrides] = useState<Map<string, boolean>>(() => new Map());
   const [unfolded, setUnfolded] = useState(false);
   const isOpen = (m: MessageRow) =>
-    overrides.get(m.id) ?? (initial.open.has(m.id) || !initial.ids.has(m.id));
+    overrides.get(m.id) ?? (initial.open.has(m.id) || (!initial.ids.has(m.id) && !m.autoReply));
   const setOpen = (id: string, open: boolean) =>
     setOverrides((prev) => new Map(prev).set(id, open));
   const allOpen = visibleMessages.every(isOpen);

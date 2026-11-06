@@ -7,6 +7,7 @@ import {
   buildThreadingHeaders,
   extractUnsubscribe,
   htmlToText,
+  isAutoReply,
   snippet,
 } from "../src/mail/mime.ts";
 
@@ -138,5 +139,35 @@ describe("buildThreadingHeaders", () => {
     expect(buildThreadingHeaders({ messageId: "<a@x>", references: [] })).toEqual({
       "Message-ID": "<a@x>",
     });
+  });
+});
+
+describe("isAutoReply", () => {
+  const mail = (subject: string, headers: Record<string, string> = {}) =>
+    ({
+      subject,
+      headers: Object.entries(headers).map(([key, value]) => ({ key, value })),
+    }) as unknown as ParsedEmail;
+
+  it("catches Exchange's out-of-office reply (auto-generated + responder subject)", () => {
+    expect(
+      isAutoReply(
+        mail("Réponse automatique\u00a0: Wohnung Düdingen", {
+          "auto-submitted": "auto-generated",
+          "x-ms-exchange-generated-message-source": "Mailbox Rules Agent",
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("trusts RFC 3834 and the X-Autoreply family regardless of subject", () => {
+    expect(isAutoReply(mail("Re: hi", { "auto-submitted": "auto-replied" }))).toBe(true);
+    expect(isAutoReply(mail("Re: hi", { "x-autoreply": "yes" }))).toBe(true);
+    expect(isAutoReply(mail("Re: hi", { precedence: "auto_reply" }))).toBe(true);
+  });
+
+  it("does not take an auto-generated notification for an auto-reply", () => {
+    expect(isAutoReply(mail("Your invoice", { "auto-submitted": "auto-generated" }))).toBe(false);
+    expect(isAutoReply(mail("Re: Out of office plans for next week"))).toBe(false);
   });
 });

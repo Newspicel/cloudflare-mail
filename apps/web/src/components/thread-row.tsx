@@ -1,3 +1,4 @@
+import { displaySubject } from "@cfmail/shared/subject";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { type LucideIcon, Mails } from "lucide-react";
@@ -13,6 +14,7 @@ import {
   type ThreadRow,
   threadQuery,
 } from "@/lib/queries.ts";
+import { counterpart, useOwnAddresses } from "@/lib/thread-label.ts";
 import { formatStamp } from "@/lib/time.ts";
 import { useSwipeRow } from "@/lib/use-swipe-row.ts";
 import { SenderAvatar } from "./sender-avatar.tsx";
@@ -97,7 +99,7 @@ export function ThreadRowView({
   const { prefs } = useUserPrefs();
   const fmt = useDateTimeFmt();
   const compact = prefs.density === "compact";
-  const firstParticipant = thread.participants[0];
+  const firstParticipant = counterpart(thread.participants, useOwnAddresses());
   const label = firstParticipant?.name ?? firstParticipant?.address ?? "(unknown)";
   const unread = thread.unreadCount > 0;
   const showSummary = prefs.aiSummaries !== false && !!thread.aiSummary;
@@ -218,7 +220,7 @@ export function ThreadRowView({
             unread ? "font-medium text-foreground" : "text-muted-foreground",
           )}
         >
-          {thread.subjectNorm || "(no subject)"}
+          {displaySubject(thread.subject) || "(no subject)"}
         </span>
         {unread && (
           // eslint-disable-next-line react-doctor/prefer-tag-over-role -- decorative status dot conveying unread count; not a real image

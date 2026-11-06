@@ -75,6 +75,7 @@ export async function seedThread(
   await db.insert(thread).values({
     id: threadId,
     mailboxId,
+    subject: "Hello",
     subjectNorm: "hello",
     msgCount: 1,
     ...overrides,

@@ -195,7 +195,7 @@ export function CollapsedMessage({
 }) {
   const fmt = useDateTimeFmt();
   const out = msg.direction === "out";
-  const unread = !out && !hasFlag(msg.flags, Flag.SEEN);
+  const unread = !out && !msg.autoReply && !hasFlag(msg.flags, Flag.SEEN);
   const when = messageTime(msg);
   return (
     <article
@@ -229,6 +229,11 @@ export function CollapsedMessage({
           </span>
         </span>
         <span className="min-w-0 flex-1 truncate text-[12px] text-muted-foreground">
+          {msg.autoReply && (
+            <Badge variant="outline" className="mr-1.5 px-1.5 text-[11px] text-muted-foreground">
+              Auto-reply
+            </Badge>
+          )}
           {showSubject && <span className="font-medium text-foreground">{msg.subject} — </span>}
           {stripQuotedSnippet(msg.snippet)}
         </span>

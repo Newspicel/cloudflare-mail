@@ -13,6 +13,8 @@ const HEADER_MATCH_WINDOW_SECONDS = 60 * 60 * 24 * 180;
 export interface ResolveThreadInput {
   mailboxId: string;
   subject: string;
+  // An out-of-office reply: joins its thread but never names it.
+  autoReply?: boolean;
   inReplyTo?: string | null;
   references?: string[] | null;
   participants: { name?: string; address: string }[];
@@ -35,7 +37,8 @@ export async function resolveThreadId(
   db: DB,
   input: ResolveThreadInput,
 ): Promise<ResolveThreadResult> {
-  const norm = normalizeSubject(input.subject);
+  const norm = input.autoReply ? "" : normalizeSubject(input.subject);
+  const threadSubject = input.autoReply ? "" : input.subject.trim();
   const headerIds = [
     ...(input.references ?? []),
     ...(input.inReplyTo ? [input.inReplyTo] : []),
@@ -63,7 +66,7 @@ export async function resolveThreadId(
         : await corroboratedThreadIds(db, candidates, input);
       const hit = candidates.find((tid) => corroborated.has(tid));
       if (hit) {
-        await adoptSubject(db, hit, norm);
+        await adoptSubject(db, hit, input);
         return { threadId: hit, joinedByHeader: true };
       }
     }
@@ -82,6 +85,7 @@ export async function resolveThreadId(
       .values({
         id,
         mailboxId: input.mailboxId,
+        subject: threadSubject,
         subjectNorm: norm,
         lastMsgAt: new Date(),
         msgCount: 0,
@@ -89,7 +93,7 @@ export async function resolveThreadId(
         unreadCount: 0,
       })
       .onConflictDoNothing();
-    await adoptSubject(db, id, norm);
+    await adoptSubject(db, id, input);
     return { threadId: id, joinedByHeader: false };
   }
 
@@ -127,6 +131,7 @@ export async function resolveThreadId(
   await db.insert(thread).values({
     id,
     mailboxId: input.mailboxId,
+    subject: threadSubject,
     subjectNorm: norm,
     lastMsgAt: new Date(),
     msgCount: 0,
@@ -138,13 +143,14 @@ export async function resolveThreadId(
 
 // A conversation that started without a subject takes the first one a later
 // message brings, so it stops listing as "(no subject)". One that already has a
-// subject keeps it.
-async function adoptSubject(db: DB, threadId: string, norm: string): Promise<void> {
-  if (!norm) return;
+// subject keeps it, and an auto-reply's "Out of office: …" never names one.
+async function adoptSubject(db: DB, threadId: string, input: ResolveThreadInput): Promise<void> {
+  const subject = input.subject.trim();
+  if (!subject || input.autoReply) return;
   await db
     .update(thread)
-    .set({ subjectNorm: norm })
-    .where(and(eq(thread.id, threadId), eq(thread.subjectNorm, "")));
+    .set({ subject, subjectNorm: normalizeSubject(subject) })
+    .where(and(eq(thread.id, threadId), eq(thread.subject, "")));
 }
 
 // A header match is only trusted when the inbound sender is already a known

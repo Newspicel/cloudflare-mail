@@ -9,6 +9,7 @@ import { attachment, label, mailbox, message, messageLabel, thread } from "@cfma
 import { Flag, hasFlag, setFlag } from "@cfmail/shared/flags";
 import { has, Perm } from "@cfmail/shared/permissions";
 import type { AddressObject, SearchFilters } from "@cfmail/shared/schemas";
+import { displaySubject } from "@cfmail/shared/subject";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Env } from "../env.ts";
 import { AppError } from "../errors.ts";
@@ -123,7 +124,7 @@ export async function listThreads(
     hasMore,
     threads: page.map((t) => ({
       threadId: t.id,
-      subject: t.subjectNorm,
+      subject: displaySubject(t.subject),
       participants: t.participants.map((p) => formatAddress(p.name ?? null, p.address)),
       messageCount: t.msgCount,
       unreadCount: t.unreadCount,
@@ -162,7 +163,7 @@ export async function readThread(_env: Env, db: DB, s: McpSession, a: { threadId
   return {
     mailbox: s.address,
     threadId: th.id,
-    subject: th.subjectNorm,
+    subject: displaySubject(th.subject),
     messageCount: th.msgCount,
     unreadCount: th.unreadCount,
     trashed: th.trashed,
