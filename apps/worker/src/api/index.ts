@@ -14,6 +14,7 @@ import { attachmentsRoutes } from "./attachments.ts";
 import { avatarRoutes } from "./avatar.ts";
 import { blocklistRoutes } from "./blocklist.ts";
 import { bootstrapRoutes } from "./bootstrap.ts";
+import { connectedAppsRoutes } from "./connected-apps.ts";
 import { contactsRoutes } from "./contacts.ts";
 import { domainsRoutes } from "./domains.ts";
 import { draftsRoutes } from "./drafts.ts";
@@ -58,10 +59,17 @@ export function buildApi() {
     // Service-mailbox API is bearer-key authed, not session authed — mount it
     // before the session middleware so it never touches cookies.
     .route("/api/svc", svcRoutes())
-    // MCP authenticates with an app password, not a cookie, so mount it above
-    // the session middleware too — below it every tool call would pay for a
-    // Better Auth session lookup whose result MCP never reads.
+    // MCP authenticates with an OAuth bearer token, not a cookie, so mount it
+    // above the session middleware too — below it every tool call would pay
+    // for a Better Auth session lookup whose result MCP never reads.
     .route("/api/mcp", mcpRoutes())
+    // OAuth discovery for MCP clients (RFC 8414 / RFC 9728). These live at the
+    // origin root by spec; Better Auth's mcp plugin answers them from its
+    // handler, so hand the request straight through.
+    .get("/.well-known/*", async (c) => {
+      const auth = await authFromCtx(c);
+      return auth.handler(c.req.raw);
+    })
     // Public HTTP sign-up is closed via `disableSignUp: true` in auth.ts.
     // All account creation flows through /api/bootstrap (first admin) or
     // /api/users (admin-created) or /api/invites/accept (invited user).
@@ -96,6 +104,7 @@ export function buildApi() {
     .route("/api/temp", tempRoutes())
     .route("/api/push", pushRoutes())
     .route("/api/app-passwords", appPasswordsRoutes())
+    .route("/api/connected-apps", connectedAppsRoutes())
     .route("/api/reminders", remindersRoutes())
     .route("/api/search", searchRoutes())
     .get("/api/stream", streamRoute);

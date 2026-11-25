@@ -45,4 +45,5 @@ export const keys = {
   folderThreads: (folderId: string) => ["folder-threads", folderId] as const,
   /** The user's IMAP app passwords plus the server's connection details. */
   appPasswords: () => ["app-passwords"] as const,
+  connectedApps: () => ["connected-apps"] as const,
 };

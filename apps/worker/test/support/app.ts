@@ -112,6 +112,11 @@ const TRUNCATE_TABLES = [
   "domain_grant",
   "domain",
   "user_invite",
+  "oauth_access_token",
+  "oauth_refresh_token",
+  "oauth_consent",
+  "oauth_client_resource",
+  "oauth_client",
   "user",
 ];
 

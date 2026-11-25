@@ -2,7 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { toast } from "sonner";
 import { CardShell, Field, PrimaryButton } from "@/components/auth-card.tsx";
-import { authClient } from "@/lib/auth-client.ts";
+import { authClient, followOAuthRedirect } from "@/lib/auth-client.ts";
 
 export const Route = createFileRoute("/two-factor")({
   component: TwoFactorPage,
@@ -22,7 +22,7 @@ function TwoFactorPage() {
         ? await authClient.twoFactor.verifyBackupCode({ code })
         : await authClient.twoFactor.verifyTotp({ code });
       if (res.error) throw new Error(res.error.message ?? "verify failed");
-      nav({ to: "/app" });
+      if (!followOAuthRedirect(res.data)) nav({ to: "/app" });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "verify failed");
     } finally {

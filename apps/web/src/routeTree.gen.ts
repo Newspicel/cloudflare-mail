@@ -21,6 +21,7 @@ import { Route as AppIndexRouteImport } from "./routes/app/index"
 import { Route as AppAdminRouteImport } from "./routes/app/admin"
 import { Route as AppSearchRouteImport } from "./routes/app/search"
 import { Route as AppSettingsRouteImport } from "./routes/app/settings"
+import { Route as OauthConsentRouteImport } from "./routes/oauth/consent"
 import { Route as AppFolderFolderIdRouteImport } from "./routes/app/folder/$folderId"
 import { Route as AppMMailboxIdRouteImport } from "./routes/app/m/$mailboxId"
 import { Route as AppFolderFolderIdIndexRouteImport } from "./routes/app/folder/$folderId.index"
@@ -88,6 +89,11 @@ const AppSettingsRoute = AppSettingsRouteImport.update({
   path: "/settings",
   getParentRoute: () => AppRouteRoute,
 } as any)
+const OauthConsentRoute = OauthConsentRouteImport.update({
+  id: "/oauth/consent",
+  path: "/oauth/consent",
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AppFolderFolderIdRoute = AppFolderFolderIdRouteImport.update({
   id: "/folder/$folderId",
   path: "/folder/$folderId",
@@ -132,6 +138,7 @@ export interface FileRoutesByFullPath {
   "/app/admin": typeof AppAdminRoute
   "/app/search": typeof AppSearchRoute
   "/app/settings": typeof AppSettingsRoute
+  "/oauth/consent": typeof OauthConsentRoute
   "/app/": typeof AppIndexRoute
   "/app/folder/$folderId": typeof AppFolderFolderIdRouteWithChildren
   "/app/m/$mailboxId": typeof AppMMailboxIdRouteWithChildren
@@ -151,6 +158,7 @@ export interface FileRoutesByTo {
   "/app/admin": typeof AppAdminRoute
   "/app/search": typeof AppSearchRoute
   "/app/settings": typeof AppSettingsRoute
+  "/oauth/consent": typeof OauthConsentRoute
   "/app": typeof AppIndexRoute
   "/app/folder/$folderId": typeof AppFolderFolderIdIndexRoute
   "/app/m/$mailboxId": typeof AppMMailboxIdIndexRoute
@@ -170,6 +178,7 @@ export interface FileRoutesById {
   "/app/admin": typeof AppAdminRoute
   "/app/search": typeof AppSearchRoute
   "/app/settings": typeof AppSettingsRoute
+  "/oauth/consent": typeof OauthConsentRoute
   "/app/": typeof AppIndexRoute
   "/app/folder/$folderId": typeof AppFolderFolderIdRouteWithChildren
   "/app/m/$mailboxId": typeof AppMMailboxIdRouteWithChildren
@@ -192,6 +201,7 @@ export interface FileRouteTypes {
     | "/app/admin"
     | "/app/search"
     | "/app/settings"
+    | "/oauth/consent"
     | "/app/"
     | "/app/folder/$folderId"
     | "/app/m/$mailboxId"
@@ -211,6 +221,7 @@ export interface FileRouteTypes {
     | "/app/admin"
     | "/app/search"
     | "/app/settings"
+    | "/oauth/consent"
     | "/app"
     | "/app/folder/$folderId"
     | "/app/m/$mailboxId"
@@ -229,6 +240,7 @@ export interface FileRouteTypes {
     | "/app/admin"
     | "/app/search"
     | "/app/settings"
+    | "/oauth/consent"
     | "/app/"
     | "/app/folder/$folderId"
     | "/app/m/$mailboxId"
@@ -247,6 +259,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   TwoFactorRoute: typeof TwoFactorRoute
+  OauthConsentRoute: typeof OauthConsentRoute
 }
 
 declare module "@tanstack/react-router" {
@@ -334,6 +347,13 @@ declare module "@tanstack/react-router" {
       fullPath: "/app/settings"
       preLoaderRoute: typeof AppSettingsRouteImport
       parentRoute: typeof AppRouteRoute
+    }
+    "/oauth/consent": {
+      id: "/oauth/consent"
+      path: "/oauth/consent"
+      fullPath: "/oauth/consent"
+      preLoaderRoute: typeof OauthConsentRouteImport
+      parentRoute: typeof rootRouteImport
     }
     "/app/folder/$folderId": {
       id: "/app/folder/$folderId"
@@ -438,6 +458,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   TwoFactorRoute: TwoFactorRoute,
+  OauthConsentRoute: OauthConsentRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

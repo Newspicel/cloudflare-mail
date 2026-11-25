@@ -23,6 +23,14 @@ const TABLES: Record<string, SQLiteTable> = {
   verification: schema.verification,
   twoFactor: schema.twoFactor,
   passkey: schema.passkey,
+  jwks: schema.jwks,
+  oauthClient: schema.oauthClient,
+  oauthResource: schema.oauthResource,
+  oauthClientResource: schema.oauthClientResource,
+  oauthRefreshToken: schema.oauthRefreshToken,
+  oauthAccessToken: schema.oauthAccessToken,
+  oauthConsent: schema.oauthConsent,
+  oauthClientAssertion: schema.oauthClientAssertion,
 };
 
 // Better Auth field.type -> Drizzle column.dataType (array/json types are

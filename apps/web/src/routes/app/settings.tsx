@@ -6,6 +6,7 @@ import { RulesSection } from "@/components/rules-settings.tsx";
 import { AppPasswordsSection } from "@/components/settings/app-passwords-section.tsx";
 import { AppearanceSection } from "@/components/settings/appearance-section.tsx";
 import { ComposeSection } from "@/components/settings/compose-section.tsx";
+import { ConnectedAppsSection } from "@/components/settings/connected-apps-section.tsx";
 import { DateTimeSection } from "@/components/settings/datetime-section.tsx";
 import { FoldersSection } from "@/components/settings/folders-section.tsx";
 import { NotificationsSection } from "@/components/settings/notifications-section.tsx";
@@ -29,6 +30,7 @@ const NAV = [
   ["templates", "Templates"],
   ["security", "Security"],
   ["imap", "IMAP access"],
+  ["apps", "Connected apps"],
   ["notifications", "Notifications"],
   ["folders", "Folders"],
   ["rules", "Rules"],
@@ -82,6 +84,7 @@ function SettingsPage() {
           <SecuritySection />
           <TwoFactorSection enabled={!!meData?.user?.twoFactorEnabled} />
           <AppPasswordsSection mailboxes={mailboxesData?.mailboxes ?? []} />
+          <ConnectedAppsSection />
           <NotificationsSection mailboxes={mailboxesData?.mailboxes ?? []} />
           <FoldersSection />
           <RulesSection mailboxes={editable} />

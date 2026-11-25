@@ -4,55 +4,32 @@
 //
 // Stateless: every request carries its own credential and is answered with a
 // plain JSON body, so there is no session to park in a Durable Object and no
-// server-initiated stream to keep open. Clients authenticate with a per-mailbox
-// app password — the same credential an IMAP client uses, so one connection
-// sees one mailbox and revoking it cuts both off at once.
+// server-initiated stream to keep open. Clients sign in as the user through
+// OAuth (Better Auth's mcp plugin: discovery, CIMD registration, consent) and
+// present a JWT bound to this resource. One connection reaches every mailbox
+// the user can; each tool call is checked against that user's perms on the
+// mailbox it touches, re-resolved through permissions.ts on that request.
 
+import { requireMcpAuth } from "@better-auth/mcp";
 import type { DB } from "@cfmail/db";
-import { appPassword } from "@cfmail/db/schema";
-import { has } from "@cfmail/shared/permissions";
-import { eq } from "drizzle-orm";
+import { oauthConsent, user } from "@cfmail/db/schema";
+import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { type LoginThrottle, loginWithAppPassword } from "../app-passwords.ts";
+import { baseUrlFromRequest, mcpResource } from "../auth.ts";
+import { authFromCtx } from "../auth-ctx.ts";
 import { dbFromCtx } from "../db.ts";
 import type { AppBindings, Env } from "../env.ts";
 import { AppError } from "../errors.ts";
-import type { McpSession } from "../mcp/store.ts";
+import { type McpCaller, resolveTarget } from "../mcp/store.ts";
 import { describeTools, TOOLS_BY_NAME } from "../mcp/tools.ts";
-import { resolveAccess } from "../permissions.ts";
 
 // The spec revision this server implements. A client that asks for a different
 // one is answered with ours; per spec it then either adapts or disconnects.
 const PROTOCOL_VERSION = "2025-06-18";
 const SERVER_NAME = "cfmail";
 const SERVER_VERSION = "1.0.0";
-
-// Scrypt dominates the cost of verifying an app password, and a stateless
-// transport re-authenticates on every call, so MCP gets a looser ceiling than
-// IMAP's once-per-session login.
-const MCP_THROTTLE: LoginThrottle = { scope: "mcp-login", max: 60, ipMax: 120 };
-
-// Verified credentials, cached per isolate so a burst of tool calls pays for
-// scrypt once. Safety doesn't rest on the cache: every request still re-reads
-// the app_password row (so deleting it cuts the client off at once) and
-// re-resolves mailbox access through permissions.ts (so a revoked membership
-// stops working immediately). The TTL only bounds how long a credential that
-// was changed in place could keep working, and `lastUsedAt` is correspondingly
-// accurate to within one TTL.
-const CRED_TTL_MS = 5 * 60 * 1000;
-const CRED_CACHE_MAX = 256;
-
-interface CachedLogin {
-  appPasswordId: string;
-  userId: string;
-  mailboxId: string;
-  address: string;
-  at: number;
-}
-
-const credCache = new Map<string, CachedLogin>();
 
 const rpcRequest = z.object({
   jsonrpc: z.literal("2.0"),
@@ -75,25 +52,38 @@ export function mcpRoutes() {
     new Hono<AppBindings>()
       .post("/", async (c) => {
         const db = dbFromCtx(c);
-        const session = await authenticate(db, c.req.raw);
+        const auth = await authFromCtx(c);
+        const resource = mcpResource(baseUrlFromRequest(c.req.raw));
 
-        let body: unknown;
-        try {
-          body = await c.req.json();
-        } catch {
-          return c.json(errorFor(null, Code.parse, "invalid JSON"));
-        }
+        // requireMcpAuth checks signature, issuer, audience (this resource) and
+        // expiry, and answers a missing or bad token with the RFC 9728 challenge
+        // that starts the client's OAuth flow.
+        const handle = requireMcpAuth(
+          auth,
+          async (req, claims) => {
+            const caller = await authorize(db, req, claims);
 
-        // Pre-2025-06-18 clients may still send a JSON-RPC batch; answer one with
-        // an array and drop the notifications, which have no reply.
-        if (Array.isArray(body)) {
-          const out = await Promise.all(body.map((m) => handleMessage(c.env, db, session, m)));
-          const replies = out.filter((r) => r !== null);
-          return replies.length === 0 ? c.body(null, 202) : c.json(replies);
-        }
+            let body: unknown;
+            try {
+              body = await req.json();
+            } catch {
+              return c.json(errorFor(null, Code.parse, "invalid JSON"));
+            }
 
-        const reply = await handleMessage(c.env, db, session, body);
-        return reply === null ? c.body(null, 202) : c.json(reply);
+            // Pre-2025-06-18 clients may still send a JSON-RPC batch; answer one
+            // with an array and drop the notifications, which have no reply.
+            if (Array.isArray(body)) {
+              const out = await Promise.all(body.map((m) => handleMessage(c.env, db, caller, m)));
+              const replies = out.filter((r) => r !== null);
+              return replies.length === 0 ? c.body(null, 202) : c.json(replies);
+            }
+
+            const reply = await handleMessage(c.env, db, caller, body);
+            return reply === null ? c.body(null, 202) : c.json(reply);
+          },
+          { resource },
+        );
+        return handle(c.req.raw);
       })
 
       // Stateless: there is no long-lived stream to attach to and no session to
@@ -111,12 +101,7 @@ export function mcpRoutes() {
 
 type RpcReply = Record<string, unknown> | null;
 
-async function handleMessage(
-  env: Env,
-  db: DB,
-  session: McpSession,
-  raw: unknown,
-): Promise<RpcReply> {
+async function handleMessage(env: Env, db: DB, caller: McpCaller, raw: unknown): Promise<RpcReply> {
   const parsed = rpcRequest.safeParse(raw);
   if (!parsed.success) {
     const id = idOf(raw);
@@ -127,7 +112,7 @@ async function handleMessage(
   const isNotification = msg.id === undefined;
 
   try {
-    const result = await dispatch(env, db, session, msg);
+    const result = await dispatch(env, db, caller, msg);
     if (isNotification) return null;
     return { jsonrpc: "2.0", id: msg.id ?? null, result };
   } catch (err) {
@@ -138,14 +123,15 @@ async function handleMessage(
   }
 }
 
-async function dispatch(env: Env, db: DB, session: McpSession, msg: RpcRequest): Promise<unknown> {
+async function dispatch(env: Env, db: DB, caller: McpCaller, msg: RpcRequest): Promise<unknown> {
   switch (msg.method) {
     case "initialize":
       return {
         protocolVersion: PROTOCOL_VERSION,
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: SERVER_NAME, title: "cfmail", version: SERVER_VERSION },
-        instructions: `You are connected to the mailbox ${session.address}. Tool calls only ever see this one mailbox. send_mail and reply_to_thread deliver real email immediately and cannot be recalled, so confirm recipients and wording with the user before calling them.`,
+        instructions:
+          "You act as the signed-in user across every mailbox they can reach. Call list_mailboxes first to learn the addresses; send_mail and list_labels name a mailbox, tools that take a thread or message id act in that item's own mailbox. send_mail and reply_to_thread deliver real email immediately and cannot be recalled, so confirm the sending address, recipients and wording with the user before calling them.",
       };
 
     case "notifications/initialized":
@@ -159,7 +145,7 @@ async function dispatch(env: Env, db: DB, session: McpSession, msg: RpcRequest):
       return { tools: describeTools() };
 
     case "tools/call":
-      return callTool(env, db, session, msg.params);
+      return callTool(env, db, caller, msg.params);
 
     default:
       throw new RpcError(Code.methodNotFound, `unknown method: ${msg.method}`);
@@ -171,7 +157,7 @@ const callParams = z.object({
   arguments: z.unknown().optional(),
 });
 
-async function callTool(env: Env, db: DB, session: McpSession, params: unknown): Promise<unknown> {
+async function callTool(env: Env, db: DB, caller: McpCaller, params: unknown): Promise<unknown> {
   const p = callParams.safeParse(params);
   if (!p.success) throw new RpcError(Code.invalidParams, "tools/call needs a tool name");
 
@@ -185,14 +171,17 @@ async function callTool(env: Env, db: DB, session: McpSession, params: unknown):
     });
   }
 
-  // RBAC for the whole surface, in one place: perms were re-resolved for this
-  // request, so a membership revoked a second ago already fails here.
-  if (!has(session.perms, tool.perm)) {
-    return toolError(`forbidden: this connection may not ${tool.name}`);
-  }
-
   try {
-    const data = await tool.run(env, db, session, args.data as never);
+    // RBAC for the whole surface, in one place: the target resolves to the
+    // mailboxes this user holds tool.perm on, re-read for this request, so a
+    // membership revoked a second ago already fails here.
+    const mailboxes = await resolveTarget(
+      db,
+      caller.userId,
+      tool.target(args.data as never),
+      tool.perm,
+    );
+    const data = await tool.run(env, db, mailboxes, args.data as never);
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   } catch (err) {
     // A failure inside a tool is the model's problem to work around, not a
@@ -244,116 +233,48 @@ function idOf(raw: unknown): string | number | null | undefined {
 
 // ─── auth ───────────────────────────────────────────────────────────────────
 
-// Credentials arrive as a mailbox address plus an app password. Basic carries
-// the pair natively; Bearer is accepted as `address:password` for clients that
-// can only send a single opaque token.
-function parseCredential(req: Request): { username: string; password: string } | null {
-  const header = req.headers.get("authorization") ?? "";
-  const basic = header.match(/^Basic\s+(.+)$/i);
-  if (basic?.[1]) {
-    let decoded: string;
-    try {
-      decoded = atob(basic[1].trim());
-    } catch {
-      return null;
-    }
-    return split(decoded);
+type JWTPayload = Parameters<Parameters<typeof requireMcpAuth>[1]>[1];
+
+// The token proves who signed in and which client they handed it to; whether
+// that still holds is read fresh on every call. A deleted or banned user, or a
+// revoked consent (Settings → Connected apps), fails the next request even
+// while the JWT is unexpired — a token caches authentication, never access.
+async function authorize(db: DB, req: Request, claims: JWTPayload): Promise<McpCaller> {
+  const userId = typeof claims.sub === "string" ? claims.sub : null;
+  const clientId = typeof claims.azp === "string" ? claims.azp : null;
+  if (!userId || !clientId) throw unauthorized(req, "the access token names no user or client");
+
+  const [row] = await db
+    .select({ banned: user.banned, banExpires: user.banExpires, consentId: oauthConsent.id })
+    .from(user)
+    .leftJoin(
+      oauthConsent,
+      and(eq(oauthConsent.userId, user.id), eq(oauthConsent.clientId, clientId)),
+    )
+    .where(eq(user.id, userId))
+    .limit(1);
+  if (!row) throw unauthorized(req, "this account no longer exists");
+  if (row.banned && (!row.banExpires || row.banExpires > new Date())) {
+    throw unauthorized(req, "this account is suspended");
   }
-  const bearer = header.match(/^Bearer\s+(.+)$/i);
-  if (bearer?.[1]) return split(bearer[1].trim());
-  return null;
+  if (!row.consentId) throw unauthorized(req, "access for this app has been revoked");
+  return { userId, clientId };
 }
 
-// The password alphabet excludes ':', so the first colon always separates.
-function split(pair: string): { username: string; password: string } | null {
-  const i = pair.indexOf(":");
-  if (i <= 0) return null;
-  const username = pair.slice(0, i);
-  const password = pair.slice(i + 1);
-  return username && password ? { username, password } : null;
-}
-
-async function authenticate(db: DB, req: Request): Promise<McpSession> {
-  const cred = parseCredential(req);
-  if (!cred) throw unauthorized("send a mailbox address and app password");
-
-  const key = await sha256Hex(`${cred.username}\u0000${cred.password}`);
-  const login = await verifiedLogin(db, req, key, cred);
-
-  // Re-resolved per request through permissions.ts, never cached: losing access
-  // to a shared mailbox has to stop the next tool call, not the next isolate.
-  const access = await resolveAccess(db, login.userId, login.mailboxId);
-  if (!access) {
-    credCache.delete(key);
-    throw unauthorized("mailbox access has been revoked");
-  }
-
-  return {
-    appPasswordId: login.appPasswordId,
-    userId: login.userId,
-    mailboxId: login.mailboxId,
-    address: login.address,
-    perms: access.perms,
-  };
-}
-
-async function verifiedLogin(
-  db: DB,
-  req: Request,
-  key: string,
-  cred: { username: string; password: string },
-): Promise<CachedLogin> {
-  const hit = credCache.get(key);
-  if (hit && Date.now() - hit.at < CRED_TTL_MS) {
-    // Cheap indexed read instead of scrypt — but still a read, so a deleted app
-    // password stops working on the very next call.
-    const row = await db.query.appPassword.findFirst({
-      where: eq(appPassword.id, hit.appPasswordId),
-      columns: { id: true },
-    });
-    if (row) return hit;
-    credCache.delete(key);
-  }
-
-  const clientIp = req.headers.get("cf-connecting-ip");
-  let login: Awaited<ReturnType<typeof loginWithAppPassword>>;
-  try {
-    login = await loginWithAppPassword(db, cred.username, cred.password, clientIp, MCP_THROTTLE);
-  } catch (err) {
-    // Rate limit / AuthBL / revoked access all surface as AppError; at the
-    // transport edge they become an HTTP status, not a JSON-RPC body.
-    if (err instanceof AppError) {
-      throw new HTTPException(err.code === "rate_limited" ? 429 : 403, { message: err.message });
-    }
-    throw err;
-  }
-  if (!login) throw unauthorized("invalid mailbox address or app password");
-
-  const entry: CachedLogin = {
-    appPasswordId: login.id,
-    userId: login.userId,
-    mailboxId: login.mailboxId,
-    address: login.address,
-    at: Date.now(),
-  };
-  if (credCache.size >= CRED_CACHE_MAX) {
-    const oldest = credCache.keys().next();
-    if (!oldest.done) credCache.delete(oldest.value);
-  }
-  credCache.set(key, entry);
-  return entry;
-}
-
-function unauthorized(message: string): HTTPException {
+// Same challenge requireMcpAuth sends for a bad token, so a client that loses
+// its grant goes back through authorization instead of retrying forever.
+function unauthorized(req: Request, message: string): HTTPException {
+  const origin = new URL(req.url).origin;
+  const metadata = `${origin}/.well-known/oauth-protected-resource${new URL(mcpResource(origin)).pathname}`;
   return new HTTPException(401, {
     res: Response.json(
-      { error: message },
-      { status: 401, headers: { "www-authenticate": 'Basic realm="cfmail MCP", charset="UTF-8"' } },
+      { jsonrpc: "2.0", error: { code: -32000, message }, id: null },
+      {
+        status: 401,
+        headers: {
+          "www-authenticate": `Bearer resource_metadata="${metadata}", error="invalid_token", error_description="${message}"`,
+        },
+      },
     ),
   });
-}
-
-async function sha256Hex(s: string): Promise<string> {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
-  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }

@@ -89,6 +89,33 @@ export async function accessibleMailboxIds(
   return rows.map((r) => r.id);
 }
 
+// The same set as accessibleMailboxIds (no service, nothing purging), each with
+// the caller's perms on it — for a transport that acts across every mailbox a
+// user can reach and has to check each one per call (MCP).
+export async function accessibleMailboxAccess(
+  db: DB,
+  userId: string,
+): Promise<{ mailboxId: string; perms: number }[]> {
+  const rows = await db
+    .select({ id: mailbox.id, ownerUserId: mailbox.ownerUserId, perms: mailboxMember.perms })
+    .from(mailbox)
+    .leftJoin(
+      mailboxMember,
+      and(eq(mailboxMember.mailboxId, mailbox.id), eq(mailboxMember.userId, userId)),
+    )
+    .where(
+      and(
+        or(eq(mailbox.ownerUserId, userId), eq(mailboxMember.userId, userId)),
+        ne(mailbox.type, "service"),
+        mailboxNotPurging,
+      ),
+    );
+  return rows.map((r) => ({
+    mailboxId: r.id,
+    perms: r.ownerUserId === userId ? ALL_PERMS : (r.perms ?? 0),
+  }));
+}
+
 export async function requirePerm(
   db: DB,
   userId: string,

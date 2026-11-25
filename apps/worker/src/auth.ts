@@ -1,13 +1,17 @@
+import { cimd } from "@better-auth/cimd";
+import { mcp } from "@better-auth/mcp";
 import { passkey } from "@better-auth/passkey";
 import { type DB, makeDB, schema } from "@cfmail/db";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { betterAuth } from "better-auth/minimal";
 import { admin } from "better-auth/plugins/admin";
+import { jwt } from "better-auth/plugins/jwt";
 import { twoFactor } from "better-auth/plugins/two-factor";
 import { getConfig, getOrCreateAuthSecret } from "./config.ts";
 import type { Env } from "./env.ts";
 import { materializeInvites } from "./invites.ts";
 import { sendMail } from "./mail/notify.ts";
+import { fetchClientMetadataResource } from "./oauth-fetch.ts";
 
 export type Auth = Awaited<ReturnType<typeof createAuth>>;
 export type User =
@@ -29,6 +33,12 @@ export const userAdditionalFields = {
   preferences: { type: "string", required: false, input: true },
 } as const;
 
+// The protected resource MCP access tokens are audience-bound to. Derived from
+// the request like every other URL here, so it follows the deployment's host.
+export function mcpResource(baseURL: string): string {
+  return `${baseURL}/api/mcp`;
+}
+
 // The Better Auth plugin list. Kept here (not inlined below) so the schema
 // drift test can ask Better Auth for the exact tables/columns these plugins
 // require and diff them against schema.ts. This is the single source of truth.
@@ -46,6 +56,18 @@ export function authPlugins(baseURL: string) {
       rpName: "cfmail",
       origin: baseURL,
     }),
+    // MCP clients sign in as the user over OAuth 2.1 and get a JWT access token
+    // signed with these keys. `/token` (a JWT for the browser session) is
+    // disabled below and its header suppressed — nothing here should mint one.
+    jwt({ disableSettingJwtHeader: true }),
+    mcp({
+      loginPage: "/login",
+      consentPage: "/oauth/consent",
+      resource: mcpResource(baseURL),
+    }),
+    // Clients register by Client ID Metadata Document (an HTTPS URL they own),
+    // never anonymously — open dynamic registration stays off.
+    cimd({ fetchClientMetadataResource, metadataProfile: "mcp-2026-07-28" }),
   ];
 }
 
@@ -57,6 +79,7 @@ export async function createAuth({ env, db, baseURL }: CreateAuthOpts) {
     baseURL,
     secret,
     trustedOrigins: [baseURL],
+    disabledPaths: ["/token"],
     // Off at runtime; the bundle drop happens via the semantic-conventions
     // shim alias in wrangler.jsonc (the flag alone doesn't tree-shake it).
     telemetry: { enabled: false },
@@ -70,6 +93,14 @@ export async function createAuth({ env, db, baseURL }: CreateAuthOpts) {
         twoFactor: schema.twoFactor,
         passkey: schema.passkey,
         rateLimit: schema.rateLimit,
+        jwks: schema.jwks,
+        oauthClient: schema.oauthClient,
+        oauthResource: schema.oauthResource,
+        oauthClientResource: schema.oauthClientResource,
+        oauthRefreshToken: schema.oauthRefreshToken,
+        oauthAccessToken: schema.oauthAccessToken,
+        oauthConsent: schema.oauthConsent,
+        oauthClientAssertion: schema.oauthClientAssertion,
       },
       usePlural: false,
     }),

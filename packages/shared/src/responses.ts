@@ -419,6 +419,21 @@ export interface AppPasswordListDto {
   imap: ImapConnectionDto | null;
 }
 
+/** An MCP client the user has granted access to their mail over OAuth. */
+export interface ConnectedAppDto {
+  clientId: string;
+  name: string;
+  uri: string | null;
+  icon: string | null;
+  grantedAt: string;
+}
+
+export interface ConnectedAppListDto {
+  apps: ConnectedAppDto[];
+  /** The MCP endpoint to give a client. */
+  mcpUrl: string;
+}
+
 /** The plaintext is returned exactly once, at creation. */
 export interface AppPasswordCreatedDto {
   id: string;

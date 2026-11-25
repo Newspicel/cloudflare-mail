@@ -1,7 +1,8 @@
 // The MCP tool surface. Each entry owns its input schema (which also emits the
-// JSON Schema in `tools/list`) and the permission bit it needs; api/mcp.ts
-// enforces that bit before the handler runs, so RBAC stays one choke point
-// (invariant 2).
+// JSON Schema in `tools/list`), the permission bit it needs, and the mailbox(es)
+// it acts on. The dispatcher (api/mcp.ts → resolveTarget) turns that target
+// into mailboxes the caller holds the bit on before the handler runs, so RBAC
+// stays one choke point (invariant 2) and no tool sees a mailbox it can't use.
 
 import type { DB } from "@cfmail/db";
 import { Perm, type PermBit } from "@cfmail/shared/permissions";
@@ -9,10 +10,11 @@ import { addressObject } from "@cfmail/shared/schemas";
 import { z } from "zod";
 import type { Env } from "../env.ts";
 import {
-  getMailbox,
   listLabels,
+  listMailboxes,
   listThreads,
-  type McpSession,
+  type McpMailbox,
+  type McpTarget,
   readThread,
   replyToThread,
   searchMail,
@@ -31,24 +33,54 @@ export interface McpTool {
   // Advertised as an MCP tool annotation so a client can show read-only tools
   // without a confirmation prompt and gate the rest.
   readOnly: boolean;
-  run(env: Env, db: DB, session: McpSession, args: never): Promise<unknown>;
+  target(args: never): McpTarget;
+  run(env: Env, db: DB, mailboxes: McpMailbox[], args: never): Promise<unknown>;
 }
 
-// Each tool is written against its own parsed argument type; the registry stores
-// them erased, and the dispatcher hands back exactly what the schema produced.
-function define<S extends z.ZodType>(t: {
+interface Spec<S extends z.ZodType> {
   name: string;
   title: string;
   description: string;
   schema: S;
   perm: PermBit;
   readOnly: boolean;
-  run(env: Env, db: DB, session: McpSession, args: z.output<S>): Promise<unknown>;
-}): McpTool {
+}
+
+// Each tool is written against its own parsed argument type; the registry stores
+// them erased, and the dispatcher hands back exactly what the schema produced.
+// `many` tools get every resolved mailbox; `one` tools exactly one.
+function many<S extends z.ZodType>(
+  t: Spec<S> & {
+    target(args: z.output<S>): McpTarget;
+    run(env: Env, db: DB, mailboxes: McpMailbox[], args: z.output<S>): Promise<unknown>;
+  },
+): McpTool {
   return t as unknown as McpTool;
 }
 
-const empty = z.object({});
+function one<S extends z.ZodType>(
+  t: Spec<S> & {
+    target(args: z.output<S>): Exclude<McpTarget, { kind: "mailboxes" }>;
+    run(env: Env, db: DB, mailbox: McpMailbox, args: z.output<S>): Promise<unknown>;
+  },
+): McpTool {
+  return {
+    ...t,
+    run: (env: Env, db: DB, mailboxes: McpMailbox[], args: z.output<S>) => {
+      const [mb] = mailboxes;
+      if (!mb) throw new Error("dispatcher resolved no mailbox for a single-mailbox tool");
+      return t.run(env, db, mb, args);
+    },
+  } as unknown as McpTool;
+}
+
+const mailboxArg = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .min(3)
+  .max(320)
+  .describe("Address of the mailbox, as list_mailboxes reports it.");
 
 const paging = {
   limit: z.number().int().min(1).max(100).default(25).describe("How many results to return."),
@@ -56,6 +88,7 @@ const paging = {
 };
 
 const searchArgs = z.object({
+  mailbox: mailboxArg.optional().describe("Only search this mailbox. Omit to search all of them."),
   query: z
     .string()
     .trim()
@@ -85,7 +118,7 @@ const searchArgs = z.object({
   direction: z
     .enum(["in", "out"])
     .optional()
-    .describe("'in' for received mail, 'out' for mail sent from this mailbox."),
+    .describe("'in' for received mail, 'out' for mail you sent."),
   hasAttachment: z.boolean().optional().describe("Only mail carrying an attachment."),
   folder: z
     .enum(["any", "inbox", "sent", "marked", "spam", "trash"])
@@ -99,23 +132,25 @@ const searchArgs = z.object({
 });
 
 export const TOOLS: McpTool[] = [
-  define({
-    name: "get_mailbox",
-    title: "Get mailbox",
+  many({
+    name: "list_mailboxes",
+    title: "List mailboxes",
     description:
-      "Describe the mailbox this connection is attached to: its address, display name, whether you may write to it, and how many inbox threads are unread. Call this first to learn which address you are acting as.",
-    schema: empty,
+      "List every mailbox this account can reach: its address, display name, whether you may write to it, and how many inbox threads are unread. Call this first — other tools take these addresses.",
+    schema: z.object({}),
     perm: Perm.READ,
     readOnly: true,
-    run: (env, db, s) => getMailbox(env, db, s),
+    target: () => ({ kind: "mailboxes" }),
+    run: (_env, db, mbs) => listMailboxes(db, mbs),
   }),
 
-  define({
+  many({
     name: "list_threads",
     title: "List threads",
     description:
-      "List conversation threads in this mailbox, most recently active first. Use this to browse a folder; use search_mail to find something specific.",
+      "List conversation threads, most recently active first, across every mailbox or just one. Use this to browse a folder; use search_mail to find something specific.",
     schema: z.object({
+      mailbox: mailboxArg.optional().describe("Only list this mailbox. Omit for all of them."),
       view: z
         .enum(["inbox", "spam", "trash", "all"])
         .default("inbox")
@@ -124,10 +159,11 @@ export const TOOLS: McpTool[] = [
     }),
     perm: Perm.READ,
     readOnly: true,
-    run: (env, db, s, a) => listThreads(env, db, s, a),
+    target: (a) => ({ kind: "mailboxes", address: a.mailbox }),
+    run: (env, db, mbs, a) => listThreads(env, db, mbs, a),
   }),
 
-  define({
+  one({
     name: "read_thread",
     title: "Read thread",
     description:
@@ -137,37 +173,41 @@ export const TOOLS: McpTool[] = [
     }),
     perm: Perm.READ,
     readOnly: true,
-    run: (env, db, s, a) => readThread(env, db, s, a),
+    target: (a) => ({ kind: "thread", id: a.threadId }),
+    run: (env, db, mb, a) => readThread(env, db, mb, a),
   }),
 
-  define({
+  many({
     name: "search_mail",
     title: "Search mail",
     description:
-      "Full-text and metadata search across this mailbox. Returns matching messages with the thread id to open them in read_thread.",
+      "Full-text and metadata search across every mailbox, or one. Returns matching messages with their mailbox and the thread id to open them in read_thread.",
     schema: searchArgs,
     perm: Perm.READ,
     readOnly: true,
-    run: (env, db, s, a) => searchMail(env, db, s, a),
+    target: (a) => ({ kind: "mailboxes", address: a.mailbox }),
+    run: (env, db, mbs, a) => searchMail(env, db, mbs, a),
   }),
 
-  define({
+  one({
     name: "list_labels",
     title: "List labels",
     description:
-      "List the labels defined in this mailbox. These names are what set_thread_label expects; labels cannot be created over MCP.",
-    schema: empty,
+      "List the labels defined in one mailbox. These names are what set_thread_label expects; labels cannot be created over MCP.",
+    schema: z.object({ mailbox: mailboxArg }),
     perm: Perm.READ,
     readOnly: true,
-    run: (env, db, s) => listLabels(env, db, s),
+    target: (a) => ({ kind: "mailbox", address: a.mailbox }),
+    run: (env, db, mb) => listLabels(env, db, mb),
   }),
 
-  define({
+  one({
     name: "send_mail",
     title: "Send mail",
     description:
-      "Send a new plain-text message from this mailbox. This delivers real email immediately and cannot be recalled — confirm recipients and wording with the user before calling it.",
+      "Send a new plain-text message from one of your mailboxes. This delivers real email immediately and cannot be recalled — confirm the sending address, recipients and wording with the user before calling it.",
     schema: z.object({
+      mailbox: mailboxArg.describe("The mailbox to send from, as list_mailboxes reports it."),
       to: z.array(addressObject).min(1).max(100).describe("Primary recipients."),
       cc: z.array(addressObject).max(100).optional(),
       bcc: z.array(addressObject).max(100).optional(),
@@ -176,14 +216,15 @@ export const TOOLS: McpTool[] = [
     }),
     perm: Perm.WRITE,
     readOnly: false,
-    run: (env, db, s, a) => sendMail(env, db, s, a),
+    target: (a) => ({ kind: "mailbox", address: a.mailbox }),
+    run: (env, db, mb, a) => sendMail(env, db, mb, a),
   }),
 
-  define({
+  one({
     name: "reply_to_thread",
     title: "Reply to thread",
     description:
-      "Reply to the newest message in a thread, keeping its subject and threading headers so the reply lands in the same conversation. Delivers real email immediately — confirm with the user first.",
+      "Reply to the newest message in a thread from the mailbox the thread belongs to, keeping its subject and threading headers so the reply lands in the same conversation. Delivers real email immediately — confirm with the user first.",
     schema: z.object({
       threadId: z.string().min(1),
       text: z.string().min(1).max(1_000_000).describe("Plain-text body of the reply."),
@@ -198,10 +239,11 @@ export const TOOLS: McpTool[] = [
     }),
     perm: Perm.WRITE,
     readOnly: false,
-    run: (env, db, s, a) => replyToThread(env, db, s, a),
+    target: (a) => ({ kind: "thread", id: a.threadId }),
+    run: (env, db, mb, a) => replyToThread(env, db, mb, a),
   }),
 
-  define({
+  one({
     name: "update_thread",
     title: "Update thread",
     description:
@@ -219,10 +261,11 @@ export const TOOLS: McpTool[] = [
       ),
     perm: Perm.WRITE,
     readOnly: false,
-    run: (env, db, s, a) => updateThread(env, db, s, a),
+    target: (a) => ({ kind: "thread", id: a.threadId }),
+    run: (env, db, mb, a) => updateThread(env, db, mb, a),
   }),
 
-  define({
+  one({
     name: "star_message",
     title: "Star message",
     description: "Star or unstar one message. Starred mail shows up in the Marked folder.",
@@ -232,14 +275,15 @@ export const TOOLS: McpTool[] = [
     }),
     perm: Perm.WRITE,
     readOnly: false,
-    run: (env, db, s, a) => starMessage(env, db, s, a),
+    target: (a) => ({ kind: "message", id: a.messageId }),
+    run: (env, db, mb, a) => starMessage(env, db, mb, a),
   }),
 
-  define({
+  one({
     name: "set_thread_label",
     title: "Set thread label",
     description:
-      "Attach or detach an existing label across every message in a thread. Use list_labels for the available names.",
+      "Attach or detach an existing label across every message in a thread. Labels belong to a mailbox: use list_labels on the thread's mailbox for the available names.",
     schema: z.object({
       threadId: z.string().min(1),
       labelName: z.string().min(1).describe("An existing label name, as list_labels reports it."),
@@ -247,7 +291,8 @@ export const TOOLS: McpTool[] = [
     }),
     perm: Perm.WRITE,
     readOnly: false,
-    run: (env, db, s, a) => setThreadLabel(env, db, s, a),
+    target: (a) => ({ kind: "thread", id: a.threadId }),
+    run: (env, db, mb, a) => setThreadLabel(env, db, mb, a),
   }),
 ];
 

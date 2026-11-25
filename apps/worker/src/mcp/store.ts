@@ -5,9 +5,17 @@
 // throws AppError; translating to MCP is api/mcp.ts's job (invariant 9).
 
 import type { DB } from "@cfmail/db";
-import { attachment, label, mailbox, message, messageLabel, thread } from "@cfmail/db/schema";
+import {
+  attachment,
+  domain,
+  label,
+  mailbox,
+  message,
+  messageLabel,
+  thread,
+} from "@cfmail/db/schema";
 import { Flag, hasFlag, setFlag } from "@cfmail/shared/flags";
-import { has, Perm } from "@cfmail/shared/permissions";
+import { has, Perm, type PermBit } from "@cfmail/shared/permissions";
 import type { AddressObject, SearchFilters } from "@cfmail/shared/schemas";
 import { displaySubject } from "@cfmail/shared/subject";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
@@ -18,15 +26,25 @@ import { buildQuote } from "../mail/quote.ts";
 import { buildSearchQuery, type SearchRow } from "../mail/search-query.ts";
 import { sendFromMailbox } from "../mail/send.ts";
 import { recomputeThreadUnread } from "../mail/threads.ts";
+import { ALL_MAILBOXES, accessibleMailboxAccess } from "../permissions.ts";
 import { enforceRateLimit } from "../rate-limit.ts";
 
-// One MCP connection is one app password, so one mailbox — the same scope an
-// IMAP client gets from the same credential.
-export interface McpSession {
-  appPasswordId: string;
+// Who is calling: the user an OAuth access token was issued to, through which
+// client. An MCP connection acts as the whole user, across every mailbox the
+// user can reach — never as one mailbox, never as anyone else.
+export interface McpCaller {
+  userId: string;
+  clientId: string;
+}
+
+// One mailbox as this caller may touch it on this call. Perms are re-resolved
+// per request (loadMailboxes), so a revoked share stops the next tool call.
+export interface McpMailbox {
   userId: string;
   mailboxId: string;
   address: string;
+  displayName: string | null;
+  type: string;
   perms: number;
 }
 
@@ -54,7 +72,9 @@ export interface SearchArgs {
   page: number;
 }
 
-export async function searchMail(env: Env, _db: DB, s: McpSession, a: SearchArgs) {
+export async function searchMail(env: Env, _db: DB, mbs: McpMailbox[], a: SearchArgs) {
+  const ids = mbs.map((m) => m.mailboxId);
+  const addressOf = new Map(mbs.map((m) => [m.mailboxId, m.address]));
   const filters: SearchFilters = {
     q: a.query,
     searchIn: a.searchIn,
@@ -68,11 +88,12 @@ export async function searchMail(env: Env, _db: DB, s: McpSession, a: SearchArgs
     hasAttachment: a.hasAttachment,
     folder: a.folder,
     sort: a.sort,
-    mailboxId: s.mailboxId,
+    mailboxId: ids.length === 1 ? ids[0]! : ALL_MAILBOXES,
     limit: a.limit,
     page: a.page,
   };
-  const { sql: stmt, binds } = buildSearchQuery(filters, [s.mailboxId]);
+  if (ids.length === 0) return { hasMore: false, results: [] };
+  const { sql: stmt, binds } = buildSearchQuery(filters, ids);
   const res = await env.DB.prepare(stmt)
     .bind(...binds)
     .all<SearchRow>();
@@ -80,9 +101,9 @@ export async function searchMail(env: Env, _db: DB, s: McpSession, a: SearchArgs
   const hasMore = rows.length > a.limit;
 
   return {
-    mailbox: s.address,
     hasMore,
     results: (hasMore ? rows.slice(0, a.limit) : rows).map((r) => ({
+      mailbox: addressOf.get(r.mailboxId) ?? null,
       messageId: r.messageId,
       threadId: r.threadId,
       subject: r.subject,
@@ -100,13 +121,15 @@ export async function searchMail(env: Env, _db: DB, s: McpSession, a: SearchArgs
 export async function listThreads(
   _env: Env,
   db: DB,
-  s: McpSession,
+  mbs: McpMailbox[],
   a: { view: ThreadView; limit: number; page: number },
 ) {
+  const addressOf = new Map(mbs.map((m) => [m.mailboxId, m.address]));
+  if (mbs.length === 0) return { view: a.view, hasMore: false, threads: [] };
   const rows = await db
     .select()
     .from(thread)
-    .where(and(eq(thread.mailboxId, s.mailboxId), viewFilter(a.view)))
+    .where(and(inArray(thread.mailboxId, [...addressOf.keys()]), viewFilter(a.view)))
     .orderBy(desc(thread.lastMsgAt))
     .limit(a.limit + 1)
     .offset(a.page * a.limit);
@@ -119,10 +142,10 @@ export async function listThreads(
   );
 
   return {
-    mailbox: s.address,
     view: a.view,
     hasMore,
     threads: page.map((t) => ({
+      mailbox: addressOf.get(t.mailboxId) ?? null,
       threadId: t.id,
       subject: displaySubject(t.subject),
       participants: t.participants.map((p) => formatAddress(p.name ?? null, p.address)),
@@ -138,7 +161,7 @@ export async function listThreads(
   };
 }
 
-export async function readThread(_env: Env, db: DB, s: McpSession, a: { threadId: string }) {
+export async function readThread(_env: Env, db: DB, s: McpMailbox, a: { threadId: string }) {
   const th = await requireThread(db, s, a.threadId);
 
   const msgs = await db
@@ -194,31 +217,35 @@ export async function readThread(_env: Env, db: DB, s: McpSession, a: { threadId
   };
 }
 
-export async function getMailbox(_env: Env, db: DB, s: McpSession) {
-  const mb = await db.query.mailbox.findFirst({
-    where: eq(mailbox.id, s.mailboxId),
-    columns: { displayName: true, type: true },
-  });
-  const [counts] = await db
-    .select({
-      threads: sql<number>`count(*)`,
-      unread: sql<number>`coalesce(sum(case when ${thread.unreadCount} > 0 then 1 else 0 end), 0)`,
-    })
-    .from(thread)
-    .where(and(eq(thread.mailboxId, s.mailboxId), viewFilter("inbox")));
+export async function listMailboxes(db: DB, mbs: McpMailbox[]) {
+  const ids = mbs.map((m) => m.mailboxId);
+  const counts = ids.length
+    ? await db
+        .select({
+          mailboxId: thread.mailboxId,
+          threads: sql<number>`count(*)`,
+          unread: sql<number>`coalesce(sum(case when ${thread.unreadCount} > 0 then 1 else 0 end), 0)`,
+        })
+        .from(thread)
+        .where(and(inArray(thread.mailboxId, ids), viewFilter("inbox")))
+        .groupBy(thread.mailboxId)
+    : [];
+  const byId = new Map(counts.map((c) => [c.mailboxId, c]));
 
   return {
-    address: s.address,
-    displayName: mb?.displayName ?? null,
-    type: mb?.type ?? null,
-    // What this connection may do — a tool call needing more is refused.
-    canWrite: has(s.perms, Perm.WRITE),
-    inboxThreads: counts?.threads ?? 0,
-    inboxUnreadThreads: counts?.unread ?? 0,
+    mailboxes: mbs.map((m) => ({
+      address: m.address,
+      displayName: m.displayName,
+      type: m.type,
+      // What this connection may do there — a tool call needing more is refused.
+      canWrite: has(m.perms, Perm.WRITE),
+      inboxThreads: byId.get(m.mailboxId)?.threads ?? 0,
+      inboxUnreadThreads: byId.get(m.mailboxId)?.unread ?? 0,
+    })),
   };
 }
 
-export async function listLabels(_env: Env, db: DB, s: McpSession) {
+export async function listLabels(_env: Env, db: DB, s: McpMailbox) {
   const rows = await db
     .select({ id: label.id, name: label.name, color: label.color })
     .from(label)
@@ -235,7 +262,7 @@ export interface SendArgs {
   text: string;
 }
 
-export async function sendMail(env: Env, db: DB, s: McpSession, a: SendArgs) {
+export async function sendMail(env: Env, db: DB, s: McpMailbox, a: SendArgs) {
   // Same budget the web app spends — an agent sending on the user's behalf
   // draws from one pool, not a second one.
   await enforceRateLimit(db, "send", s.userId, 60, 60 * 60 * 1000);
@@ -253,7 +280,7 @@ export async function sendMail(env: Env, db: DB, s: McpSession, a: SendArgs) {
 export async function replyToThread(
   env: Env,
   db: DB,
-  s: McpSession,
+  s: McpMailbox,
   a: { threadId: string; text: string; replyAll: boolean; quoteOriginal: boolean },
 ) {
   const th = await requireThread(db, s, a.threadId);
@@ -298,7 +325,7 @@ export async function replyToThread(
 export async function updateThread(
   env: Env,
   db: DB,
-  s: McpSession,
+  s: McpMailbox,
   a: { threadId: string; read?: boolean; trashed?: boolean; spam?: boolean },
 ) {
   const th = await requireThread(db, s, a.threadId);
@@ -358,7 +385,7 @@ export async function updateThread(
 export async function starMessage(
   env: Env,
   db: DB,
-  s: McpSession,
+  s: McpMailbox,
   a: { messageId: string; starred: boolean },
 ) {
   const msg = await db.query.message.findFirst({
@@ -383,7 +410,7 @@ export async function starMessage(
 export async function setThreadLabel(
   env: Env,
   db: DB,
-  s: McpSession,
+  s: McpMailbox,
   a: { threadId: string; labelName: string; attached: boolean },
 ) {
   const th = await requireThread(db, s, a.threadId);
@@ -421,12 +448,105 @@ export async function setThreadLabel(
   return { threadId: th.id, label: lb.name, attached: a.attached };
 }
 
+// ─── scope ──────────────────────────────────────────────────────────────────
+
+// Every mailbox the caller can reach right now, with perms resolved through
+// permissions.ts on this request — the whole of what a tool call may touch.
+export async function loadMailboxes(db: DB, userId: string): Promise<McpMailbox[]> {
+  const access = await accessibleMailboxAccess(db, userId);
+  if (access.length === 0) return [];
+  const rows = await db
+    .select({
+      id: mailbox.id,
+      localPart: mailbox.localPart,
+      domainName: domain.name,
+      displayName: mailbox.displayName,
+      type: mailbox.type,
+    })
+    .from(mailbox)
+    .innerJoin(domain, eq(domain.id, mailbox.domainId))
+    .where(
+      inArray(
+        mailbox.id,
+        access.map((a) => a.mailboxId),
+      ),
+    );
+  const permsOf = new Map(access.map((a) => [a.mailboxId, a.perms]));
+  return rows
+    .map((r) => ({
+      userId,
+      mailboxId: r.id,
+      address: `${r.localPart}@${r.domainName}`,
+      displayName: r.displayName,
+      type: r.type,
+      perms: permsOf.get(r.id) ?? 0,
+    }))
+    .toSorted((x, y) => x.address.localeCompare(y.address));
+}
+
+// What a tool call names: one mailbox by address, an optional filter over all of
+// them, or an item whose own mailbox decides.
+export type McpTarget =
+  | { kind: "mailbox"; address: string }
+  | { kind: "mailboxes"; address?: string }
+  | { kind: "thread"; id: string }
+  | { kind: "message"; id: string };
+
+// Resolve a target to the mailboxes this call may act on with `perm`. An item
+// in a mailbox the caller can't reach is "not found" (no existence leak); a
+// mailbox it can reach without the bit is "forbidden". An unfiltered listing
+// just leaves out what the caller lacks the bit for.
+export async function resolveTarget(
+  db: DB,
+  userId: string,
+  target: McpTarget,
+  perm: PermBit,
+): Promise<McpMailbox[]> {
+  const mbs = await loadMailboxes(db, userId);
+  if (target.kind === "mailboxes" && target.address === undefined) {
+    return mbs.filter((m) => has(m.perms, perm));
+  }
+
+  let mb: McpMailbox | undefined;
+  if (target.kind === "mailbox" || target.kind === "mailboxes") {
+    const want = target.address?.toLowerCase();
+    mb = mbs.find((m) => m.address.toLowerCase() === want);
+    if (!mb) throw new AppError("not_found", `no mailbox ${target.address} on this account`);
+  } else {
+    const id =
+      target.kind === "thread"
+        ? await mailboxOfThread(db, target.id)
+        : await mailboxOfMessage(db, target.id);
+    mb = mbs.find((m) => m.mailboxId === id);
+    if (!mb) throw new AppError("not_found", `${target.kind} not found`);
+  }
+  if (!has(mb.perms, perm)) {
+    throw new AppError("forbidden", `you may not do that in ${mb.address}`);
+  }
+  return [mb];
+}
+
+export async function mailboxOfThread(db: DB, threadId: string): Promise<string | null> {
+  const row = await db.query.thread.findFirst({
+    where: eq(thread.id, threadId),
+    columns: { mailboxId: true },
+  });
+  return row?.mailboxId ?? null;
+}
+
+export async function mailboxOfMessage(db: DB, messageId: string): Promise<string | null> {
+  const row = await db.query.message.findFirst({
+    where: eq(message.id, messageId),
+    columns: { mailboxId: true },
+  });
+  return row?.mailboxId ?? null;
+}
+
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-// A thread is only addressable inside the connection's own mailbox, so scoping
-// the lookup by mailboxId *is* the access check — there is no cross-mailbox id
-// to leak and no second mailbox to escalate into.
-async function requireThread(db: DB, s: McpSession, threadId: string) {
+// The dispatcher already resolved this thread's mailbox and checked access to
+// it; scoping the lookup by that mailbox keeps a tool from wandering anyway.
+async function requireThread(db: DB, s: McpMailbox, threadId: string) {
   const th = await db.query.thread.findFirst({
     where: and(eq(thread.id, threadId), eq(thread.mailboxId, s.mailboxId)),
   });

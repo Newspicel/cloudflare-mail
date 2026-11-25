@@ -45,7 +45,13 @@ function withSecurityHeaders(res: Response): Response {
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
-    if (url.pathname.startsWith("/api/") || url.pathname === "/api") {
+    // /.well-known/ is OAuth discovery for MCP clients (api/index.ts); it has
+    // to sit at the origin root by spec, so the API answers it too.
+    if (
+      url.pathname.startsWith("/api/") ||
+      url.pathname === "/api" ||
+      url.pathname.startsWith("/.well-known/")
+    ) {
       return api.fetch(req, env, ctx);
     }
     return withSecurityHeaders(await env.ASSETS.fetch(req));

@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { CardShell, Field, PrimaryButton } from "@/components/auth-card.tsx";
 import { Button } from "@/components/ui/button.tsx";
-import { authClient } from "@/lib/auth-client.ts";
+import { authClient, followOAuthRedirect } from "@/lib/auth-client.ts";
 import { bootstrapQuery } from "@/lib/queries.ts";
 
 export const Route = createFileRoute("/login")({
@@ -89,7 +89,7 @@ function SignInForm() {
       if (res.error) throw new Error(res.error.message ?? "sign-in failed");
       // Better Auth's twoFactor plugin redirects to /two-factor via
       // onTwoFactorRedirect when a 2FA step is required.
-      nav({ to: "/app" });
+      if (!followOAuthRedirect(res.data)) nav({ to: "/app" });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "sign-in failed");
     } finally {
@@ -116,7 +116,7 @@ function SignInForm() {
     try {
       const res = await authClient.signIn.passkey();
       if (res?.error) throw new Error(res.error.message ?? "passkey sign-in failed");
-      nav({ to: "/app" });
+      if (!followOAuthRedirect(res?.data)) nav({ to: "/app" });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "passkey sign-in failed");
     } finally {

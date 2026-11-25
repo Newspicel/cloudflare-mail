@@ -244,6 +244,11 @@ export const appPasswordsQuery = queryOptions({
   queryFn: () => unwrap(rpc["app-passwords"].$get()),
 });
 
+export const connectedAppsQuery = queryOptions({
+  queryKey: keys.connectedApps(),
+  queryFn: () => unwrap(rpc["connected-apps"].$get()),
+});
+
 export const foldersQuery = queryOptions({
   queryKey: keys.folders(),
   queryFn: () => unwrap(rpc.folders.$get()),
