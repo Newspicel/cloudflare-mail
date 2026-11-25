@@ -194,27 +194,18 @@ Folders map onto the app's own model: `INBOX`, `Sent`, `Spam`, `Trash`, plus eac
 
 ### 7. MCP access (optional)
 
-The Worker also speaks [MCP](https://modelcontextprotocol.io) at `/api/mcp`, so an AI client can work your mail: search it, read threads, label and star, and send or reply. It is the same Worker, the same RBAC and the same credential as IMAP — no extra deployment, and nothing to enable.
+The Worker also speaks [MCP](https://modelcontextprotocol.io) at `/api/mcp`, so an AI client can work your mail: search it, read threads, label and star, and send or reply. Same Worker, same RBAC — no extra deployment, and nothing to enable.
 
-Authenticate with an app password from **Settings → IMAP access**. One password unlocks one mailbox, so one MCP connection sees exactly one mailbox; deleting the password cuts the client off on its next call, and losing access to a shared mailbox does the same.
+A client connects as **you**, over OAuth: point it at `https://<your-host>/api/mcp` (shown under **Settings → Connected apps**), and it discovers the server, sends you through the normal sign-in (2FA and passkeys included) and asks you to approve it. Clients identify themselves with a [Client ID Metadata Document](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization#client-id-metadata-documents); anonymous dynamic registration is off. For Claude Code:
 
-Credentials go in an `Authorization` header, either as Basic auth (`<mailbox-address>:<app-password>`) or, for clients that only send an opaque token, as `Bearer <mailbox-address>:<app-password>`. For a client that speaks MCP over stdio, bridge it with [`mcp-remote`](https://github.com/geelen/mcp-remote):
-
-```json
-{
-  "mcpServers": {
-    "cfmail": {
-      "command": "npx",
-      "args": [
-        "-y", "mcp-remote", "https://mail.example.com/api/mcp",
-        "--header", "Authorization: Bearer you@example.com:your-app-password"
-      ]
-    }
-  }
-}
+```bash
+claude mcp add --transport http cfmail https://mail.example.com/api/mcp
+# then run /mcp in Claude Code and pick cfmail to sign in
 ```
 
-Tools: `get_mailbox`, `list_threads`, `read_thread`, `search_mail` and `list_labels` need READ; `send_mail`, `reply_to_thread`, `update_thread`, `star_message` and `set_thread_label` need WRITE, so a read-only share stays read-only. Writes broadcast on the same SSE hub as everything else, so the web app and any open IMAP session see them immediately. Mail sent this way draws on the same hourly send budget as the web app.
+One connection reaches every mailbox you can, with your permissions on each: a read-only share stays read-only. Revoking the app under **Settings → Connected apps** cuts it off on its next call, and losing access to a shared mailbox takes it out of the client's reach at once.
+
+Tools: `list_mailboxes` (start here), `list_threads` and `search_mail` (all mailboxes, or one by address), `read_thread`, `list_labels`, `send_mail` (from a named mailbox), `reply_to_thread`, `update_thread`, `star_message` and `set_thread_label`. Reading needs READ on the mailbox, everything else WRITE. Writes broadcast on the same SSE hub as everything else, so the web app and any open IMAP session see them immediately. Mail sent this way draws on the same hourly send budget as the web app.
 
 ### 8. Local dev
 
