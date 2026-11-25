@@ -37,6 +37,7 @@ export function useListVirtualizer(
   const snap = cacheKey ? snapshots.get(cacheKey) : undefined;
 
   /* eslint-disable react-doctor/no-event-handler -- the virtualizer snapshot onChange and the paging effect derive from scroll/render state (getVirtualItems), not from a DOM event */
+  // oxlint-disable-next-line react/incompatible-library -- TanStack Virtual is mutable by design; React Compiler skips this hook and callers read it fresh each render
   const virtualizer = useVirtualizer({
     count,
     getScrollElement: () => scrollRef.current,

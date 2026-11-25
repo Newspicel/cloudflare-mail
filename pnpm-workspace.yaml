@@ -2,6 +2,11 @@ packages:
   - apps/*
   - packages/*
 
+# Better Auth ships its MCP/OAuth fixes faster than the release-age window.
+minimumReleaseAgeExclude:
+  - better-auth
+  - "@better-auth/*"
+
 overrides:
   esbuild: ">=0.28.1"
   "@babel/core": "^7.29.6"

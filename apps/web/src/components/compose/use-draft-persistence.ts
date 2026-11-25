@@ -90,52 +90,66 @@ export function useDraftPersistence({
 
   // eslint-disable-next-line react-doctor/react-compiler-no-manual-memoization -- stable identity feeds the pagehide-flush effect's exhaustive-deps
   const flush = useCallback(
-    async (data: DraftFlush) => {
+    async (first: DraftFlush) => {
       const st = saveRef.current;
       if (st.saving) {
-        st.queued = data;
+        st.queued = first;
         return;
       }
       st.saving = true;
+      let data: DraftFlush | null = first;
       try {
-        if (data.isEmpty) {
-          await deleteDraft(data.keepalive);
-        } else {
-          const payload = {
-            ...data.snap,
-            inReplyTo,
-            references,
-            quote: quoteRef,
-          };
-          if (draftIdRef.current) {
-            await unwrap(
-              rpc.drafts[":id"].$patch(
-                { param: { id: draftIdRef.current }, json: payload },
-                { init: { keepalive: data.keepalive } },
-              ),
-            );
-          } else {
-            // createDraft's schema takes `fromAddress` as optional (not null) —
-            // updateDraft is the nullish one — so drop a null before sending.
-            const res = await unwrap(
-              rpc.drafts.$post(
-                { json: { mailboxId, ...payload, fromAddress: payload.fromAddress ?? undefined } },
-                { init: { keepalive: data.keepalive } },
-              ),
-            );
-            draftIdRef.current = res.draft.id;
+        // Serial on purpose: a save queued behind a running one must land after it.
+        while (data) {
+          try {
+            if (data.isEmpty) {
+              // oxlint-disable-next-line no-await-in-loop
+              await deleteDraft(data.keepalive);
+            } else {
+              const payload = {
+                ...data.snap,
+                inReplyTo,
+                references,
+                quote: quoteRef,
+              };
+              if (draftIdRef.current) {
+                // oxlint-disable-next-line no-await-in-loop
+                await unwrap(
+                  rpc.drafts[":id"].$patch(
+                    { param: { id: draftIdRef.current }, json: payload },
+                    { init: { keepalive: data.keepalive } },
+                  ),
+                );
+              } else {
+                // createDraft's schema takes `fromAddress` as optional (not null) —
+                // updateDraft is the nullish one — so drop a null before sending.
+                // oxlint-disable-next-line no-await-in-loop
+                const res = await unwrap(
+                  rpc.drafts.$post(
+                    {
+                      json: {
+                        mailboxId,
+                        ...payload,
+                        fromAddress: payload.fromAddress ?? undefined,
+                      },
+                    },
+                    { init: { keepalive: data.keepalive } },
+                  ),
+                );
+                draftIdRef.current = res.draft.id;
+              }
+              setSavedHint(true);
+              invalidateDrafts();
+            }
+            savedKeyRef.current = data.key;
+          } catch {
+            // Autosave is best-effort; surface nothing on transient failures.
           }
-          setSavedHint(true);
-          invalidateDrafts();
+          data = st.queued;
+          st.queued = null;
         }
-        savedKeyRef.current = data.key;
-      } catch {
-        // Autosave is best-effort; surface nothing on transient failures.
       } finally {
         st.saving = false;
-        const q = st.queued;
-        st.queued = null;
-        if (q) void flush(q);
       }
     },
     [mailboxId, inReplyTo, references, quoteRef, deleteDraft, invalidateDrafts],
